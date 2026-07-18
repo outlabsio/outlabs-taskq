@@ -25,16 +25,26 @@
 
 | | |
 |---|---|
-| Stage | **2A specification drafted**; runtime implementation awaits the round-3 response |
+| Stage | **1 — round-3 remediation BLOCKED on two Contract questions**; Stage 2A closed |
 | Suite | 58/58 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
-| Next review | Round-3 request assembled for Andi: migration 0001 + runner + harness vs manifest |
+| Next review | Round 3 verdict **BLOCKED**: 4 HIGH, 2 MEDIUM, 1 LOW, 2 Contract questions |
 
-## Now — Round-3 entry gate
+## Now — contract adjudication (STOP before implementation)
 
-- [ ] **R3-01 · Process the external round-3 response.** Classify implementation findings vs Contract questions, record every disposition, and stop before S2-01 if a Tier-0/ADR contradiction is found. The request exists; no response artifact is present yet.
+- [ ] **R3-CQ · Adjudicate CQ-01 and CQ-02 docs-first.** Decide explicit-`NULL` boundary semantics/registered SQLSTATEs and the stored-error ceiling's scope, byte unit, and truncation/rejection behavior. Apply accepted Tier-0 errata/version discipline before any SQL remediation.
 
-## Next — Stage 2 kickoff (do not start before S1-09)
+## Next — Round-3 remediation (only after R3-CQ)
+
+- [ ] **R3-F01 · Exact machine-readable manifest + verifier** — close R3-01 across object-set equality, function identity/attributes/ACLs, roles, tables/views/types/indexes/constraints, DML denial, seeds, and rollback-only corruption vectors.
+- [ ] **R3-F02 · Migration lock failure recovery** — close R3-02 for sync/async and caller/runner-owned transactions; prove concurrent recovery after injected failure.
+- [ ] **R3-F03 · Reserved-role validation** — close R3-03 by atomically rejecting unsafe pre-existing LOGIN/elevated/member roles before grants and verifying the role manifest.
+- [ ] **R3-F04 · Manifest-complete T2/T8 coverage** — close R3-04 with collection completeness, all public-function behavior/error/grant vectors, shadow probes, installer concurrency/failure/CLI/sync/compatibility cases, and broader T4 operations where already contracted.
+- [ ] **R3-F05 · Built-artifact CI gate** — close R3-05 by installing wheel and sdist outside the source tree, checking import isolation, entry points, packaged migration discovery, migrate, and verify.
+- [ ] **R3-F06 · Benchmark reset and conservation** — close R3-06 with the normative fresh-database method and producer-stop→worker-drain B4 accounting.
+- [ ] **R3-F07 · Plan-query drift detection** — close R3-07 by binding representative structural plans to actual function definitions or captured nested plans.
+
+## Later — Stage 2 kickoff (closed until round-3 remediation passes PG16 + PG18)
 
 - [ ] S2-01 typed `Task[In, Out]` registry + wire names/aliases (features 01/03/08-lite)
 - [ ] S2-02 async SQL transport implementing the protocol commands + typed results
@@ -45,11 +55,17 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-*(none open — manifest errata §8 resolved the Stage-1 set)*
+1. **CQ-01 · Explicit `NULL` at locked numeric boundaries.** Tier 0 promises bounded claim batch (1–50), release delay (0–86400), and bulk redrive limit (1–500) with closed TQ errors, but its executable/reference bodies let SQL `NULL` bypass `IF` predicates: live probes accept a null claim batch, make redrive unbounded, and surface native `23502` from release. Decide whether explicit null is uniformly invalid (`TQ422` is the review recommendation), and record the exact contract/version treatment before changing SQL.
+2. **CQ-02 · Stored-error 2KB ceiling.** Protocol H-09 freezes stored error at ≤2KB, while adopted cancel/snooze bodies store unbounded reason text; live probes stored 12,000 bytes, and existing `left(..., 2000)` paths count characters rather than bytes. Decide which job/attempt/event fields the ceiling covers, whether KB means bytes, and whether overage is rejected or byte-safely truncated before changing bodies.
+
+## Round-3 finding dispositions
+
+All seven findings are **accepted as source-backed**, pending the two contract decisions above. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
 
-- [x] **S2-00 · Stage-2A implementation specification** — the new Tier-3 spec fixes the typed task/registry boundary, closed 0.1 outcomes and TQ errors, complete async SQL transport scope, caller-vs-transport transaction ownership, fence/import safety, and the S2-01..03 acceptance matrix; it remains subordinate to the pending round-3 response.
+- [x] **R3-01 · External response processed** — the immutable [round-3 response](docs/design-review-3/RESPONSE.md) was independently adjudicated: verdict BLOCKED; all 7 findings accepted; CQ-01/CQ-02 recorded above; S2-01 remains closed.
+- [x] **S2-00 · Stage-2A implementation specification** — the new Tier-3 spec fixes the typed task/registry boundary, closed 0.1 outcomes and TQ errors, complete async SQL transport scope, caller-vs-transport transaction ownership, fence/import safety, and the S2-01..03 acceptance matrix; it remains subordinate to the blocked round-3 remediation.
 - [x] **Design phase** — spec v1.6, ADR-001..011, two review rounds folded, Protocol v1 + Function Manifest canonical, docs constitution (`6cf6793`..`e1237c5`)
 - [x] **S1 opening slice** — migration `0001_initial.sql` (6 roles, 39 hardened functions, self-checking), ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI), T1 (26) + T2 (15) suites, 42/42 green vs PG 18.3, wheel packaging fixed, single-writer ledger + typed-cancel reconciliations in manifest errata §8 (`3e7d55d`)
 - [x] **S1-01 · T3 choreographed races** — six advisory-barrier/hold-open race cases run deterministically for 20 rounds each: same-key convergence, double-claim exclusion, post-reap fence loss, cross-verb settle conflict, ten-way cap admission, and the single permitted pause slip.
