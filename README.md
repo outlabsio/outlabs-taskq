@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..011](docs/adr/README.md) accepted; both review rounds folded in; protocol v1 + 0.1 function manifest canonical). **Stage 1 in progress** — kernel migration + harness landed, 42/42 contract tests green on live PostgreSQL. Live task board: [`TASKS.md`](TASKS.md); stage strategy: the [build plan](docs/Task%20Queue%20Build%20Plan.md).
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..011](docs/adr/README.md) accepted; both review rounds folded in; protocol v1 + 0.1 function manifest canonical). **Stage 1 in progress** — see the live [`TASKS.md`](TASKS.md) board for current counts and work; stage strategy lives in the [build plan](docs/Task%20Queue%20Build%20Plan.md).
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -52,7 +52,11 @@ src/taskq/
 
 - `qdarteAPI` / `qdarte-workers`
 - `diverse-data-api` / `diverse-data-workers`
-- `outlabsAPI` (planned third host — embedded topology, replaces its RabbitMQ lanes; extraction brief §2.3)
+- `outlabsAPI` (planned third host — embedded topology, replaces its legacy broker lanes; extraction brief §2.3)
+
+## Development gates
+
+Protect `main` with pull requests, require branches to be current, and require every Stage-1 CI check: `lint`; both `import-isolation` and `unit` Python lanes; both PostgreSQL `sql-contract` lanes; `races`; `migrations`; and `bench-smoke`. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
 
 ## License
 

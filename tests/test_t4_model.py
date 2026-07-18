@@ -17,7 +17,13 @@ from uuid import UUID
 import asyncpg
 import pytest
 from hypothesis import HealthCheck, settings, strategies as st
-from hypothesis.stateful import Bundle, RuleBasedStateMachine, invariant, rule, run_state_machine_as_test
+from hypothesis.stateful import (
+    Bundle,
+    RuleBasedStateMachine,
+    invariant,
+    rule,
+    run_state_machine_as_test,
+)
 
 from conftest import _plain_dsn, _truncate_taskq
 
@@ -298,9 +304,7 @@ class TaskqStateMachine(RuleBasedStateMachine):
         )
         try:
             redriven = self._run(
-                self.operator.fetchval(
-                    "SELECT taskq.redrive_job($1, 't4', false)", job_id
-                )
+                self.operator.fetchval("SELECT taskq.redrive_job($1, 't4', false)", job_id)
             )
         except asyncpg.PostgresError as exc:
             assert collision and exc.sqlstate == "TQ409"
@@ -362,9 +366,7 @@ def test_stateful_sql_model(
     examples = int(os.environ.get("TASKQ_MODEL_EXAMPLES", "20"))
     steps = int(os.environ.get("TASKQ_MODEL_STEPS", "40"))
     assert examples > 0 and steps > 0
-    print(
-        f"T4 examples={examples} steps={steps}; set HYPOTHESIS_SEED to replay a generated run"
-    )
+    print(f"T4 examples={examples} steps={steps}; set HYPOTHESIS_SEED to replay a generated run")
     run_state_machine_as_test(
         lambda: TaskqStateMachine(_plain_dsn(taskq_dsn)),
         settings=settings(

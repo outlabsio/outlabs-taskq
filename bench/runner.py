@@ -44,12 +44,33 @@ class Scale:
 
 
 SCALES = {
-    "toy": Scale(operations=25, bulk_size=1000, backlog=200, duration_seconds=0.5,
-                 producers=1, workers=2, warmup=3),
-    "small": Scale(operations=1000, bulk_size=1000, backlog=10_000, duration_seconds=10.0,
-                   producers=2, workers=5, warmup=25),
-    "full": Scale(operations=10_000, bulk_size=1000, backlog=1_000_000,
-                  duration_seconds=60.0, producers=4, workers=20, warmup=100),
+    "toy": Scale(
+        operations=25,
+        bulk_size=1000,
+        backlog=200,
+        duration_seconds=0.5,
+        producers=1,
+        workers=2,
+        warmup=3,
+    ),
+    "small": Scale(
+        operations=1000,
+        bulk_size=1000,
+        backlog=10_000,
+        duration_seconds=10.0,
+        producers=2,
+        workers=5,
+        warmup=25,
+    ),
+    "full": Scale(
+        operations=10_000,
+        bulk_size=1000,
+        backlog=1_000_000,
+        duration_seconds=60.0,
+        producers=4,
+        workers=20,
+        warmup=100,
+    ),
 }
 
 
@@ -179,9 +200,7 @@ async def _event_loop_delay(samples: int = 20) -> dict[str, float]:
     return _latency_summary(delays)
 
 
-async def _representative_claim_plan(
-    admin: asyncpg.Connection, queue: str
-) -> dict[str, Any]:
+async def _representative_claim_plan(admin: asyncpg.Connection, queue: str) -> dict[str, Any]:
     raw = await admin.fetchval(
         f"""
         EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)
@@ -216,12 +235,9 @@ async def _representative_claim_plan(
     }
 
 
-async def _enqueue_one(
-    producer: asyncpg.Connection, queue: str, key: str
-) -> asyncpg.Record:
+async def _enqueue_one(producer: asyncpg.Connection, queue: str, key: str) -> asyncpg.Record:
     row = await producer.fetchrow(
-        "SELECT * FROM taskq.enqueue($1, 'bench.noop', '{}'::jsonb, "
-        "p_idempotency_key => $2)",
+        "SELECT * FROM taskq.enqueue($1, 'bench.noop', '{}'::jsonb, p_idempotency_key => $2)",
         queue,
         key,
     )
@@ -264,12 +280,14 @@ async def _b1(
             await _enqueue_one(producer, queue, f"b1-{seed}-{repetition}-{index}")
             latencies.append(time.perf_counter() - before)
         duration = time.perf_counter() - started
-        results.append({
-            "accepted": scale.operations,
-            "duration_seconds": duration,
-            "throughput_rows_per_second": scale.operations / duration,
-            "latency": _latency_summary(latencies),
-        })
+        results.append(
+            {
+                "accepted": scale.operations,
+                "duration_seconds": duration,
+                "throughput_rows_per_second": scale.operations / duration,
+                "latency": _latency_summary(latencies),
+            }
+        )
     return results
 
 
@@ -290,22 +308,20 @@ async def _b2(
     results = []
     for repetition in range(repetitions):
         started = time.perf_counter()
-        accepted = await _bulk(
-            producer, queue, f"b2-{seed}-{repetition}", scale.bulk_size
-        )
+        accepted = await _bulk(producer, queue, f"b2-{seed}-{repetition}", scale.bulk_size)
         duration = time.perf_counter() - started
-        results.append({
-            "accepted": accepted,
-            "duration_seconds": duration,
-            "throughput_rows_per_second": accepted / duration,
-            "latency": _latency_summary([duration]),
-        })
+        results.append(
+            {
+                "accepted": accepted,
+                "duration_seconds": duration,
+                "throughput_rows_per_second": accepted / duration,
+                "latency": _latency_summary([duration]),
+            }
+        )
     return results
 
 
-async def _seed_backlog(
-    producer: asyncpg.Connection, queue: str, prefix: str, count: int
-) -> None:
+async def _seed_backlog(producer: asyncpg.Connection, queue: str, prefix: str, count: int) -> None:
     for offset in range(0, count, 1000):
         await _bulk(producer, queue, f"{prefix}-{offset}", min(1000, count - offset))
 
@@ -339,9 +355,7 @@ async def _b3(
         queue = f"bench_b3_{repetition}"
         await _ensure_queue(operator, queue)
         empty_started = time.perf_counter()
-        empty = await runner.fetchrow(
-            "SELECT * FROM taskq.claim_jobs($1, 'bench-b3-empty')", queue
-        )
+        empty = await runner.fetchrow("SELECT * FROM taskq.claim_jobs($1, 'bench-b3-empty')", queue)
         empty_latency = time.perf_counter() - empty_started
         assert empty["state"] == "empty"
         await _seed_backlog(producer, queue, f"b3-{seed}-{repetition}", scale.backlog)
@@ -368,16 +382,18 @@ async def _b3(
             claim_latencies.append(after_claim - before_claim)
             e2e_latencies.append(time.perf_counter() - before_claim)
         duration = time.perf_counter() - started
-        results.append({
-            "accepted": samples,
-            "settled": samples,
-            "backlog_rows": scale.backlog,
-            "empty_claim_ms": empty_latency * 1000,
-            "duration_seconds": duration,
-            "throughput_rows_per_second": samples / duration,
-            "claim_latency": _latency_summary(claim_latencies),
-            "e2e_latency": _latency_summary(e2e_latencies),
-        })
+        results.append(
+            {
+                "accepted": samples,
+                "settled": samples,
+                "backlog_rows": scale.backlog,
+                "empty_claim_ms": empty_latency * 1000,
+                "duration_seconds": duration,
+                "throughput_rows_per_second": samples / duration,
+                "claim_latency": _latency_summary(claim_latencies),
+                "e2e_latency": _latency_summary(e2e_latencies),
+            }
+        )
     return results
 
 
@@ -399,9 +415,7 @@ async def _b4(
         e2e_latencies: list[float] = []
 
         for index in range(scale.warmup):
-            await _enqueue_one(
-                producers[0], queue, f"b4-warmup-{seed}-{repetition}-{index}"
-            )
+            await _enqueue_one(producers[0], queue, f"b4-warmup-{seed}-{repetition}-{index}")
             batch = await workers[0].fetchrow(
                 "SELECT * FROM taskq.claim_jobs($1, 'bench-b4-warmup')", queue
             )
@@ -430,9 +444,7 @@ async def _b4(
             worker = f"bench-b4-{repetition}-{lane}"
             while not stop.is_set():
                 started = time.perf_counter()
-                batch = await conn.fetchrow(
-                    "SELECT * FROM taskq.claim_jobs($1, $2)", queue, worker
-                )
+                batch = await conn.fetchrow("SELECT * FROM taskq.claim_jobs($1, $2)", queue, worker)
                 if batch["state"] == "empty":
                     await asyncio.sleep(0)
                     continue
@@ -440,13 +452,17 @@ async def _b4(
                 if rng.random() < 0.85:
                     row = await conn.fetchrow(
                         "SELECT * FROM taskq.complete_job($1, $2, $3)",
-                        job["job_id"], job["attempt_id"], worker,
+                        job["job_id"],
+                        job["attempt_id"],
+                        worker,
                     )
                 else:
                     row = await conn.fetchrow(
                         "SELECT * FROM taskq.fail_job($1, $2, $3, 'bench failure', "
                         "p_retryable => false)",
-                        job["job_id"], job["attempt_id"], worker,
+                        job["job_id"],
+                        job["attempt_id"],
+                        worker,
                     )
                 assert row["result"] in {"ok", "dead"}
                 settled += 1
@@ -463,14 +479,16 @@ async def _b4(
         duration = time.perf_counter() - started
         for conn in (*producers, *workers):
             await conn.close()
-        results.append({
-            "accepted": accepted,
-            "settled": settled,
-            "duration_seconds": duration,
-            "throughput_rows_per_second": settled / duration,
-            "enqueue_latency": _latency_summary(enqueue_latencies),
-            "e2e_latency": _latency_summary(e2e_latencies),
-        })
+        results.append(
+            {
+                "accepted": accepted,
+                "settled": settled,
+                "duration_seconds": duration,
+                "throughput_rows_per_second": settled / duration,
+                "enqueue_latency": _latency_summary(enqueue_latencies),
+                "e2e_latency": _latency_summary(e2e_latencies),
+            }
+        )
     return results
 
 

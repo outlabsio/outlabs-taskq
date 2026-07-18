@@ -111,8 +111,7 @@ class TestMigrateAndVerify:
                 assert not report.ok
                 hardening = _failed_check(report, "function_hardening")
                 assert any(
-                    "enqueue" in detail and "taskq_owner" in detail
-                    for detail in hardening.details
+                    "enqueue" in detail and "taskq_owner" in detail for detail in hardening.details
                 )
             finally:
                 await pg.execute(f"ALTER FUNCTION {signature} OWNER TO taskq_owner")
@@ -146,8 +145,7 @@ class TestMigrateAndVerify:
                 )
             finally:
                 await pg.execute(
-                    f"ALTER FUNCTION {signature} "
-                    "SET search_path TO pg_catalog, taskq, pg_temp"
+                    f"ALTER FUNCTION {signature} SET search_path TO pg_catalog, taskq, pg_temp"
                 )
             async with engine.connect() as conn:
                 report = await verify(conn)

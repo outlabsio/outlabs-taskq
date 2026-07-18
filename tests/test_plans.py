@@ -45,9 +45,7 @@ def _assert_index_family(plan: dict[str, Any], expected: str) -> None:
 
 async def _seed_million(pg: asyncpg.Connection) -> None:
     for queue in ("plan_a", "plan_b"):
-        row = await pg.fetchrow(
-            "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'plans')", queue
-        )
+        row = await pg.fetchrow("SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'plans')", queue)
         assert row is not None
 
     # This is plan-fixture data, not a state-transition test. One set-based
@@ -157,9 +155,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
         """,
     )
     arbiter_indexes = {
-        index
-        for node in _walk_plan(dedup)
-        for index in node.get("Conflict Arbiter Indexes", ())
+        index for node in _walk_plan(dedup) for index in node.get("Conflict Arbiter Indexes", ())
     }
     assert "jobs_idem_uq" in arbiter_indexes
 

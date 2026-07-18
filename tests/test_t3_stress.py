@@ -332,9 +332,7 @@ async def test_randomized_stress_preserves_global_invariants(
         for lane, conn in enumerate(producers)
     ]
     worker_tasks = [
-        asyncio.create_task(
-            _worker_loop(conn, pg, queue, lane, seed + 20_000 + lane, stop, state)
-        )
+        asyncio.create_task(_worker_loop(conn, pg, queue, lane, seed + 20_000 + lane, stop, state))
         for lane, conn in enumerate(workers)
     ]
     cancel_task = asyncio.create_task(_cancel_loop(operator, seed + 30_000, stop, state))
@@ -349,9 +347,7 @@ async def test_randomized_stress_preserves_global_invariants(
     await _drain(drainer, pg, housekeeper, queue, seed)
     await housekeeper.fetchval("SELECT taskq.tick(200)")
 
-    rows = await pg.fetch(
-        "SELECT id, status FROM taskq.jobs WHERE queue = $1 ORDER BY id", queue
-    )
+    rows = await pg.fetch("SELECT id, status FROM taskq.jobs WHERE queue = $1 ORDER BY id", queue)
     row_ids = {row["id"] for row in rows}
     assert row_ids == state.enqueued_ids, (
         f"seed={seed} conservation mismatch returned={len(state.enqueued_ids)} rows={len(row_ids)}"
@@ -359,10 +355,7 @@ async def test_randomized_stress_preserves_global_invariants(
     assert len(rows) == state.created_count == len(state.enqueued_ids)
     assert all(row["status"] in {"succeeded", "failed", "cancelled"} for row in rows)
     assert (
-        await pg.fetchval(
-            "SELECT count(*) FROM taskq.job_attempts WHERE status = 'running'"
-        )
-        == 0
+        await pg.fetchval("SELECT count(*) FROM taskq.job_attempts WHERE status = 'running'") == 0
     )
     assert (
         await pg.fetchval(

@@ -32,9 +32,7 @@ def _barrier_key(case: int, round_index: int, lane: int = 0) -> int:
 
 
 async def _make_queue(operator: asyncpg.Connection, name: str) -> None:
-    row = await operator.fetchrow(
-        "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 't3')", name
-    )
+    row = await operator.fetchrow("SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 't3')", name)
     assert row is not None
 
 
@@ -49,9 +47,7 @@ async def _enqueue_one(
     return row
 
 
-async def _claim_one(
-    runner: asyncpg.Connection, queue: str, worker_id: str
-) -> asyncpg.Record:
+async def _claim_one(runner: asyncpg.Connection, queue: str, worker_id: str) -> asyncpg.Record:
     batch = await runner.fetchrow(_CLAIM, queue, worker_id)
     assert batch is not None
     assert batch["state"] == "claimed"
@@ -152,8 +148,7 @@ class TestChoreographedRaces:
             assert second["job_id"] == first["job_id"]
             assert (
                 await pg.fetchval(
-                    "SELECT count(*) FROM taskq.jobs "
-                    "WHERE queue = $1 AND idempotency_key = $2",
+                    "SELECT count(*) FROM taskq.jobs WHERE queue = $1 AND idempotency_key = $2",
                     queue,
                     key,
                 )
@@ -240,9 +235,7 @@ class TestChoreographedRaces:
 
             transaction = operator.transaction()
             await transaction.start()
-            expired = await operator.fetchval(
-                "SELECT taskq.expire_job($1, 't3')", job["job_id"]
-            )
+            expired = await operator.fetchval("SELECT taskq.expire_job($1, 't3')", job["job_id"])
             assert expired == "expired_and_reaped"
 
             barrier = _barrier_key(3, round_index)
@@ -369,7 +362,9 @@ class TestChoreographedRaces:
                 await _release_barrier(pg, barrier)
 
             batches = [await _finish_task(claim) for claim in claims]
-            winners = [(lane, batch) for lane, batch in enumerate(batches) if batch["state"] == "claimed"]
+            winners = [
+                (lane, batch) for lane, batch in enumerate(batches) if batch["state"] == "claimed"
+            ]
             assert len(winners) == 1
             assert all(batch["state"] in {"claimed", "empty"} for batch in batches)
             assert (

@@ -32,7 +32,6 @@
 
 ## Now — Stage 1 exit gate
 
-- [ ] **S1-08 · CI wiring.** GitHub Actions per Harness doc §4: lint, import-isolation (core installs without extras), T1, sql-contract on PG16+PG18 service containers, races job. Branch protection note in README.
 - [ ] **S1-09 · Stage-1 exit review packet.** When S1-01..08 are green: update Build Plan stage status, assemble the round-3 review prompt (migration 0001 + runner + suites vs manifest), hand to Andi.
 
 ## Next — Stage 2 kickoff (do not start before S1-09)
@@ -59,3 +58,4 @@
 - [x] **S1-05 · PG16 lane** — the identical 54-test suite passes on PostgreSQL 16.14 and 18.3, including the uuid7 fallback, races, stress, model, and verifier corruption matrix; no PG16 manifest caveat was required.
 - [x] **S1-06 · 1M-row plan checks** — opt-in `tests/test_plans.py` seeds mixed states, stabilizes stats/visibility, runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, and structurally asserts claim/dedup/reap/stats index families, bounded hot-path rows, and no full `jobs` scan (two consecutive PG18 runs green).
 - [x] **S1-07 · B1–B4 benchmark smoke** — packaged `taskq-bench` runs single enqueue, 1000-row bulk, empty/deep claim→settle, and mixed producer/worker load for ≥3 repetitions; toy tests and the CLI print/write JSON with method, machine/PG/settings, WAL/storage/tuple/lock/connection, latency/throughput, event-loop, and structural EXPLAIN evidence. No baseline was created.
+- [x] **S1-08 · CI wiring** — GitHub Actions now gates Ruff check/format, Python 3.12/3.13 core+HTTP import isolation and T1, PostgreSQL 16/18 SQL contracts, PG18 races/T4, migrations, and B1–B4 smoke; README records the required branch-protection checks.

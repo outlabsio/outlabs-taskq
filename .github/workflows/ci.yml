@@ -1,0 +1,202 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_FROZEN: "1"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+
+  import-isolation:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Core has no optional framework/auth imports
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-core uv sync --no-dev
+          UV_PROJECT_ENVIRONMENT=.venv-core uv run python - <<'PY'
+          import importlib.util
+          import sys
+          import taskq
+          import taskq.sql
+
+          assert importlib.util.find_spec("fastapi") is None
+          assert importlib.util.find_spec("outlabs_auth") is None
+          assert "fastapi" not in sys.modules
+          assert "outlabs_auth" not in sys.modules
+          PY
+      - name: HTTP extra still excludes outlabs-auth
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-http uv sync --no-dev --extra http
+          UV_PROJECT_ENVIRONMENT=.venv-http uv run python - <<'PY'
+          import importlib.util
+          import fastapi
+          import taskq
+
+          assert importlib.util.find_spec("outlabs_auth") is None
+          PY
+
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/test_t1_unit.py tests/test_version.py -q
+
+  sql-contract:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        postgres-version: ["16", "18"]
+    services:
+      postgres:
+        image: postgres:${{ matrix.postgres-version }}
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/test_t2_contract.py tests/test_version.py -q
+
+  races:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+      TASKQ_STRESS_SEED: "424242"
+      HYPOTHESIS_SEED: "24680"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: >-
+          uv run pytest
+          tests/test_t3_races.py
+          tests/test_t3_stress.py
+          tests/test_t4_model.py
+          -q
+
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run pytest 'tests/test_t2_contract.py::TestMigrateAndVerify' -q
+
+  bench-smoke:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/test_bench_smoke.py -q
+
