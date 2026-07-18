@@ -32,7 +32,6 @@
 
 ## Now — round-4 remediation (stop before S2-05)
 
-- [ ] **R4-F01 · Settlement-liveness heartbeat (R4-01/R4-03)** — heartbeat until terminal settlement or ownership loss; pin interleaved retries and the `settling → ownership_lost` suppression arc.
 - [ ] **R4-F02 · External cancellation (R4-02/R4-06)** — convert unowned task cancellation to shielded shutdown release, then re-raise; pin pre-start, mid-handler, and cancellation races.
 - [ ] **R4-F03 · Process-exit honesty and dispatch arity (R4-04/R4-05/R4-06)** — expose lease-loss live-sync danger, dispatch from registry metadata, and close the named lifecycle race gaps.
 - [ ] **R4-F04 · Replay oracle and error normalization (R4-07/R4-08)** — retain exact settlement arguments and normalize special-path transport errors into fatal reports.
@@ -62,6 +61,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **R4-F01 · Settlement-liveness heartbeat (R4-01/R4-03)** — heartbeat lifetime is now controlled by terminal settlement rather than handler completion; retry backoff is interruptible by lease loss, and deterministic long-backoff vectors prove heartbeat interleaving plus `settling → ownership_lost` suppression.
 - [x] **S2-04-R4-RESPONSE · Round-4 response recorded** — registered the external response verbatim as immutable Tier 4; its executed counterexamples leave the SQL safety core intact but block S2-05 on settlement-heartbeat liveness, external-cancellation semantics, process-exit honesty, dispatch arity, and their regression oracles (285/285 baseline on PG18, Ruff clean).
 - [x] **S3-PREP-03 · Batch boundary adapters and measured delta** — module-level adapters now validate bulk-enqueue items in one `TaskQ` boundary call and decode each SQL claim batch as one state-checked projection. Fixed-seed toy B2/B3 runs used five repetitions and fresh databases before/after: B2 median throughput 33,029.69→33,216.71 rows/s (+0.57%), worst p99 30.35→30.95 ms (+2.00%); B3 median throughput 798.42→799.90 rows/s (+0.18%), worst p99 3.76→3.09 ms (-17.63%). B2/B3 call SQL directly and do not traverse these Pydantic adapters, so all deltas are recorded as harness/environment noise, not a performance win (285/285 on PG18).
 - [x] **S3-PREP-02 · Tagged protocol result unions** — split enqueue dispositions on `status` and all six fenced settlement dispositions on `result` into Pydantic discriminated unions with public concrete variants and module-level parsers; Tier-0 parity proves the tag sets equal the closed protocol outcomes, while eight frozen representative vectors prove byte-identical JSON with no wire-contract change, ADR, or version bump (283/283 on PG18).

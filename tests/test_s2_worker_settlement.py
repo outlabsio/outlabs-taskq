@@ -29,7 +29,13 @@ from taskq.errors import (
     TaskqUnavailableError,
     TaskqValidationError,
 )
-from taskq.protocol import SETTLE_RESULT_ADAPTER, ClaimedJob, JobStatus, SettleOutcome
+from taskq.protocol import (
+    SETTLE_RESULT_ADAPTER,
+    ClaimedJob,
+    HeartbeatResult,
+    JobStatus,
+    SettleOutcome,
+)
 from tests.worker_support import ManualClock, ScriptedTransport
 
 
@@ -157,7 +163,10 @@ async def test_lost_response_retries_identical_verb_and_runs_handler_once(
 
     supervisor = _supervisor(transport, clock, selected_handler)
     running = asyncio.create_task(supervisor.run_job(_claim("math.work" if handler else "missing")))
-    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 1)
+    expected_sleepers = 2 if handler is not None else 1
+    await _spin_until(
+        lambda: len(transport.calls) == 1 and clock.sleeping >= expected_sleepers
+    )
     clock.advance(0.25)
     report = await running
     assert report.state is JobRunState.SETTLED
@@ -215,15 +224,95 @@ async def test_retry_exhaustion_is_settlement_unknown_and_stops_heartbeat() -> N
     )
     supervisor = _supervisor(transport, clock, complete_handler, attempts=3)
     running = asyncio.create_task(supervisor.run_job(_claim()))
-    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 1)
+    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 2)
     clock.advance(0.25)
-    await _spin_until(lambda: len(transport.calls) == 2)
+    await _spin_until(lambda: len(transport.calls) == 2 and clock.sleeping >= 2)
     clock.advance(0.5)
     report = await running
     assert report.outcome is JobRunOutcome.SETTLEMENT_UNKNOWN
     assert report.fatal
     assert [call.command for call in transport.calls] == ["complete"] * 3
     assert clock.sleeping == 0
+    await supervisor.aclose()
+
+
+async def test_heartbeat_remains_live_through_settlement_retry() -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script("complete", TaskqUnavailableError())
+    registry = TaskRegistry(
+        [
+            Task(
+                name="math.work",
+                queue="worker",
+                input_model=Input,
+                output_model=Output,
+                handler=complete_handler,
+            )
+        ]
+    )
+    supervisor = WorkerSupervisor(
+        transport,  # type: ignore[arg-type]
+        registry,
+        "worker-1",
+        options=WorkerOptions(settle_backoff_base=10, settle_backoff_cap=10),
+        clock=clock,
+    )
+    running = asyncio.create_task(supervisor.run_job(_claim()))
+    await _spin_until(
+        lambda: [call.command for call in transport.calls] == ["complete"]
+        and clock.sleeping >= 2
+    )
+    clock.advance(5)
+    await _spin_until(lambda: len(transport.calls) == 2)
+    assert [call.command for call in transport.calls] == ["complete", "heartbeat"]
+    clock.advance(5)
+    report = await running
+    assert report.state is JobRunState.SETTLED
+    assert [call.command for call in transport.calls] == [
+        "complete",
+        "heartbeat",
+        "heartbeat",
+        "complete",
+    ]
+    await supervisor.aclose()
+
+
+async def test_heartbeat_loss_during_settlement_suppresses_next_retry() -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script("complete", TaskqUnavailableError())
+    transport.script(
+        "heartbeat", HeartbeatResult(ok=False, cancel_requested=False, lease_expires_at=None)
+    )
+    registry = TaskRegistry(
+        [
+            Task(
+                name="math.work",
+                queue="worker",
+                input_model=Input,
+                output_model=Output,
+                handler=complete_handler,
+            )
+        ]
+    )
+    supervisor = WorkerSupervisor(
+        transport,  # type: ignore[arg-type]
+        registry,
+        "worker-1",
+        options=WorkerOptions(settle_backoff_base=10, settle_backoff_cap=10),
+        clock=clock,
+    )
+    running = asyncio.create_task(supervisor.run_job(_claim()))
+    await _spin_until(
+        lambda: [call.command for call in transport.calls] == ["complete"]
+        and clock.sleeping >= 2
+    )
+    clock.advance(5)
+    report = await running
+    assert report.state is JobRunState.OWNERSHIP_LOST
+    assert report.outcome is JobRunOutcome.OWNERSHIP_LOST
+    assert [call.command for call in transport.calls] == ["complete", "heartbeat"]
     await supervisor.aclose()
 
 

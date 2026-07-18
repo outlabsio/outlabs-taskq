@@ -122,6 +122,7 @@ class _RunControl:
         self.is_sync = is_sync
         self.cancellation = CancellationToken()
         self.ownership_lost = asyncio.Event()
+        self.settlement_terminal = asyncio.Event()
         self.runtime_failed = False
         self.handler: asyncio.Future[Any] | None = None
         self.operator_grace: asyncio.Task[None] | None = None
@@ -348,10 +349,14 @@ class WorkerSupervisor:
         ):
             intent = None
 
-        report = await self._settle_intent(claim, intent, reason, context=context)
-        heartbeat.cancel()
-        await asyncio.gather(heartbeat, return_exceptions=True)
-        return report
+        try:
+            return await self._settle_intent(
+                claim, intent, reason, context=context, control=control
+            )
+        finally:
+            control.settlement_terminal.set()
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
 
     def _refresh_capacity_event(self) -> None:
         if self._accepting and self._free_slots > 0:
@@ -444,7 +449,7 @@ class WorkerSupervisor:
         interval = min(claim.lease_seconds / 3, 30.0)
         consecutive_failures = 0
         await self.clock.sleep(interval)
-        while control.handler is not None and not control.handler.done():
+        while not control.settlement_terminal.is_set():
             pending = context._pending_checkpoint()
             try:
                 result = await self.transport.heartbeat(
@@ -538,6 +543,7 @@ class WorkerSupervisor:
         reason: CancellationReason | None,
         *,
         context: JobContext | None = None,
+        control: _RunControl | None = None,
     ) -> JobRunReport:
         progress = context.progress if context is not None else claim.progress
         if intent is None:
@@ -613,7 +619,9 @@ class WorkerSupervisor:
 
             command = CommandName.FAIL
         try:
-            report = await self._settle_with_retry(claim.job_id, command, operation)
+            report = await self._settle_with_retry(
+                claim.job_id, command, operation, control=control
+            )
         except (TaskqValidationError, TaskqCapabilityError) as exc:
             if not isinstance(intent, Complete) or not intent.followups:
                 return self._runtime_failure(claim.job_id, command)
@@ -621,6 +629,7 @@ class WorkerSupervisor:
                 claim,
                 progress,
                 capability_skew=isinstance(exc, TaskqCapabilityError),
+                control=control,
             )
         return report.model_copy(update={"cancellation_reason": reason})
 
@@ -629,8 +638,12 @@ class WorkerSupervisor:
         job_id: UUID,
         command: CommandName,
         operation: Callable[[], Awaitable[SettleResult]],
+        *,
+        control: _RunControl | None = None,
     ) -> JobRunReport:
         for attempt in range(1, self.options.settle_max_attempts + 1):
+            if control is not None and control.ownership_lost.is_set():
+                return self._ownership_lost_report(job_id, control)
             try:
                 result = await operation()
             except asyncio.CancelledError:
@@ -655,7 +668,8 @@ class WorkerSupervisor:
                     self.options.settle_backoff_base * (2 ** (attempt - 1)),
                     self.options.settle_backoff_cap,
                 )
-                await self.clock.sleep(delay)
+                if await self._settle_delay(delay, control):
+                    return self._ownership_lost_report(job_id, control)
         return JobRunReport(
             job_id=job_id,
             state=JobRunState.RUNTIME_FAILED,
@@ -670,6 +684,7 @@ class WorkerSupervisor:
         progress: dict[str, Any] | None,
         *,
         capability_skew: bool,
+        control: _RunControl | None = None,
     ) -> JobRunReport:
         async def terminal_fail() -> SettleResult:
             return await self.transport.fail(
@@ -681,7 +696,9 @@ class WorkerSupervisor:
                 progress=progress,
             )
 
-        failed = await self._settle_with_retry(claim.job_id, CommandName.FAIL, terminal_fail)
+        failed = await self._settle_with_retry(
+            claim.job_id, CommandName.FAIL, terminal_fail, control=control
+        )
         if failed.state is not JobRunState.SETTLED:
             return failed
         return JobRunReport(
@@ -701,6 +718,38 @@ class WorkerSupervisor:
             outcome=JobRunOutcome.RUNTIME_ERROR,
             settlement_command=command.value,
             fatal=True,
+        )
+
+    async def _settle_delay(self, delay: float, control: _RunControl | None) -> bool:
+        if control is None:
+            await self.clock.sleep(delay)
+            return False
+        sleeping = asyncio.create_task(self.clock.sleep(delay), name="taskq-settle-backoff")
+        lost = asyncio.create_task(
+            control.ownership_lost.wait(), name="taskq-settle-ownership"
+        )
+        done, _ = await asyncio.wait((sleeping, lost), return_when=asyncio.FIRST_COMPLETED)
+        sleeping.cancel()
+        lost.cancel()
+        await asyncio.gather(sleeping, lost, return_exceptions=True)
+        return lost in done
+
+    @staticmethod
+    def _ownership_lost_report(job_id: UUID, control: _RunControl) -> JobRunReport:
+        reason = control.cancellation.reason or CancellationReason.LEASE_LOST
+        if control.runtime_failed:
+            return JobRunReport(
+                job_id=job_id,
+                state=JobRunState.RUNTIME_FAILED,
+                outcome=JobRunOutcome.RUNTIME_ERROR,
+                cancellation_reason=reason,
+                fatal=True,
+            )
+        return JobRunReport(
+            job_id=job_id,
+            state=JobRunState.OWNERSHIP_LOST,
+            outcome=JobRunOutcome.OWNERSHIP_LOST,
+            cancellation_reason=reason,
         )
 
     @staticmethod
