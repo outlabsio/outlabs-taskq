@@ -56,7 +56,7 @@ src/taskq/
 
 ## Development gates
 
-Protect `main` with pull requests, require branches to be current, and require every Stage-1 CI check: `lint`; both `import-isolation` and `unit` Python lanes; both PostgreSQL `sql-contract` lanes; `races`; `migrations`; and `bench-smoke`. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
+Protect `main` with pull requests, require branches to be current, and require every Stage-1 CI check: `lint`; both `import-isolation` and `unit` Python lanes; `built-artifacts`; both PostgreSQL `sql-contract` lanes; `races`; `migrations`; and `bench-smoke`. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
 
 ## License
 

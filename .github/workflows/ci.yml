@@ -66,6 +66,56 @@ jobs:
           assert importlib.util.find_spec("outlabs_auth") is None
           PY
 
+  built-artifacts:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ARTIFACT_ADMIN_DSN: postgresql://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Build wheel and sdist
+        run: uv build
+      - name: Install and smoke each built artifact outside the checkout
+        shell: bash
+        run: |
+          set -euo pipefail
+          for artifact in dist/*.whl dist/*.tar.gz; do
+            smoke_root="$(mktemp -d)"
+            core_env="$smoke_root/core"
+            http_env="$smoke_root/http"
+            uv venv "$core_env"
+            uv pip install --python "$core_env/bin/python" "$GITHUB_WORKSPACE/$artifact"
+            (
+              cd "$smoke_root"
+              "$core_env/bin/python" "$GITHUB_WORKSPACE/scripts/artifact_smoke.py" \
+                --mode core --repo "$GITHUB_WORKSPACE" --admin-dsn "$ARTIFACT_ADMIN_DSN"
+            )
+            uv venv "$http_env"
+            uv pip install --python "$http_env/bin/python" "$GITHUB_WORKSPACE/${artifact}[http]"
+            (
+              cd "$smoke_root"
+              "$http_env/bin/python" "$GITHUB_WORKSPACE/scripts/artifact_smoke.py" \
+                --mode http --repo "$GITHUB_WORKSPACE"
+            )
+          done
+
   unit:
     runs-on: ubuntu-latest
     strategy:
@@ -199,4 +249,3 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev
       - run: uv run pytest tests/test_bench_smoke.py -q
-
