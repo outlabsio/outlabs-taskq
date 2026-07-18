@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2B completion audit open** — the bounded worker lifecycle is green; S2-04-AUDIT is the sole remaining Stage 2B gate |
-| Suite | 264/264 regular on PG18.3; contract baseline 221/221 + opt-in 1M plan gate green on PG16.14 |
+| Stage | **Stage 2B complete** — the worker execution kernel and permanent completion evidence are green; S2-05 remains review-gated |
+| Suite | 279/279 regular + opt-in 1M plan gate on PG18.3 and PG16.14; clean Python 3.13 worker/unit lane 149/149 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Round 4 after S2-04-AUDIT, including the contract-0.1.2 upgrade path |
+| Next review | Round 4 is ready: audit the completed Stage 2B kernel and contract-0.1.2 upgrade path |
 
-## Now — Stage 2B worker runtime
+## Now — gated pending round 4
 
-- [ ] **S2-04-AUDIT** — race, resource-leak, packaging, and PostgreSQL 16/18 completion evidence
+*(none — do not open S2-05 until the Stage 2B review is adjudicated)*
 
 ## Next — gated after Stage 2B review
 
@@ -53,6 +53,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-04-AUDIT · Stage 2B permanent completion evidence** — five repeated, barrier-choreographed race families cover both winner orders without correctness sleeps; live SQL vectors prove complete/retry/snooze/cancel/shutdown/no-handler budget and exact event conservation plus committed-response replay; task, exception, executor-thread, and SQL-pool ledgers return to baseline; source CI imports the worker on Python 3.12/3.13 and every fresh wheel/sdist core/HTTP/OutLabs install smokes it outside the checkout. The exact full suite is 279/279 plus the million-row plan gate on PostgreSQL 18.3 and 16.14, with 149/149 in the clean Python 3.13 worker/unit lane.
 - [x] **S2-04D · Bounded concurrency and soft stop** — added synchronous slot reservation, duplicate-attempt rejection, capacity waiting, lazy bounded sync execution with active heartbeat while thread-queued, atomic intake close, cooperative/infinite drain, monotonic deadline, shared escalation, async shutdown release, honest live-sync process-exit signaling, fatal auto-stop, and complete task/executor joining; 8 deterministic vectors bring PG18 to 264/264.
 - [x] **S2-04C · Verb-aware settlement replay and fault injection** — settlement now retries only the original verb with bounded exponential backoff, validates command-specific outcomes, converges after a committed-but-lost response, keeps heartbeats live until certainty, classifies exhausted certainty as fatal, and applies the frozen invalid-follow-up terminal escape; 13 deterministic vectors bring PG18 to 256/256 and prove one semantic settlement plus one handler invocation under response loss.
 - [x] **S2-04B · Monotonic heartbeat and fenced per-job supervision** — added the core worker options/clock/state/report API, exact `lease_seconds/3` cadence, one heartbeat coroutine per active handler, generation-safe checkpoint flush, two-failure recovery/third-failure ownership loss, typed loss, operator grace cancellation, non-retryable runtime failure, no-handler release, async/sync dispatch, and joined lifecycle; 10 deterministic vectors bring PG18 to 243/243 without reading absolute expiry for scheduling.

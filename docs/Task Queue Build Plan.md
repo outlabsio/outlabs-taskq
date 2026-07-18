@@ -4,9 +4,9 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; the PG16/PG18 portability gates are green and Stage 2B is open.
+Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; Stage 2B's worker execution kernel and PG16/PG18 evidence are complete, and S2-05 remains gated pending round 4.
 
-## Stage 1 — secure SQL kernel (ROUND-3 REMEDIATION IN PROGRESS — CONTRACT QUESTIONS RESOLVED 2026-07-18)
+## Stage 1 — secure SQL kernel (COMPLETE)
 
 **Landed:** immutable migrations `0001_initial.sql` + `0002_contract_0_1_1.sql` + `0003_contract_0_1_2.sql` (6 validated capability roles, 11 tables, 3 composites, 40 hardened functions, byte-safe diagnostics, effective lease projection, 0.1-only seeding); the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI) with transaction-safe lock ownership; the exact machine-readable catalog verifier; manifest-complete T2/T8/T4 coverage; T3 deterministic and randomized concurrency, function-bound million-row structural plans, fresh-database/conservation-proven B1–B4 benchmarks, and source plus built-artifact CI. The kernel gates pass PostgreSQL 16.14 and 18.3, including the opt-in million-row plan suite. Manifest §8–§10 record the integration errata and contract patches; no Stage-1 contract questions remain open.
 
@@ -47,6 +47,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 **S2-04C implementation:** every settlement path now retries only its original protocol verb with bounded monotonic backoff, validates the verb's closed outcome set, and keeps heartbeating until an authoritative response arrives or certainty is exhausted. Programmable response-loss tests prove handlers execute once and committed mutations converge through `already_settled`; invalid follow-ups take the frozen terminal-fail escape and capability skew is fatal. The full **256/256** suite passes PostgreSQL 18.3; S2-04D is next.
 
 **S2-04D implementation:** the supervisor now reserves bounded capacity synchronously, rejects duplicate active attempts, exposes capacity waiting, and owns one lazy bounded sync executor while heartbeating work queued for a thread. Soft stop atomically closes intake, shares one idempotent drain, supports immediate escalation and monotonic deadlines, releases hard-cancelled async jobs budget-free, and never releases a live sync handler; fatal reports automatically close and drain the supervisor. The full **264/264** suite passes PostgreSQL 18.3; S2-04-AUDIT is the remaining Stage 2B gate.
+
+**Stage 2B complete:** S2-04-AUDIT makes every worker acceptance row permanent with repeated barrier races, real-SQL budget/attempt/event conservation, committed-response replay, zero task/exception/thread/pool leakage, Python 3.12/3.13 import isolation, and worker-aware smoke checks for every wheel/sdist core/HTTP/OutLabs install. The exact full suite is **279/279 plus the million-row plan gate on PostgreSQL 16.14 and 18.3**, and the clean Python-3.13 worker/unit lane is **149/149**. S2-05 stays closed until the round-4 review of Stage 2B and the contract-0.1.2 upgrade path is adjudicated.
 
 ## Stage 3 — FastAPI + outlabs-auth
 

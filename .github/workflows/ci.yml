@@ -50,11 +50,13 @@ jobs:
           import taskq
           import taskq.client
           import taskq.errors
+          import taskq.execution
           import taskq.protocol
           import taskq.registry
           import taskq.sql
           import taskq.sql.transport
           import taskq.transport
+          import taskq.worker
 
           assert importlib.util.find_spec("fastapi") is None
           assert importlib.util.find_spec("outlabs_auth") is None
@@ -69,7 +71,9 @@ jobs:
           import sys
           import taskq
           import taskq.client
+          import taskq.execution
           import taskq.protocol
+          import taskq.worker
 
           assert "fastapi" not in sys.modules
           assert "outlabs_auth" not in sys.modules
@@ -86,7 +90,9 @@ jobs:
           import sys
           import taskq
           import taskq.client
+          import taskq.execution
           import taskq.protocol
+          import taskq.worker
 
           assert "fastapi" not in sys.modules
           assert "outlabs_auth" not in sys.modules
@@ -173,6 +179,11 @@ jobs:
           tests/test_version.py
           tests/test_s2_registry.py
           tests/test_s2_client.py
+          tests/test_s2_worker_execution.py
+          tests/test_s2_worker_supervision.py
+          tests/test_s2_worker_settlement.py
+          tests/test_s2_worker_lifecycle.py
+          tests/test_s2_worker_races.py
           -q
 
   sql-contract:
@@ -238,6 +249,7 @@ jobs:
           tests/test_t3_races.py
           tests/test_t3_stress.py
           tests/test_t4_model.py
+          tests/test_s2_worker_races.py
           -q
 
   migrations:

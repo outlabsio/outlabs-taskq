@@ -60,11 +60,21 @@ def main() -> None:
     import taskq
     import taskq.client
     import taskq.errors
+    import taskq.execution
     import taskq.protocol
     import taskq.registry
     import taskq.sql.transport
     import taskq.transport
-    from taskq import TaskQ, TaskRegistry
+    import taskq.worker
+    from taskq import (
+        CancellationToken,
+        Complete,
+        JobContext,
+        TaskQ,
+        TaskRegistry,
+        WorkerOptions,
+        WorkerSupervisor,
+    )
     from taskq.sql import discover_migrations
     from taskq.sql.manifest import FUNCTIONS
 
@@ -88,6 +98,14 @@ def main() -> None:
 
     assert TaskQ is not None
     assert TaskRegistry is not None
+    assert Complete is not None
+    assert CancellationToken is not None
+    assert JobContext is not None
+    assert WorkerOptions().concurrency == 1
+
+    supervisor = WorkerSupervisor(object(), TaskRegistry(), "artifact-smoke")  # type: ignore[arg-type]
+    assert supervisor.available_slots == 0
+    asyncio.run(supervisor.aclose())
 
     assert [migration.id for migration in discover_migrations()] == [
         "0001_initial",
