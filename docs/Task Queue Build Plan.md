@@ -34,7 +34,7 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Outcome audit green:** S2-AUDIT-03 closes the final adapter-level gap by validating each scalar and composite result against that command's own protocol-owned outcome set, so a value that belongs to another command is a closed `TQ500` failure rather than an accepted cross-command drift. The full **217/217** suite passes PostgreSQL 16.14 and 18.3, with the million-row plan gate green on both.
 
-**Stage 2B opening gate:** the S2-04 authority pass found that the Tier-0 claim composite exposes the absolute lease expiry but not the effective lease duration required to schedule the normative `min(lease/3, 30s)` heartbeat without relying on worker clock skew. `TASKS.md` records S2-CQ-01 and the recommended additive contract-0.1.2 resolution. Worker specification and implementation are stopped until that question is adjudicated docs-first; S2-05 and Stage 3 remain closed.
+**Stage 2B contract gate resolved docs-first:** ADR-013 and the Tier-0 contracts advance the design to SQL contract 0.1.2 by appending the effective `lease_seconds` to the claim projection. Workers schedule from that duration monotonically and never derive it from an absolute expiry plus client wall time. Immutable migration 0003 plus PG16/PG18 fresh/upgrade evidence remains the implementation gate before S2-04-SPEC; S2-05 and Stage 3 remain closed.
 
 ## Stage 3 — FastAPI + outlabs-auth
 

@@ -1,6 +1,6 @@
 # taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.1 — 2026-07-18. Closes R2-08 and incorporates ADR-012: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.1 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.2 — 2026-07-18. Closes R2-08 and incorporates ADR-012/013: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.2 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -9,9 +9,18 @@
 
 Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
 
-Composite types frozen for 0.1 (H-02; additive evolution only):
+Composite types frozen for 0.1 (H-02; additive evolution only). Contract 0.1.2 has the following complete `claimed_job` shape; `lease_seconds` is appended and no existing attribute moves:
 
 ```sql
+CREATE TYPE taskq.claimed_job AS (
+    job_id uuid, queue text, job_type text, priority smallint,
+    payload jsonb, headers jsonb, progress jsonb,
+    attempt_id uuid, attempt_number integer,
+    failure_count smallint, max_attempts smallint,
+    lease_expires_at timestamptz,
+    workflow_id uuid, step_key text,
+    lease_seconds integer
+);
 CREATE TYPE taskq.claim_batch AS (
     state text,                 -- claimed | empty | paused | unknown_queue | unavailable
     jobs  taskq.claimed_job[]   -- non-empty only when state = 'claimed'
@@ -536,3 +545,13 @@ Migration `0002_contract_0_1_1.sql` applies these normative deltas without chang
 3. **Exact helper surface.** `taskq.truncate_utf8(text,int)` is the sole new 0.1.1 function: owner `taskq_owner`, `SECURITY DEFINER`, immutable, parallel-safe, pinned path, PUBLIC EXECUTE revoked, and no application-role grant. The expected catalog therefore contains 40 functions.
 4. **Version state.** Migration 0002 updates `taskq.meta['contract_version']` from JSON string `"0.1"` to `"0.1.1"`; capabilities remain unchanged. Protocol major stays v1.
 5. **Required tests.** T2 includes omitted/null/min/max/out-of-range vectors for every public bounded parameter and ASCII/multibyte diagnostic vectors proving byte caps and successful settlement. T8 proves 0001→0002 upgrade, fresh-chain equivalence, immutable checksums, and old/new contract negotiation behavior.
+
+## 10. Contract patch 0.1.2 — ADR-013 (2026-07-18)
+
+Migration `0003_contract_0_1_2.sql` applies one additive projection correction without adding or removing a public function:
+
+1. **Append-only claim attribute.** `ALTER TYPE taskq.claimed_job ADD ATTRIBUTE lease_seconds integer` appends the field after `step_key`. `lease_expires_at` remains unchanged. The complete shape is frozen in §0.
+2. **Exact effective duration.** `claim_jobs` appends its non-null `v_lease` to each returned `claimed_job`; this is the same 15–86400 value used to update `jobs.lease_expires_at` and insert `job_attempts.lease_seconds`.
+3. **Clock boundary.** Workers schedule heartbeats from `lease_seconds` on a monotonic timer and never compute a duration as `lease_expires_at - local_now()`.
+4. **Version state.** Migration 0003 updates `taskq.meta['contract_version']` from JSON string `"0.1.1"` to `"0.1.2"`; capabilities and Protocol major v1 are unchanged.
+5. **Required tests.** `verify()` and the independent catalog-parity projection assert the ordered 15-attribute composite. T2 proves queue-default, task-stamped, and explicit claim-override durations match the job row, attempt row, and returned projection. T8 proves a fresh chain and the full immutable `0001 → 0002 → 0003` upgrade on PostgreSQL 16 and 18.
