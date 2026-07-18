@@ -12,7 +12,8 @@ from pydantic import BaseModel, ValidationError
 from taskq import (
     JobContext,
     ClaimedJob,
-    EnqueueResult,
+    EnqueueCreatedResult,
+    EnqueueExistedResult,
     EnqueueStatus,
     RetryStrategy,
     Task,
@@ -33,11 +34,12 @@ from taskq.errors import (
 )
 from taskq.protocol import (
     COMMAND_SPECS,
+    ENQUEUE_RESULT_ADAPTER,
+    SETTLE_RESULT_ADAPTER,
     CommandName,
     EnqueueCommand,
     EnqueueManyItem,
     SettleOutcome,
-    SettleResult,
     TQ_ERROR_REGISTRY,
     TqCode,
 )
@@ -253,29 +255,39 @@ def test_generated_valid_names_round_trip_as_aliases(name: str) -> None:
 
 @pytest.mark.parametrize("status", list(EnqueueStatus))
 def test_enqueue_result_is_closed_consistent_and_frozen(status: EnqueueStatus) -> None:
-    result = EnqueueResult(
-        status=status,
-        job_id=uuid4(),
-        created=status is EnqueueStatus.CREATED,
-        queue="default",
-        job_type="math.double",
+    result = ENQUEUE_RESULT_ADAPTER.validate_python(
+        {
+            "status": status,
+            "job_id": uuid4(),
+            "created": status is EnqueueStatus.CREATED,
+            "queue": "default",
+            "job_type": "math.double",
+        }
     )
     assert result.ok
+    expected_type = (
+        EnqueueCreatedResult if status is EnqueueStatus.CREATED else EnqueueExistedResult
+    )
+    assert isinstance(result, expected_type)
     with pytest.raises(ValidationError):
-        EnqueueResult(
-            status=status,
-            job_id=uuid4(),
-            created=status is not EnqueueStatus.CREATED,
-            queue="default",
-            job_type="math.double",
+        ENQUEUE_RESULT_ADAPTER.validate_python(
+            {
+                "status": status,
+                "job_id": uuid4(),
+                "created": status is not EnqueueStatus.CREATED,
+                "queue": "default",
+                "job_type": "math.double",
+            }
         )
     with pytest.raises(ValidationError):
-        EnqueueResult(
-            status="replaced",
-            job_id=uuid4(),
-            created=False,
-            queue="default",
-            job_type="math.double",
+        ENQUEUE_RESULT_ADAPTER.validate_python(
+            {
+                "status": "replaced",
+                "job_id": uuid4(),
+                "created": False,
+                "queue": "default",
+                "job_type": "math.double",
+            }
         )
 
 
@@ -296,7 +308,7 @@ def test_inbound_command_typo_is_rejected() -> None:
 
 
 def test_outbound_result_ignores_unknown_additive_field() -> None:
-    result = EnqueueResult.model_validate(
+    result = ENQUEUE_RESULT_ADAPTER.validate_python(
         {
             "status": "created",
             "job_id": uuid4(),
@@ -375,10 +387,78 @@ def test_protocol_command_registry_is_closed_and_self_consistent() -> None:
 
 
 def test_settle_outcomes_are_closed_protocol_values() -> None:
-    result = SettleResult(result="lost", job_status=None, scheduled_at=None)
+    result = SETTLE_RESULT_ADAPTER.validate_python(
+        {"result": "lost", "job_status": None, "scheduled_at": None}
+    )
     assert result.result is SettleOutcome.LOST
     with pytest.raises(ValidationError):
-        SettleResult(result="invented", job_status=None, scheduled_at=None)
+        SETTLE_RESULT_ADAPTER.validate_python(
+            {"result": "invented", "job_status": None, "scheduled_at": None}
+        )
+
+
+def test_tagged_result_serialization_is_byte_identical_to_legacy_wire_shape() -> None:
+    enqueue_vectors = [
+        (
+            {
+                "status": "created",
+                "job_id": UUID("00000000-0000-0000-0000-000000000001"),
+                "created": True,
+                "queue": "default",
+                "job_type": "math.double",
+            },
+            b'{"status":"created","job_id":"00000000-0000-0000-0000-000000000001","created":true,"queue":"default","job_type":"math.double","idempotency_key":null,"scheduled_at":null}',
+        ),
+        (
+            {
+                "status": "existed",
+                "job_id": UUID("00000000-0000-0000-0000-000000000002"),
+                "created": False,
+                "queue": "default",
+                "job_type": "math.double",
+                "idempotency_key": "same",
+                "scheduled_at": datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+            },
+            b'{"status":"existed","job_id":"00000000-0000-0000-0000-000000000002","created":false,"queue":"default","job_type":"math.double","idempotency_key":"same","scheduled_at":"2026-01-02T03:04:05Z"}',
+        ),
+    ]
+    for value, expected in enqueue_vectors:
+        parsed = ENQUEUE_RESULT_ADAPTER.validate_python(value)
+        assert ENQUEUE_RESULT_ADAPTER.dump_json(parsed) == expected
+
+    settle_vectors = [
+        (
+            {"result": "ok", "job_status": "succeeded", "scheduled_at": None},
+            b'{"result":"ok","job_status":"succeeded","scheduled_at":null}',
+        ),
+        (
+            {
+                "result": "retry_scheduled",
+                "job_status": "queued",
+                "scheduled_at": datetime(2026, 1, 2, 3, 4, 5, tzinfo=UTC),
+            },
+            b'{"result":"retry_scheduled","job_status":"queued","scheduled_at":"2026-01-02T03:04:05Z"}',
+        ),
+        (
+            {"result": "dead", "job_status": "failed", "scheduled_at": None},
+            b'{"result":"dead","job_status":"failed","scheduled_at":null}',
+        ),
+        (
+            {"result": "already_settled", "job_status": "succeeded", "scheduled_at": None},
+            b'{"result":"already_settled","job_status":"succeeded","scheduled_at":null}',
+        ),
+        (
+            {"result": "settle_conflict", "job_status": "failed", "scheduled_at": None},
+            b'{"result":"settle_conflict","job_status":"failed","scheduled_at":null}',
+        ),
+        (
+            {"result": "lost", "job_status": None, "scheduled_at": None},
+            b'{"result":"lost","job_status":null,"scheduled_at":null}',
+        ),
+    ]
+    for value, expected in settle_vectors:
+        parsed = SETTLE_RESULT_ADAPTER.validate_python(value)
+        assert SETTLE_RESULT_ADAPTER.dump_json(parsed) == expected
 
 
 @pytest.mark.parametrize("state", ["08006", "53300", "57P01", "57P03"])

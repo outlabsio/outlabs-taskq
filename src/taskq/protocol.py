@@ -12,10 +12,10 @@ from datetime import datetime
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Any, Final, Literal
+from typing import Annotated, Any, Final, Literal, TypeAlias
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
 
 class TqCode(StrEnum):
@@ -118,7 +118,7 @@ class CancelOutcome(StrEnum):
     ALREADY_TERMINAL = "already_terminal"
 
 
-class EnqueueResult(BaseModel):
+class _EnqueueResultBase(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     status: EnqueueStatus
@@ -129,15 +129,26 @@ class EnqueueResult(BaseModel):
     idempotency_key: str | None = None
     scheduled_at: datetime | None = None
 
-    @model_validator(mode="after")
-    def _created_matches_status(self) -> EnqueueResult:
-        if self.created is not (self.status is EnqueueStatus.CREATED):
-            raise ValueError("created must be true exactly when status is created")
-        return self
-
     @property
     def ok(self) -> bool:
         return True
+
+
+class EnqueueCreatedResult(_EnqueueResultBase):
+    status: Literal[EnqueueStatus.CREATED] = EnqueueStatus.CREATED
+    created: Literal[True] = True
+
+
+class EnqueueExistedResult(_EnqueueResultBase):
+    status: Literal[EnqueueStatus.EXISTED] = EnqueueStatus.EXISTED
+    created: Literal[False] = False
+
+
+EnqueueResult: TypeAlias = Annotated[
+    EnqueueCreatedResult | EnqueueExistedResult,
+    Field(discriminator="status"),
+]
+ENQUEUE_RESULT_ADAPTER: Final[TypeAdapter[EnqueueResult]] = TypeAdapter(EnqueueResult)
 
 
 class EnqueueCommand(BaseModel):
@@ -206,12 +217,48 @@ class HeartbeatResult(BaseModel):
     lease_expires_at: datetime | None
 
 
-class SettleResult(BaseModel):
+class _SettleResultBase(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     result: SettleOutcome
     job_status: JobStatus | None
     scheduled_at: datetime | None
+
+
+class SettleOkResult(_SettleResultBase):
+    result: Literal[SettleOutcome.OK] = SettleOutcome.OK
+
+
+class SettleRetryScheduledResult(_SettleResultBase):
+    result: Literal[SettleOutcome.RETRY_SCHEDULED] = SettleOutcome.RETRY_SCHEDULED
+
+
+class SettleDeadResult(_SettleResultBase):
+    result: Literal[SettleOutcome.DEAD] = SettleOutcome.DEAD
+
+
+class SettleAlreadySettledResult(_SettleResultBase):
+    result: Literal[SettleOutcome.ALREADY_SETTLED] = SettleOutcome.ALREADY_SETTLED
+
+
+class SettleConflictResult(_SettleResultBase):
+    result: Literal[SettleOutcome.SETTLE_CONFLICT] = SettleOutcome.SETTLE_CONFLICT
+
+
+class SettleLostResult(_SettleResultBase):
+    result: Literal[SettleOutcome.LOST] = SettleOutcome.LOST
+
+
+SettleResult: TypeAlias = Annotated[
+    SettleOkResult
+    | SettleRetryScheduledResult
+    | SettleDeadResult
+    | SettleAlreadySettledResult
+    | SettleConflictResult
+    | SettleLostResult,
+    Field(discriminator="result"),
+]
+SETTLE_RESULT_ADAPTER: Final[TypeAdapter[SettleResult]] = TypeAdapter(SettleResult)
 
 
 class AuthorizationProjection(BaseModel):
@@ -583,7 +630,10 @@ __all__ = [
     "CommandSpec",
     "ConfigChangeOutcome",
     "ContractMeta",
+    "ENQUEUE_RESULT_ADAPTER",
     "EnqueueCommand",
+    "EnqueueCreatedResult",
+    "EnqueueExistedResult",
     "EnqueueManyItem",
     "EnqueueResult",
     "EnqueueStatus",
@@ -598,8 +648,15 @@ __all__ = [
     "QueueStats",
     "RedriveFailedResult",
     "ReplayRule",
+    "SETTLE_RESULT_ADAPTER",
+    "SettleAlreadySettledResult",
+    "SettleConflictResult",
+    "SettleDeadResult",
+    "SettleLostResult",
+    "SettleOkResult",
     "SettleOutcome",
     "SettleResult",
+    "SettleRetryScheduledResult",
     "TQ_ERROR_REGISTRY",
     "TqCode",
     "TqErrorSpec",

@@ -25,14 +25,13 @@
 
 | | |
 |---|---|
-| Stage | **S3-PREP boundary hardening active** — inbound extras policy is green; tagged result unions are next; round 4 remains pending and S2-05 closed |
-| Suite | 281/281 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
+| Stage | **S3-PREP boundary hardening active** — tagged result unions preserve the wire exactly; bulk/claim adapters and benchmark delta are next |
+| Suite | 283/283 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | Hand off `docs/design-review-4/REQUEST.md`; adjudicate the response before opening S2-05 |
 
 ## Now — S3-PREP Python-surface only
 
-- [ ] **S3-PREP-02** — tagged/discriminated enqueue and settlement result unions with byte-identical wire serialization
 - [ ] **S3-PREP-03** — module-level bulk-item/claim-batch `TypeAdapter`s and B2/B3 before/after evidence
 
 ## Next — gated after Stage 2B review
@@ -56,6 +55,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-PREP-02 · Tagged protocol result unions** — split enqueue dispositions on `status` and all six fenced settlement dispositions on `result` into Pydantic discriminated unions with public concrete variants and module-level parsers; Tier-0 parity proves the tag sets equal the closed protocol outcomes, while eight frozen representative vectors prove byte-identical JSON with no wire-contract change, ADR, or version bump (283/283 on PG18).
 - [x] **S3-PREP-01 · Direction-aware extras policy** — documented the ADR-005 boundary rule in `taskq.protocol`: inbound enqueue command/bulk-item models now forbid unknown fields so typos fail locally, while outbound projections/results explicitly ignore additive fields for forward-compatible decoding; typo and unknown-result vectors bring PG18 to 281/281 without changing wire or SQL contracts.
 - [x] **S2-04-R4 · Round-4 review packet** — registered an immutable, contract-first adversarial request covering the contract-0.1.2 additive upgrade and verifier, every S2-04 execution/heartbeat/replay/lifecycle acceptance row, mandatory R2-11 live-sync counterexamples, repeated races, real-SQL conservation, resource cleanup, artifact/import isolation, CI collection, and strict absence of S2-05/Stage-3 scope; the reviewer may add only `docs/design-review-4/RESPONSE.md` and must decide whether S2-05 may open.
 - [x] **S2-04-AUDIT · Stage 2B permanent completion evidence** — five repeated, barrier-choreographed race families cover both winner orders without correctness sleeps; live SQL vectors prove complete/retry/snooze/cancel/shutdown/no-handler budget and exact event conservation plus committed-response replay; task, exception, executor-thread, and SQL-pool ledgers return to baseline; source CI imports the worker on Python 3.12/3.13 and every fresh wheel/sdist core/HTTP/OutLabs install smokes it outside the checkout. The exact full suite is 279/279 plus the million-row plan gate on PostgreSQL 18.3 and 16.14, with 149/149 in the clean Python 3.13 worker/unit lane.

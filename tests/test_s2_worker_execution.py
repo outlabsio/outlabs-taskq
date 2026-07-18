@@ -23,7 +23,7 @@ from taskq import (
     TaskqConfigError,
 )
 from taskq.errors import TaskqUnavailableError
-from taskq.protocol import JobStatus, SettleOutcome, SettleResult
+from taskq.protocol import JobStatus, SettleAlreadySettledResult
 from tests.worker_support import ManualClock, ScriptedTransport
 
 
@@ -195,11 +195,7 @@ async def test_manual_clock_orders_sleepers_without_wall_time() -> None:
 
 async def test_scripted_transport_models_applied_but_lost_response() -> None:
     transport = ScriptedTransport()
-    replay = SettleResult(
-        result=SettleOutcome.ALREADY_SETTLED,
-        job_status=JobStatus.SUCCEEDED,
-        scheduled_at=None,
-    )
+    replay = SettleAlreadySettledResult(job_status=JobStatus.SUCCEEDED, scheduled_at=None)
     transport.drop_response_after_apply("complete", replay=replay)
     args = (uuid4(), uuid4(), "worker")
     with pytest.raises(TaskqUnavailableError) as excinfo:

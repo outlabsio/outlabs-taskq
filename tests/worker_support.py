@@ -11,7 +11,14 @@ from typing import Any
 from uuid import UUID
 
 from taskq.errors import TaskqUnavailableError
-from taskq.protocol import HeartbeatResult, JobStatus, SettleOutcome, SettleResult
+from taskq.protocol import (
+    HeartbeatResult,
+    JobStatus,
+    SettleDeadResult,
+    SettleOkResult,
+    SettleResult,
+    SettleRetryScheduledResult,
+)
 
 
 class ManualClock:
@@ -134,9 +141,7 @@ class ScriptedTransport:
         return await self._next(
             "complete",
             {"job_id": job_id, "attempt_id": attempt_id, "worker_id": worker_id},
-            SettleResult(
-                result=SettleOutcome.OK, job_status=JobStatus.SUCCEEDED, scheduled_at=None
-            ),
+            SettleOkResult(job_status=JobStatus.SUCCEEDED, scheduled_at=None),
         )
 
     async def fail(
@@ -159,10 +164,10 @@ class ScriptedTransport:
                 "worker_id": worker_id,
                 "retryable": retryable,
             },
-            SettleResult(
-                result=SettleOutcome.RETRY_SCHEDULED if retryable else SettleOutcome.DEAD,
-                job_status=JobStatus.QUEUED if retryable else JobStatus.FAILED,
-                scheduled_at=None,
+            (
+                SettleRetryScheduledResult(job_status=JobStatus.QUEUED, scheduled_at=None)
+                if retryable
+                else SettleDeadResult(job_status=JobStatus.FAILED, scheduled_at=None)
             ),
         )
 
@@ -201,7 +206,7 @@ class ScriptedTransport:
         return await self._next(
             command,
             {"job_id": job_id, "attempt_id": attempt_id, "worker_id": worker_id},
-            SettleResult(result=SettleOutcome.OK, job_status=JobStatus.QUEUED, scheduled_at=None),
+            SettleOkResult(job_status=JobStatus.QUEUED, scheduled_at=None),
         )
 
     async def aclose(self) -> None:

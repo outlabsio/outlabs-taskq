@@ -13,7 +13,17 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from taskq import TaskqInternalError, TaskqTransport
-from taskq.protocol import COMMAND_SPECS, ClaimState, EnqueueCommand, EnqueueManyItem, EnqueueStatus
+from taskq.protocol import (
+    COMMAND_SPECS,
+    ENQUEUE_RESULT_ADAPTER,
+    SETTLE_RESULT_ADAPTER,
+    ClaimState,
+    CommandName,
+    EnqueueCommand,
+    EnqueueManyItem,
+    EnqueueStatus,
+    SettleOutcome,
+)
 from taskq.sql.manifest import FUNCTIONS, PUBLIC_ERRORS, PUBLIC_FUNCTIONS, REPLAY_RULES
 from taskq.sql.transport import METHOD_FUNCTIONS, SqlTaskqTransport
 
@@ -52,6 +62,29 @@ def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
         assert spec.replay_rule.value == REPLAY_RULES[spec.sql_function]
         assert spec.outcomes
         assert spec.retryable_errors <= spec.errors
+
+
+def test_tagged_result_discriminators_are_exactly_the_tier0_outcomes() -> None:
+    enqueue_schema = ENQUEUE_RESULT_ADAPTER.json_schema()
+    assert enqueue_schema["discriminator"]["propertyName"] == "status"
+    assert set(enqueue_schema["discriminator"]["mapping"]) == {
+        outcome.value for outcome in EnqueueStatus
+    }
+
+    settle_schema = SETTLE_RESULT_ADAPTER.json_schema()
+    assert settle_schema["discriminator"]["propertyName"] == "result"
+    tagged_outcomes = set(settle_schema["discriminator"]["mapping"])
+    assert tagged_outcomes == {outcome.value for outcome in SettleOutcome}
+    fenced_commands = (
+        CommandName.COMPLETE,
+        CommandName.FAIL,
+        CommandName.SNOOZE,
+        CommandName.RELEASE,
+        CommandName.CANCEL_RUNNING,
+    )
+    assert set().union(*(COMMAND_SPECS[command].outcomes for command in fenced_commands)) == (
+        tagged_outcomes
+    )
 
 
 def test_sql_adapter_contains_no_taskq_table_dml() -> None:

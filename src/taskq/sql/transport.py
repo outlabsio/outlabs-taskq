@@ -24,6 +24,7 @@ from taskq.protocol import (
     CommandOkOutcome,
     ConfigChangeOutcome,
     ContractMeta,
+    ENQUEUE_RESULT_ADAPTER,
     EnqueueCommand,
     EnqueueManyItem,
     EnqueueResult,
@@ -38,6 +39,7 @@ from taskq.protocol import (
     QueueControlOutcome,
     RedriveFailedResult,
     SettleResult,
+    SETTLE_RESULT_ADAPTER,
 )
 
 T = TypeVar("T")
@@ -164,14 +166,16 @@ class SqlTaskqTransport:
             job_id = row["job_id"]
             if not isinstance(created, bool) or not isinstance(job_id, UUID):
                 raise TaskqInternalError()
-            return EnqueueResult(
-                status=EnqueueStatus.CREATED if created else EnqueueStatus.EXISTED,
-                job_id=job_id,
-                created=created,
-                queue=command.queue,
-                job_type=command.job_type,
-                idempotency_key=command.idempotency_key,
-                scheduled_at=command.scheduled_at,
+            return ENQUEUE_RESULT_ADAPTER.validate_python(
+                {
+                    "status": EnqueueStatus.CREATED if created else EnqueueStatus.EXISTED,
+                    "job_id": job_id,
+                    "created": created,
+                    "queue": command.queue,
+                    "job_type": command.job_type,
+                    "idempotency_key": command.idempotency_key,
+                    "scheduled_at": command.scheduled_at,
+                }
             )
 
         return await self._run(operation, connection=connection)
@@ -215,14 +219,16 @@ class SqlTaskqTransport:
                 if not isinstance(job_id, UUID):
                     raise TaskqInternalError()
                 results.append(
-                    EnqueueResult(
-                        status=status,
-                        job_id=job_id,
-                        created=status is EnqueueStatus.CREATED,
-                        queue=queue,
-                        job_type=item.job_type,
-                        idempotency_key=item.idempotency_key,
-                        scheduled_at=item.scheduled_at,
+                    ENQUEUE_RESULT_ADAPTER.validate_python(
+                        {
+                            "status": status,
+                            "job_id": job_id,
+                            "created": status is EnqueueStatus.CREATED,
+                            "queue": queue,
+                            "job_type": item.job_type,
+                            "idempotency_key": item.idempotency_key,
+                            "scheduled_at": item.scheduled_at,
+                        }
                     )
                 )
             return results
@@ -317,7 +323,7 @@ class SqlTaskqTransport:
     ) -> SettleResult:
         async def operation(conn: AsyncConnection) -> SettleResult:
             row = await self._one(conn, statement, params)
-            result = SettleResult.model_validate(row)
+            result = SETTLE_RESULT_ADAPTER.validate_python(row)
             self._validated_outcome(command, result.result)
             return result
 

@@ -15,8 +15,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from taskq import (
+    EnqueueCreatedResult,
     EnqueueResult,
-    EnqueueStatus,
     RetryStrategy,
     Task,
     TaskQ,
@@ -56,8 +56,7 @@ class FakeTransport:
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         self.commands.append(command)
-        return EnqueueResult(
-            status=EnqueueStatus.CREATED,
+        return EnqueueCreatedResult(
             job_id=uuid4(),
             created=True,
             queue=command.queue,
@@ -71,8 +70,7 @@ class FakeTransport:
     ) -> list[EnqueueResult]:
         self.bulk.append((queue, tuple(items)))
         return [
-            EnqueueResult(
-                status=EnqueueStatus.CREATED,
+            EnqueueCreatedResult(
                 job_id=uuid4(),
                 created=True,
                 queue=queue,
@@ -102,7 +100,7 @@ async def test_typed_enqueue_compiles_canonical_metadata_once() -> None:
         priority=9,
         headers={"trace": "safe"},
     )
-    assert isinstance(result, EnqueueResult)
+    assert isinstance(result, EnqueueCreatedResult)
     assert len(transport.commands) == 1
     command = transport.commands[0]
     assert command.job_type == "math.double"

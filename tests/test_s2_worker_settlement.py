@@ -29,7 +29,7 @@ from taskq.errors import (
     TaskqUnavailableError,
     TaskqValidationError,
 )
-from taskq.protocol import ClaimedJob, JobStatus, SettleOutcome, SettleResult
+from taskq.protocol import SETTLE_RESULT_ADAPTER, ClaimedJob, JobStatus, SettleOutcome
 from tests.worker_support import ManualClock, ScriptedTransport
 
 
@@ -136,10 +136,12 @@ async def test_lost_response_retries_identical_verb_and_runs_handler_once(
     transport = ScriptedTransport()
     transport.drop_response_after_apply(
         command,
-        replay=SettleResult(
-            result=SettleOutcome.ALREADY_SETTLED,
-            job_status=status,
-            scheduled_at=None,
+        replay=SETTLE_RESULT_ADAPTER.validate_python(
+            {
+                "result": SettleOutcome.ALREADY_SETTLED,
+                "job_status": status,
+                "scheduled_at": None,
+            }
         ),
     )
     calls = 0
@@ -189,7 +191,9 @@ async def test_complete_outcomes_are_command_specific_and_never_switch_verbs(
     transport = ScriptedTransport()
     transport.script(
         "complete",
-        SettleResult(result=outcome, job_status=JobStatus.FAILED, scheduled_at=None),
+        SETTLE_RESULT_ADAPTER.validate_python(
+            {"result": outcome, "job_status": JobStatus.FAILED, "scheduled_at": None}
+        ),
     )
     supervisor = _supervisor(transport, clock, complete_handler)
     report = await supervisor.run_job(_claim())

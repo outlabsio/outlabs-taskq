@@ -30,7 +30,20 @@ from taskq.execution import (
     Snooze,
     TaskCancelled,
 )
-from taskq.protocol import ClaimedJob, EnqueueResult, EnqueueStatus, TqCode
+from taskq.protocol import (
+    ClaimedJob,
+    EnqueueCreatedResult,
+    EnqueueExistedResult,
+    EnqueueResult,
+    EnqueueStatus,
+    SettleAlreadySettledResult,
+    SettleConflictResult,
+    SettleDeadResult,
+    SettleLostResult,
+    SettleOkResult,
+    SettleRetryScheduledResult,
+    TqCode,
+)
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.transport import TaskqTransport
 from taskq.worker import (
@@ -51,6 +64,8 @@ __all__ = [
     "CancellationReason",
     "CancellationToken",
     "Complete",
+    "EnqueueCreatedResult",
+    "EnqueueExistedResult",
     "EnqueueResult",
     "EnqueueStatus",
     "HandlerResult",
@@ -64,6 +79,12 @@ __all__ = [
     "RetryValue",
     "RealWorkerClock",
     "Snooze",
+    "SettleAlreadySettledResult",
+    "SettleConflictResult",
+    "SettleDeadResult",
+    "SettleLostResult",
+    "SettleOkResult",
+    "SettleRetryScheduledResult",
     "Task",
     "TaskQ",
     "TaskRegistry",
