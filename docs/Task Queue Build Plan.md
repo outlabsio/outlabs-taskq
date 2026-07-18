@@ -50,6 +50,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Stage 2B complete:** S2-04-AUDIT makes every worker acceptance row permanent with repeated barrier races, real-SQL budget/attempt/event conservation, committed-response replay, zero task/exception/thread/pool leakage, Python 3.12/3.13 import isolation, and worker-aware smoke checks for every wheel/sdist core/HTTP/OutLabs install. The exact full suite is **279/279 plus the million-row plan gate on PostgreSQL 16.14 and 18.3**, and the clean Python-3.13 worker/unit lane is **149/149**. S2-05 stays closed until the round-4 review of Stage 2B and the contract-0.1.2 upgrade path is adjudicated.
 
+**Round-4 handoff ready:** the immutable [review request](./design-review-4/REQUEST.md) requires an independent contract-0.1.2 catalog/upgrade audit and adversarial worker review, with R2-11 live-sync safety, settlement replay, fatal stop, races, SQL conservation, resource cleanup, packaging, and CI as explicit targets. S2-05 remains closed until its response is adjudicated.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
