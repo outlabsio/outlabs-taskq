@@ -474,3 +474,15 @@ END $$;
 ## 7. Explicitly absent from the 0.1 migration
 
 `_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, `list_jobs` beyond the operator-minimal form, and every 0.2/0.3 composite field. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+
+## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
+
+Resolved when migration 0001 + the harness first met live PostgreSQL (42/42 contract tests green). These are clarifications of ambiguity, not semantic changes:
+
+1. **Single ledger writer:** the RUNNER records `schema_migrations` rows (id = filename stem, e.g. `0001_initial`; package version; sha256 of raw file bytes). Migration files guarantee the table exists but never self-insert — two writers produced id drift on first integration.
+2. **`cancel_job` returns the typed composite `(result, job_status)`** — cooperative cancel of a running job = `('cancel_requested','running')`.
+3. **`release_job` signature:** this manifest's `(job_id, attempt_id, worker_id, p_cause, p_delay_seconds=0, p_progress)` is authoritative; spec §5.7 prose (`p_reason`, default delay 15) is superseded. Delay bound 0–86400 (snooze remains 0–2592000).
+4. **§0 hardening applies to EVERY function including `LANGUAGE sql` helpers** (`uuid7`, `has_capability`, projections): SECURITY DEFINER + pinned search_path + owner + PUBLIC revoke. `verify()` enforces this uniformly; a NULL `proacl` counts as a PUBLIC-execute violation.
+5. **Queue/worker-level operator verbs (pause/resume/shutdown-request/set-limit) emit no `job_events` row** — `job_events.job_id` is NOT NULL; their audit is the typed result + caller logging (facade actor / CLI).
+6. **Verb-aware replay includes the reaper:** an attempt settled as `expired` answers any worker settle with `settle_conflict`.
+7. 0.1 single-`enqueue` rejects `p_depends_on`/`p_workflow_id` with `TQ501` (capability gate); bulk specs carrying dependency fields are `TQ422` with the input index.

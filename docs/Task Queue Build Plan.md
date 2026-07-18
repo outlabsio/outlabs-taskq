@@ -6,7 +6,10 @@
 
 Design is complete and twice externally reviewed (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1 SQL surface (Function Manifest) are canonical. The repo history is clean (peer projects referenced generically; named provenance archived privately). No implementation exists beyond the package skeleton — deliberately: contracts froze before code.
 
-## Stage 1 — secure SQL kernel (next)
+## Stage 1 — secure SQL kernel (IN PROGRESS — opening slice landed 2026-07-18)
+
+**Landed:** migration `0001_initial.sql` (2.6k lines: 6 roles, 11 tables, 3 composites, 39 hardened functions, self-checking hardening block, 0.1-only seeding) + the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI) + T1 (26 unit) and T2 (15 contract) suites — **42/42 green against live PG 18.3**, including privilege probes, verb-aware replay/`settle_conflict`, budget-free cancel, `TQ501` gates, and claim states. Manifest §8 records the integration errata.
+**Remaining for the exit gate:** PG16 lane, T3 choreographed races + T3-R, T4 stateful model, `verify` corruption matrix breadth, 1M-row plan checks, B1–B4 smoke, CI wiring.
 
 Build, in one vertical slice against ephemeral PostgreSQL 18:
 
