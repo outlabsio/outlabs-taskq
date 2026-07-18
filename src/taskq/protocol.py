@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Any, Final, Literal
@@ -63,6 +64,52 @@ TQ_ERROR_REGISTRY: Final = MappingProxyType(
 class EnqueueStatus(StrEnum):
     CREATED = "created"
     EXISTED = "existed"
+
+
+class JobStatus(StrEnum):
+    BLOCKED = "blocked"
+    QUEUED = "queued"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class SettleOutcome(StrEnum):
+    OK = "ok"
+    RETRY_SCHEDULED = "retry_scheduled"
+    DEAD = "dead"
+    ALREADY_SETTLED = "already_settled"
+    SETTLE_CONFLICT = "settle_conflict"
+    LOST = "lost"
+
+
+class QueueControlOutcome(StrEnum):
+    PAUSED = "paused"
+    ALREADY_PAUSED = "already_paused"
+    RESUMED = "resumed"
+    ALREADY_RESUMED = "already_resumed"
+
+
+class ConfigChangeOutcome(StrEnum):
+    CREATED = "created"
+    UPDATED = "updated"
+    UNCHANGED = "unchanged"
+
+
+class CommandOkOutcome(StrEnum):
+    OK = "ok"
+
+
+class ExpireJobOutcome(StrEnum):
+    NOT_RUNNING = "not_running"
+    EXPIRED_AND_REAPED = "expired_and_reaped"
+
+
+class CancelOutcome(StrEnum):
+    CANCELLED = "cancelled"
+    CANCEL_REQUESTED = "cancel_requested"
+    ALREADY_TERMINAL = "already_terminal"
 
 
 class EnqueueResult(BaseModel):
@@ -156,8 +203,8 @@ class HeartbeatResult(BaseModel):
 class SettleResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    result: str
-    job_status: str | None
+    result: SettleOutcome
+    job_status: JobStatus | None
     scheduled_at: datetime | None
 
 
@@ -167,7 +214,7 @@ class AuthorizationProjection(BaseModel):
     job_id: UUID
     queue: str
     job_type: str
-    status: str
+    status: JobStatus
 
 
 class JobDetail(BaseModel):
@@ -176,7 +223,7 @@ class JobDetail(BaseModel):
     job_id: UUID
     queue: str
     job_type: str
-    status: str
+    status: JobStatus
     outcome: str | None
     priority: int
     attempt_count: int
@@ -219,14 +266,14 @@ class Metric(BaseModel):
 class CancelResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    result: Literal["cancelled", "cancel_requested", "already_terminal"]
-    job_status: str
+    result: CancelOutcome
+    job_status: JobStatus
 
 
 class EnsureQueueResult(BaseModel):
     model_config = ConfigDict(frozen=True)
 
-    result: Literal["created", "updated", "unchanged"]
+    result: ConfigChangeOutcome
     profile: dict[str, Any]
 
 
@@ -243,6 +290,252 @@ class RedriveFailedResult(BaseModel):
 
     redriven: int
     skipped: int
+
+
+class CommandName(StrEnum):
+    ENQUEUE = "enqueue"
+    ENQUEUE_MANY = "enqueue_many"
+    CLAIM = "claim"
+    HEARTBEAT = "heartbeat"
+    COMPLETE = "complete"
+    FAIL = "fail"
+    SNOOZE = "snooze"
+    RELEASE = "release"
+    CANCEL_RUNNING = "cancel_running"
+    WORKER_HEARTBEAT = "worker_heartbeat"
+    GET_AUTHORIZATION_PROJECTION = "get_authorization_projection"
+    GET_JOB = "get_job"
+    GET_QUEUE_STATS = "get_queue_stats"
+    GET_CONTRACT_META = "get_contract_meta"
+    METRICS = "metrics"
+    ENSURE_QUEUE = "ensure_queue"
+    PAUSE_QUEUE = "pause_queue"
+    RESUME_QUEUE = "resume_queue"
+    SET_CONCURRENCY_LIMIT = "set_concurrency_limit"
+    REQUEST_WORKER_SHUTDOWN = "request_worker_shutdown"
+    PURGE_QUEUED = "purge_queued"
+    RUN_NOW = "run_now"
+    REPRIORITIZE = "reprioritize"
+    CANCEL = "cancel"
+    REDRIVE = "redrive"
+    REDRIVE_FAILED = "redrive_failed"
+    EXPIRE_JOB = "expire_job"
+    EXPIRE_WORKER_LEASES = "expire_worker_leases"
+    TICK = "tick"
+    JANITOR = "janitor"
+
+
+class CapabilityRole(StrEnum):
+    PRODUCER = "taskq_producer"
+    RUNNER = "taskq_runner"
+    OBSERVER = "taskq_observer"
+    OPERATOR = "taskq_operator"
+    HOUSEKEEPER = "taskq_housekeeper"
+
+
+class ReplayRule(StrEnum):
+    FENCED = "verb-aware attempt replay"
+    STATE_DERIVED = "state-derived idempotency or documented repeat"
+
+
+@dataclass(frozen=True, slots=True)
+class CommandSpec:
+    sql_function: str
+    capability: CapabilityRole
+    outcomes: frozenset[str]
+    errors: frozenset[TqCode]
+    replay_rule: ReplayRule = ReplayRule.STATE_DERIVED
+
+    @property
+    def retryable_errors(self) -> frozenset[TqCode]:
+        return frozenset(code for code in self.errors if TQ_ERROR_REGISTRY[code].retryable)
+
+
+def _spec(
+    sql_function: str,
+    capability: CapabilityRole,
+    outcomes: tuple[str, ...],
+    errors: tuple[TqCode, ...] = (),
+    replay_rule: ReplayRule = ReplayRule.STATE_DERIVED,
+) -> CommandSpec:
+    return CommandSpec(
+        sql_function=sql_function,
+        capability=capability,
+        outcomes=frozenset(outcomes),
+        errors=frozenset(errors),
+        replay_rule=replay_rule,
+    )
+
+
+_FENCED = ReplayRule.FENCED
+_PRODUCER = CapabilityRole.PRODUCER
+_RUNNER = CapabilityRole.RUNNER
+_OBSERVER = CapabilityRole.OBSERVER
+_OPERATOR = CapabilityRole.OPERATOR
+_HOUSEKEEPER = CapabilityRole.HOUSEKEEPER
+
+# Single Python source for Protocol-v1 command names, SQL identities, capability
+# roles, closed outcomes, public TQ errors, and replay metadata. Parity tests
+# audit this independent projection against the Tier-0-derived SQL manifest.
+COMMAND_SPECS: Final = MappingProxyType(
+    {
+        CommandName.ENQUEUE: _spec(
+            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+            _PRODUCER,
+            tuple(item.value for item in EnqueueStatus),
+            (
+                TqCode.NOT_FOUND,
+                TqCode.VALIDATION,
+                TqCode.BACKPRESSURE,
+                TqCode.INTERNAL,
+                TqCode.CAPABILITY,
+            ),
+        ),
+        CommandName.ENQUEUE_MANY: _spec(
+            "taskq.enqueue_many(text,jsonb)",
+            _PRODUCER,
+            tuple(item.value for item in EnqueueStatus),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.BACKPRESSURE, TqCode.INTERNAL),
+        ),
+        CommandName.CLAIM: _spec(
+            "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
+            _RUNNER,
+            tuple(item.value for item in ClaimState),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.HEARTBEAT: _spec(
+            "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)",
+            _RUNNER,
+            ("ok", "lost"),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.COMPLETE: _spec(
+            "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
+            _RUNNER,
+            ("ok", "already_settled", "settle_conflict", "lost"),
+            (TqCode.VALIDATION, TqCode.CAPABILITY),
+            _FENCED,
+        ),
+        CommandName.FAIL: _spec(
+            "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)",
+            _RUNNER,
+            ("ok", "retry_scheduled", "dead", "already_settled", "settle_conflict", "lost"),
+            (TqCode.VALIDATION,),
+            _FENCED,
+        ),
+        CommandName.SNOOZE: _spec(
+            "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)",
+            _RUNNER,
+            ("ok", "already_settled", "settle_conflict", "lost"),
+            (TqCode.VALIDATION,),
+            _FENCED,
+        ),
+        CommandName.RELEASE: _spec(
+            "taskq.release_job(uuid,uuid,text,text,integer,jsonb)",
+            _RUNNER,
+            ("ok", "already_settled", "settle_conflict", "lost"),
+            (TqCode.VALIDATION,),
+            _FENCED,
+        ),
+        CommandName.CANCEL_RUNNING: _spec(
+            "taskq.cancel_running_job(uuid,uuid,text,text)",
+            _RUNNER,
+            ("ok", "already_settled", "settle_conflict", "lost"),
+            replay_rule=_FENCED,
+        ),
+        CommandName.WORKER_HEARTBEAT: _spec(
+            "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)",
+            _RUNNER,
+            ("continue", "shutdown_requested"),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.GET_AUTHORIZATION_PROJECTION: _spec(
+            "taskq.get_authorization_projection(uuid)", _OBSERVER, ("ok", "missing")
+        ),
+        CommandName.GET_JOB: _spec(
+            "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
+            _OBSERVER,
+            ("ok", "missing"),
+        ),
+        CommandName.GET_QUEUE_STATS: _spec("taskq.get_queue_stats(text)", _OBSERVER, ("ok",)),
+        CommandName.GET_CONTRACT_META: _spec("taskq.get_contract_meta()", _OBSERVER, ("ok",)),
+        CommandName.METRICS: _spec("taskq.metrics()", _OBSERVER, ("ok",)),
+        CommandName.ENSURE_QUEUE: _spec(
+            "taskq.ensure_queue(text,jsonb,text)",
+            _OPERATOR,
+            tuple(item.value for item in ConfigChangeOutcome),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.PAUSE_QUEUE: _spec(
+            "taskq.pause_queue(text,text,text)",
+            _OPERATOR,
+            ("paused", "already_paused"),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.RESUME_QUEUE: _spec(
+            "taskq.resume_queue(text,text)",
+            _OPERATOR,
+            ("resumed", "already_resumed"),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.SET_CONCURRENCY_LIMIT: _spec(
+            "taskq.set_concurrency_limit(text,integer,text)",
+            _OPERATOR,
+            tuple(item.value for item in ConfigChangeOutcome),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.REQUEST_WORKER_SHUTDOWN: _spec(
+            "taskq.request_worker_shutdown(text,text,text)", _OPERATOR, ("ok",)
+        ),
+        CommandName.PURGE_QUEUED: _spec(
+            "taskq.purge_queued(text,integer,text,text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION),
+        ),
+        CommandName.RUN_NOW: _spec(
+            "taskq.run_now(uuid,text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT),
+        ),
+        CommandName.REPRIORITIZE: _spec(
+            "taskq.reprioritize(uuid,smallint,text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
+        CommandName.CANCEL: _spec(
+            "taskq.cancel_job(uuid,text,text)",
+            _OPERATOR,
+            tuple(item.value for item in CancelOutcome),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.REDRIVE: _spec(
+            "taskq.redrive_job(uuid,text,boolean)",
+            _OPERATOR,
+            ("redriven",),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT),
+        ),
+        CommandName.REDRIVE_FAILED: _spec(
+            "taskq.redrive_failed(text,integer,text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.EXPIRE_JOB: _spec(
+            "taskq.expire_job(uuid,text)",
+            _OPERATOR,
+            tuple(item.value for item in ExpireJobOutcome),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.EXPIRE_WORKER_LEASES: _spec(
+            "taskq.expire_worker_leases(text,text)", _OPERATOR, ("ok",)
+        ),
+        CommandName.TICK: _spec("taskq.tick(integer)", _HOUSEKEEPER, ("ok",), (TqCode.VALIDATION,)),
+        CommandName.JANITOR: _spec("taskq.janitor()", _HOUSEKEEPER, ("ok",)),
+    }
+)
 
 
 class ClaimedJob(BaseModel):
@@ -271,22 +564,34 @@ ClaimResult.model_rebuild()
 
 __all__ = [
     "AuthorizationProjection",
+    "COMMAND_SPECS",
+    "CancelOutcome",
     "CancelResult",
+    "CapabilityRole",
     "ClaimedJob",
     "ClaimResult",
     "ClaimState",
+    "CommandName",
+    "CommandOkOutcome",
+    "CommandSpec",
+    "ConfigChangeOutcome",
     "ContractMeta",
     "EnqueueCommand",
     "EnqueueManyItem",
     "EnqueueResult",
     "EnqueueStatus",
     "EnsureQueueResult",
+    "ExpireJobOutcome",
     "ExpireWorkerLeasesResult",
     "HeartbeatResult",
     "JobDetail",
+    "JobStatus",
     "Metric",
+    "QueueControlOutcome",
     "QueueStats",
     "RedriveFailedResult",
+    "ReplayRule",
+    "SettleOutcome",
     "SettleResult",
     "TQ_ERROR_REGISTRY",
     "TqCode",

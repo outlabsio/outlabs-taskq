@@ -10,16 +10,20 @@ from taskq.protocol import (
     AuthorizationProjection,
     CancelResult,
     ClaimResult,
+    CommandOkOutcome,
+    ConfigChangeOutcome,
     ContractMeta,
     EnqueueCommand,
     EnqueueManyItem,
     EnqueueResult,
     EnsureQueueResult,
+    ExpireJobOutcome,
     ExpireWorkerLeasesResult,
     HeartbeatResult,
     JobDetail,
     Metric,
     QueueStats,
+    QueueControlOutcome,
     RedriveFailedResult,
     SettleResult,
 )
@@ -141,11 +145,15 @@ class TaskqTransport(Protocol):
         self, name: str, profile: Mapping[str, Any] | None = None, actor: str | None = None
     ) -> EnsureQueueResult: ...
 
-    async def pause_queue(self, name: str, actor: str, reason: str | None = None) -> str: ...
+    async def pause_queue(
+        self, name: str, actor: str, reason: str | None = None
+    ) -> QueueControlOutcome: ...
 
-    async def resume_queue(self, name: str, actor: str) -> str: ...
+    async def resume_queue(self, name: str, actor: str) -> QueueControlOutcome: ...
 
-    async def set_concurrency_limit(self, key: str, max_running: int, actor: str) -> str: ...
+    async def set_concurrency_limit(
+        self, key: str, max_running: int, actor: str
+    ) -> ConfigChangeOutcome: ...
 
     async def request_worker_shutdown(
         self, *, worker_id: str | None, queue: str | None, actor: str
@@ -155,9 +163,9 @@ class TaskqTransport(Protocol):
         self, queue: str, limit: int, actor: str, reason: str | None = None
     ) -> int: ...
 
-    async def run_now(self, job_id: UUID, actor: str) -> str: ...
+    async def run_now(self, job_id: UUID, actor: str) -> CommandOkOutcome: ...
 
-    async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> str: ...
+    async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> CommandOkOutcome: ...
 
     async def cancel(self, job_id: UUID, actor: str, reason: str | None = None) -> CancelResult: ...
 
@@ -165,7 +173,7 @@ class TaskqTransport(Protocol):
 
     async def redrive_failed(self, queue: str, limit: int, actor: str) -> RedriveFailedResult: ...
 
-    async def expire_job(self, job_id: UUID, actor: str) -> str: ...
+    async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome: ...
 
     async def expire_worker_leases(
         self, worker_id: str, actor: str

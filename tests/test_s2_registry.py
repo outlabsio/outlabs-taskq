@@ -30,7 +30,14 @@ from taskq.errors import (
     TaskqVersionError,
     taskq_error_from_exception,
 )
-from taskq.protocol import TQ_ERROR_REGISTRY, TqCode
+from taskq.protocol import (
+    COMMAND_SPECS,
+    CommandName,
+    SettleOutcome,
+    SettleResult,
+    TQ_ERROR_REGISTRY,
+    TqCode,
+)
 
 
 class Input(BaseModel):
@@ -308,6 +315,23 @@ def test_closed_tq_registry_normalizes_from_sqlstate_only(
     assert error.cause is source
     assert "driver secret" not in str(error)
     assert "driver secret" not in repr(error)
+
+
+def test_protocol_command_registry_is_closed_and_self_consistent() -> None:
+    assert set(COMMAND_SPECS) == set(CommandName)
+    assert len(COMMAND_SPECS) == 30
+    for spec in COMMAND_SPECS.values():
+        assert spec.outcomes
+        assert spec.retryable_errors == frozenset(
+            code for code in spec.errors if TQ_ERROR_REGISTRY[code].retryable
+        )
+
+
+def test_settle_outcomes_are_closed_protocol_values() -> None:
+    result = SettleResult(result="lost", job_status=None, scheduled_at=None)
+    assert result.result is SettleOutcome.LOST
+    with pytest.raises(ValidationError):
+        SettleResult(result="invented", job_status=None, scheduled_at=None)
 
 
 @pytest.mark.parametrize("state", ["08006", "53300", "57P01", "57P03"])

@@ -6,6 +6,7 @@ import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from decimal import Decimal
+from types import MappingProxyType
 from typing import Any, Literal, TypeVar
 from uuid import UUID
 
@@ -16,57 +17,33 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from taskq.errors import TaskqConfigError, TaskqInternalError, taskq_error_from_exception
 from taskq.protocol import (
     AuthorizationProjection,
+    COMMAND_SPECS,
     CancelResult,
     ClaimResult,
+    CommandOkOutcome,
+    ConfigChangeOutcome,
     ContractMeta,
     EnqueueCommand,
     EnqueueManyItem,
     EnqueueResult,
     EnqueueStatus,
     EnsureQueueResult,
+    ExpireJobOutcome,
     ExpireWorkerLeasesResult,
     HeartbeatResult,
     JobDetail,
     Metric,
     QueueStats,
+    QueueControlOutcome,
     RedriveFailedResult,
     SettleResult,
 )
 
 T = TypeVar("T")
 
-METHOD_FUNCTIONS = {
-    "cancel": "taskq.cancel_job(uuid,text,text)",
-    "cancel_running": "taskq.cancel_running_job(uuid,uuid,text,text)",
-    "claim": "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
-    "complete": "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
-    "enqueue_many": "taskq.enqueue_many(text,jsonb)",
-    "enqueue": "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
-    "ensure_queue": "taskq.ensure_queue(text,jsonb,text)",
-    "expire_job": "taskq.expire_job(uuid,text)",
-    "expire_worker_leases": "taskq.expire_worker_leases(text,text)",
-    "fail": "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)",
-    "get_authorization_projection": "taskq.get_authorization_projection(uuid)",
-    "get_contract_meta": "taskq.get_contract_meta()",
-    "get_job": "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
-    "get_queue_stats": "taskq.get_queue_stats(text)",
-    "heartbeat": "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)",
-    "janitor": "taskq.janitor()",
-    "metrics": "taskq.metrics()",
-    "pause_queue": "taskq.pause_queue(text,text,text)",
-    "purge_queued": "taskq.purge_queued(text,integer,text,text)",
-    "redrive_failed": "taskq.redrive_failed(text,integer,text)",
-    "redrive": "taskq.redrive_job(uuid,text,boolean)",
-    "release": "taskq.release_job(uuid,uuid,text,text,integer,jsonb)",
-    "reprioritize": "taskq.reprioritize(uuid,smallint,text)",
-    "request_worker_shutdown": "taskq.request_worker_shutdown(text,text,text)",
-    "resume_queue": "taskq.resume_queue(text,text)",
-    "run_now": "taskq.run_now(uuid,text)",
-    "set_concurrency_limit": "taskq.set_concurrency_limit(text,integer,text)",
-    "snooze": "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)",
-    "tick": "taskq.tick(integer)",
-    "worker_heartbeat": "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)",
-}
+METHOD_FUNCTIONS = MappingProxyType(
+    {command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()}
+)
 
 
 def _json(value: Any) -> Any:
@@ -565,23 +542,27 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
-    async def pause_queue(self, name: str, actor: str, reason: str | None = None) -> str:
-        return str(
+    async def pause_queue(
+        self, name: str, actor: str, reason: str | None = None
+    ) -> QueueControlOutcome:
+        return QueueControlOutcome(
             await self._operator_scalar(
                 "taskq.pause_queue(:name, :actor, :reason)",
                 {"name": name, "actor": actor, "reason": reason},
             )
         )
 
-    async def resume_queue(self, name: str, actor: str) -> str:
-        return str(
+    async def resume_queue(self, name: str, actor: str) -> QueueControlOutcome:
+        return QueueControlOutcome(
             await self._operator_scalar(
                 "taskq.resume_queue(:name, :actor)", {"name": name, "actor": actor}
             )
         )
 
-    async def set_concurrency_limit(self, key: str, max_running: int, actor: str) -> str:
-        return str(
+    async def set_concurrency_limit(
+        self, key: str, max_running: int, actor: str
+    ) -> ConfigChangeOutcome:
+        return ConfigChangeOutcome(
             await self._operator_scalar(
                 "taskq.set_concurrency_limit(:key, :max_running, :actor)",
                 {"key": key, "max_running": max_running, "actor": actor},
@@ -608,15 +589,15 @@ class SqlTaskqTransport:
             )
         )
 
-    async def run_now(self, job_id: UUID, actor: str) -> str:
-        return str(
+    async def run_now(self, job_id: UUID, actor: str) -> CommandOkOutcome:
+        return CommandOkOutcome(
             await self._operator_scalar(
                 "taskq.run_now(:job_id, :actor)", {"job_id": job_id, "actor": actor}
             )
         )
 
-    async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> str:
-        return str(
+    async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> CommandOkOutcome:
+        return CommandOkOutcome(
             await self._operator_scalar(
                 "taskq.reprioritize(:job_id, :priority, :actor)",
                 {"job_id": job_id, "priority": priority, "actor": actor},
@@ -653,8 +634,8 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
-    async def expire_job(self, job_id: UUID, actor: str) -> str:
-        return str(
+    async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome:
+        return ExpireJobOutcome(
             await self._operator_scalar(
                 "taskq.expire_job(:job_id, :actor)", {"job_id": job_id, "actor": actor}
             )

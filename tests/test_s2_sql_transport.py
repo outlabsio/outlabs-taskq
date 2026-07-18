@@ -13,8 +13,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
 from taskq import TaskqInternalError, TaskqTransport
-from taskq.protocol import ClaimState, EnqueueCommand, EnqueueManyItem, EnqueueStatus
-from taskq.sql.manifest import PUBLIC_FUNCTIONS
+from taskq.protocol import COMMAND_SPECS, ClaimState, EnqueueCommand, EnqueueManyItem, EnqueueStatus
+from taskq.sql.manifest import FUNCTIONS, PUBLIC_ERRORS, PUBLIC_FUNCTIONS, REPLAY_RULES
 from taskq.sql.transport import METHOD_FUNCTIONS, SqlTaskqTransport
 
 pytestmark = pytest.mark.taskq_sql
@@ -40,9 +40,18 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
 def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
     assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 30
-    for method in METHOD_FUNCTIONS:
+    assert METHOD_FUNCTIONS == {
+        command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
+    }
+    for command, spec in COMMAND_SPECS.items():
+        method = command.value
         assert inspect.iscoroutinefunction(getattr(TaskqTransport, method))
         assert inspect.iscoroutinefunction(getattr(SqlTaskqTransport, method))
+        assert spec.capability.value in FUNCTIONS[spec.sql_function].grants
+        assert {code.value for code in spec.errors} == set(PUBLIC_ERRORS[spec.sql_function])
+        assert spec.replay_rule.value == REPLAY_RULES[spec.sql_function]
+        assert spec.outcomes
+        assert spec.retryable_errors <= spec.errors
 
 
 def test_sql_adapter_contains_no_taskq_table_dml() -> None:
