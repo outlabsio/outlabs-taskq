@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
 from typing import Any, Protocol
@@ -12,7 +12,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from taskq.errors import TaskqConfigError, TaskqError
+from taskq.errors import (
+    TaskqCapabilityError,
+    TaskqConfigError,
+    TaskqError,
+    TaskqValidationError,
+)
 from taskq.execution import (
     HANDLER_RESULT_TYPES,
     Cancel,
@@ -26,7 +31,7 @@ from taskq.execution import (
     Snooze,
     TaskCancelled,
 )
-from taskq.protocol import ClaimedJob, SettleOutcome, SettleResult
+from taskq.protocol import COMMAND_SPECS, ClaimedJob, CommandName, SettleOutcome, SettleResult
 from taskq.registry import Task, TaskRegistry
 from taskq.transport import TaskqTransport
 
@@ -86,6 +91,8 @@ class JobRunOutcome(StrEnum):
     NO_HANDLER = "no_handler"
     OWNERSHIP_LOST = "ownership_lost"
     SETTLE_CONFLICT = "settle_conflict"
+    SETTLEMENT_UNKNOWN = "settlement_unknown"
+    FOLLOWUP_REJECTED = "followup_rejected"
     RUNTIME_ERROR = "runtime_error"
 
 
@@ -99,6 +106,7 @@ class JobRunReport(BaseModel):
     settlement_outcome: str | None = None
     cancellation_reason: CancellationReason | None = None
     requires_process_exit: bool = False
+    fatal: bool = False
 
 
 class WorkerCapacityError(RuntimeError):
@@ -333,15 +341,20 @@ class WorkerSupervisor:
         return Complete(result=validated.model_dump(mode="json"))
 
     async def _release_no_handler(self, claim: ClaimedJob) -> JobRunReport:
-        result = await self.transport.release(
-            claim.job_id,
-            claim.attempt_id,
-            self.worker_id,
-            "no_handler",
-            delay_seconds=self.options.no_handler_delay_seconds,
-            progress=claim.progress,
-        )
-        return self._report_from_settle(claim.job_id, "release", result, no_handler=True)
+        async def operation() -> SettleResult:
+            return await self.transport.release(
+                claim.job_id,
+                claim.attempt_id,
+                self.worker_id,
+                "no_handler",
+                delay_seconds=self.options.no_handler_delay_seconds,
+                progress=claim.progress,
+            )
+
+        report = await self._settle_with_retry(claim.job_id, CommandName.RELEASE, operation)
+        if report.state is JobRunState.SETTLED:
+            return report.model_copy(update={"outcome": JobRunOutcome.NO_HANDLER})
+        return report
 
     async def _settle_intent(
         self,
@@ -353,61 +366,167 @@ class WorkerSupervisor:
     ) -> JobRunReport:
         progress = context.progress if context is not None else claim.progress
         if intent is None:
-            result = await self.transport.release(
+
+            async def operation() -> SettleResult:
+                return await self.transport.release(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    "worker_shutdown",
+                    progress=progress,
+                )
+
+            command = CommandName.RELEASE
+        elif isinstance(intent, Complete):
+
+            async def operation() -> SettleResult:
+                return await self.transport.complete(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    result=intent.result,
+                    followups=intent.followups,
+                )
+
+            command = CommandName.COMPLETE
+        elif isinstance(intent, Snooze):
+
+            async def operation() -> SettleResult:
+                return await self.transport.snooze(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    intent.delay_seconds,
+                    reason=intent.reason,
+                    progress=intent.progress or progress,
+                )
+
+            command = CommandName.SNOOZE
+        elif isinstance(intent, Cancel):
+
+            async def operation() -> SettleResult:
+                return await self.transport.cancel_running(
+                    claim.job_id, claim.attempt_id, self.worker_id, intent.reason
+                )
+
+            command = CommandName.CANCEL_RUNNING
+        elif isinstance(intent, Retry):
+
+            async def operation() -> SettleResult:
+                return await self.transport.fail(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    intent.error or "handler requested retry",
+                    retryable=True,
+                    retry_after_seconds=intent.after_seconds,
+                    progress=intent.progress or progress,
+                )
+
+            command = CommandName.FAIL
+        else:
+
+            async def operation() -> SettleResult:
+                return await self.transport.fail(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    intent.error,
+                    retryable=False,
+                    progress=intent.progress or progress,
+                )
+
+            command = CommandName.FAIL
+        try:
+            report = await self._settle_with_retry(claim.job_id, command, operation)
+        except (TaskqValidationError, TaskqCapabilityError) as exc:
+            if not isinstance(intent, Complete) or not intent.followups:
+                return self._runtime_failure(claim.job_id, command)
+            report = await self._settle_invalid_followup(
+                claim,
+                progress,
+                capability_skew=isinstance(exc, TaskqCapabilityError),
+            )
+        return report.model_copy(update={"cancellation_reason": reason})
+
+    async def _settle_with_retry(
+        self,
+        job_id: UUID,
+        command: CommandName,
+        operation: Callable[[], Awaitable[SettleResult]],
+    ) -> JobRunReport:
+        for attempt in range(1, self.options.settle_max_attempts + 1):
+            try:
+                result = await operation()
+            except asyncio.CancelledError:
+                raise
+            except (TaskqValidationError, TaskqCapabilityError):
+                raise
+            except TaskqError as exc:
+                if not exc.retryable:
+                    return self._runtime_failure(job_id, command)
+                retryable = True
+            except (TimeoutError, ConnectionError):
+                retryable = True
+            except Exception:
+                return self._runtime_failure(job_id, command)
+            else:
+                if result.result.value not in COMMAND_SPECS[command].outcomes:
+                    return self._runtime_failure(job_id, command)
+                return self._report_from_settle(job_id, command.value, result)
+
+            if retryable and attempt < self.options.settle_max_attempts:
+                delay = min(
+                    self.options.settle_backoff_base * (2 ** (attempt - 1)),
+                    self.options.settle_backoff_cap,
+                )
+                await self.clock.sleep(delay)
+        return JobRunReport(
+            job_id=job_id,
+            state=JobRunState.RUNTIME_FAILED,
+            outcome=JobRunOutcome.SETTLEMENT_UNKNOWN,
+            settlement_command=command.value,
+            fatal=True,
+        )
+
+    async def _settle_invalid_followup(
+        self,
+        claim: ClaimedJob,
+        progress: dict[str, Any] | None,
+        *,
+        capability_skew: bool,
+    ) -> JobRunReport:
+        async def terminal_fail() -> SettleResult:
+            return await self.transport.fail(
                 claim.job_id,
                 claim.attempt_id,
                 self.worker_id,
-                "worker_shutdown",
+                "invalid_followup: rejected by active SQL contract",
+                retryable=False,
                 progress=progress,
             )
-            command = "release"
-        elif isinstance(intent, Complete):
-            result = await self.transport.complete(
-                claim.job_id,
-                claim.attempt_id,
-                self.worker_id,
-                result=intent.result,
-                followups=intent.followups,
-            )
-            command = "complete"
-        elif isinstance(intent, Snooze):
-            result = await self.transport.snooze(
-                claim.job_id,
-                claim.attempt_id,
-                self.worker_id,
-                intent.delay_seconds,
-                reason=intent.reason,
-                progress=intent.progress or progress,
-            )
-            command = "snooze"
-        elif isinstance(intent, Cancel):
-            result = await self.transport.cancel_running(
-                claim.job_id, claim.attempt_id, self.worker_id, intent.reason
-            )
-            command = "cancel_running"
-        elif isinstance(intent, Retry):
-            result = await self.transport.fail(
-                claim.job_id,
-                claim.attempt_id,
-                self.worker_id,
-                intent.error or "handler requested retry",
-                retryable=True,
-                retry_after_seconds=intent.after_seconds,
-                progress=intent.progress or progress,
-            )
-            command = "fail"
-        else:
-            result = await self.transport.fail(
-                claim.job_id,
-                claim.attempt_id,
-                self.worker_id,
-                intent.error,
-                retryable=False,
-                progress=intent.progress or progress,
-            )
-            command = "fail"
-        report = self._report_from_settle(claim.job_id, command, result)
-        return report.model_copy(update={"cancellation_reason": reason})
+
+        failed = await self._settle_with_retry(claim.job_id, CommandName.FAIL, terminal_fail)
+        if failed.state is not JobRunState.SETTLED:
+            return failed
+        return JobRunReport(
+            job_id=claim.job_id,
+            state=JobRunState.RUNTIME_FAILED if capability_skew else JobRunState.SETTLED,
+            outcome=JobRunOutcome.FOLLOWUP_REJECTED,
+            settlement_command=CommandName.FAIL.value,
+            settlement_outcome=failed.settlement_outcome,
+            fatal=capability_skew,
+        )
+
+    @staticmethod
+    def _runtime_failure(job_id: UUID, command: CommandName) -> JobRunReport:
+        return JobRunReport(
+            job_id=job_id,
+            state=JobRunState.RUNTIME_FAILED,
+            outcome=JobRunOutcome.RUNTIME_ERROR,
+            settlement_command=command.value,
+            fatal=True,
+        )
 
     @staticmethod
     def _report_from_settle(
@@ -428,6 +547,7 @@ class WorkerSupervisor:
                 outcome=JobRunOutcome.SETTLE_CONFLICT,
                 settlement_command=command,
                 settlement_outcome=result.result,
+                fatal=True,
             )
         return JobRunReport(
             job_id=job_id,

@@ -25,14 +25,13 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2B settlement replay open** — monotonic heartbeat and fenced per-job supervision are green; S2-04C is next |
-| Suite | 243/243 regular on PG18.3; contract baseline 221/221 + opt-in 1M plan gate green on PG16.14 |
+| Stage | **Stage 2B bounded lifecycle open** — verb-aware settlement replay and lost-response convergence are green; S2-04D is next |
+| Suite | 256/256 regular on PG18.3; contract baseline 221/221 + opt-in 1M plan gate green on PG16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | Implement verb-aware settlement retries, response-loss convergence, and fatal conflict handling |
 
 ## Now — Stage 2B worker runtime
 
-- [ ] **S2-04C** — verb-aware settlement replay policy and programmable lost-response injection
 - [ ] **S2-04D** — bounded concurrency, bounded sync executor, and soft-stop lifecycle
 - [ ] **S2-04-AUDIT** — deterministic races, resource conservation, artifact/import isolation, and PG16/PG18 completion evidence
 
@@ -55,6 +54,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-04C · Verb-aware settlement replay and fault injection** — settlement now retries only the original verb with bounded exponential backoff, validates command-specific outcomes, converges after a committed-but-lost response, keeps heartbeats live until certainty, classifies exhausted certainty as fatal, and applies the frozen invalid-follow-up terminal escape; 13 deterministic vectors bring PG18 to 256/256 and prove one semantic settlement plus one handler invocation under response loss.
 - [x] **S2-04B · Monotonic heartbeat and fenced per-job supervision** — added the core worker options/clock/state/report API, exact `lease_seconds/3` cadence, one heartbeat coroutine per active handler, generation-safe checkpoint flush, two-failure recovery/third-failure ownership loss, typed loss, operator grace cancellation, non-retryable runtime failure, no-handler release, async/sync dispatch, and joined lifecycle; 10 deterministic vectors bring PG18 to 243/243 without reading absolute expiry for scheduling.
 - [x] **S2-04A · Execution primitives and deterministic harness** — added frozen closed handler intents, thread-safe escalating cancellation, fence-free `JobContext` with generation-safe 2KB checkpoints, exact sync/async one-/two-argument handler registration, public core exports, and private manual-clock/scripted-response-loss utilities; 12 boundary/concurrency vectors bring the PG18 suite to 233/233 with no optional imports or construction-time work.
 - [x] **S2-04-SPEC · Worker-runtime contracts frozen** — the new Tier-3 specification fixes the S2-04-only module/API boundary, closed result normalization, cancellation precedence, monotonic lease-derived heartbeat state machine, verb-aware replay, R2-11 sync honesty, bounded supervisor/soft stop, deterministic harness, and A/B/C/D/audit acceptance matrix; S2-05 and Stage 3 remain excluded.
