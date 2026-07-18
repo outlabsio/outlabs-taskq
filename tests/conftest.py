@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import AsyncIterator, Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 
 import asyncpg
 import pytest
@@ -90,6 +90,57 @@ async def _migrate_once(dsn: str) -> None:
         await engine.dispose()
 
 
+async def _install_stateful_time_travel(dsn: str) -> None:
+    """Install the Harness §1.1 scratch-only lease clock helper.
+
+    This schema is test infrastructure, never package migration content. The
+    helper remains owner-executed and grants only the housekeeper role used by
+    T4's lease-rewind + tick operation.
+    """
+    conn = await asyncpg.connect(_plain_dsn(dsn))
+    try:
+        await conn.execute(
+            """
+            CREATE SCHEMA IF NOT EXISTS taskq_test AUTHORIZATION taskq_owner;
+            ALTER SCHEMA taskq_test OWNER TO taskq_owner;
+            REVOKE ALL ON SCHEMA taskq_test FROM PUBLIC;
+            GRANT USAGE ON SCHEMA taskq_test TO taskq_housekeeper;
+
+            CREATE OR REPLACE FUNCTION taskq_test.rewind_lease(
+                p_job_id uuid,
+                p_by interval
+            ) RETURNS boolean
+            LANGUAGE plpgsql SECURITY DEFINER
+            SET search_path = pg_catalog, taskq, pg_temp
+            AS $function$
+            BEGIN
+                IF p_by IS NULL OR p_by <= interval '0 seconds' THEN
+                    RAISE EXCEPTION 'rewind interval must be positive';
+                END IF;
+                UPDATE taskq.jobs
+                   SET lease_expires_at = lease_expires_at - p_by
+                 WHERE id = p_job_id AND status = 'running';
+                RETURN FOUND;
+            END
+            $function$;
+            ALTER FUNCTION taskq_test.rewind_lease(uuid, interval) OWNER TO taskq_owner;
+            REVOKE EXECUTE ON FUNCTION taskq_test.rewind_lease(uuid, interval) FROM PUBLIC;
+            GRANT EXECUTE ON FUNCTION taskq_test.rewind_lease(uuid, interval)
+                TO taskq_housekeeper;
+            """
+        )
+    finally:
+        await conn.close()
+
+
+async def _drop_stateful_time_travel(dsn: str) -> None:
+    conn = await asyncpg.connect(_plain_dsn(dsn))
+    try:
+        await conn.execute("DROP SCHEMA IF EXISTS taskq_test CASCADE")
+    finally:
+        await conn.close()
+
+
 @pytest.fixture(scope="session")
 def migrated(taskq_dsn: str) -> None:
     """Session-scoped one-time install into the scratch database.
@@ -104,6 +155,16 @@ def migrated(taskq_dsn: str) -> None:
             "T2 needs migration 0001 (authored from the 0.1 Function Manifest)"
         )
     asyncio.run(_migrate_once(taskq_dsn))
+
+
+@pytest.fixture(scope="session")
+def stateful_time_travel(taskq_dsn: str, migrated: None) -> Iterator[None]:
+    """Scratch-only owner helper used by T4; removed after the test session."""
+    asyncio.run(_install_stateful_time_travel(taskq_dsn))
+    try:
+        yield
+    finally:
+        asyncio.run(_drop_stateful_time_travel(taskq_dsn))
 
 
 async def _truncate_taskq(conn: asyncpg.Connection) -> None:
