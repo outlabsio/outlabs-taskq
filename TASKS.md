@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **1 — secure SQL kernel** (exit gates green; round-3 review requested) |
+| Stage | **2A specification drafted**; runtime implementation awaits the round-3 response |
 | Suite | 58/58 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
 | Next review | Round-3 request assembled for Andi: migration 0001 + runner + harness vs manifest |
 
-## Now — Stage 1 exit gate
+## Now — Round-3 entry gate
 
-*(No unchecked Stage-1 work remains. Await the round-3 response; do not fold findings into Tier-0 contracts without the docs-first process.)*
+- [ ] **R3-01 · Process the external round-3 response.** Classify implementation findings vs Contract questions, record every disposition, and stop before S2-01 if a Tier-0/ADR contradiction is found. The request exists; no response artifact is present yet.
 
 ## Next — Stage 2 kickoff (do not start before S1-09)
 
@@ -49,6 +49,7 @@
 
 ## Done
 
+- [x] **S2-00 · Stage-2A implementation specification** — the new Tier-3 spec fixes the typed task/registry boundary, closed 0.1 outcomes and TQ errors, complete async SQL transport scope, caller-vs-transport transaction ownership, fence/import safety, and the S2-01..03 acceptance matrix; it remains subordinate to the pending round-3 response.
 - [x] **Design phase** — spec v1.6, ADR-001..011, two review rounds folded, Protocol v1 + Function Manifest canonical, docs constitution (`6cf6793`..`e1237c5`)
 - [x] **S1 opening slice** — migration `0001_initial.sql` (6 roles, 39 hardened functions, self-checking), ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI), T1 (26) + T2 (15) suites, 42/42 green vs PG 18.3, wheel packaging fixed, single-writer ledger + typed-cancel reconciliations in manifest errata §8 (`3e7d55d`)
 - [x] **S1-01 · T3 choreographed races** — six advisory-barrier/hold-open race cases run deterministically for 20 rounds each: same-key convergence, double-claim exclusion, post-reap fence loss, cross-verb settle conflict, ten-way cap admission, and the single permitted pause slip.

@@ -31,6 +31,7 @@ Two living docs: [`TASKS.md`](../TASKS.md) (repo root — the task board, cold-s
 |---|---|---|
 | [Unified Design Spec](./Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md) (v1.6) | Full destination design: state machine, DDL, SQL semantics, ops model, PG strategy, migration plan | Authoritative for **semantics and rationale**; the 0.1 Function Manifest wins for 0.1 SQL specifics |
 | [Library Extraction Design Brief](./Task%20Queue%20Library%20Extraction%20Design%20Brief.md) | Package layout, import boundaries, host adoption | Subordinate to ADRs |
+| [Stage 2A Typed Enqueue Specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | S2-01..03 Python models, registry, SQL transport, transaction ownership, acceptance matrix | Implementation design; subordinate to Tier 0 and ADRs |
 | [Authorization & Queue Permissions](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md) | Queue-scoped authz, `taskq_{queue}:{action}` grammar, provisioning DX | Detail behind ADR-006/011 |
 | [Test & Benchmark Harness](./Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Suites T1–T8, CI matrix, benchmarks B1–B13, envelope gates | Implements §16.3 + the review test programs |
 | [Growth, Topology & Live Visibility](./Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md) | Retention profiles, dedicated-DB topology, read models, SSE | §1–§2 adopted; **§3–§5 PROPOSALS** (decide via future ADRs; R2-14/15/16 amendments accepted) |
