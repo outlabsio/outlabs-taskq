@@ -61,7 +61,7 @@ Randomized layer: T3-R runs K producers × M workers × mixed ops for N seconds 
 `hypothesis` stateful testing against real Postgres:
 
 - **Model:** the §3 state machine reduced to per-job (status, failure_count, expiry_streak, attempt ledger size).
-- **Ops drawn:** enqueue (± idempotency key, ± deps), claim, complete, fail(retryable|not), release, snooze, lease-rewind+tick, cancel, redrive — each op = SQL call as `taskq_worker`.
+- **Ops drawn:** enqueue (± idempotency key, ± deps), claim, complete, fail(retryable|not), release, snooze, lease-rewind+tick, cancel, redrive — each generated op dispatches through its exact capability role (producer/runner/observer/operator/housekeeper — ADR-011), so the property suite doubles as a continuous grant check.
 - **Invariants after every step:** ≤1 running attempt per job (and `uq_job_attempts_running` never violated); `failure_count` only moves per the §3.3 table (releases/snoozes never consume budget); terminal ⇔ `finished_at` set; conservation (every enqueued job is exactly one of active/terminal — never vanished); dedup: ≤1 active row per (queue, key); typed results only (no unexpected exceptions).
 - Shrinking gives minimal reproductions of any state-machine bug — the cheapest adversarial reviewer the project can hire.
 

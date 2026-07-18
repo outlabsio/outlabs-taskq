@@ -62,8 +62,9 @@
     Phase C (SHOULD runtime/ops):  06 → 11 → 07 → 10 → 12 → 14
     Phase D (0.2+ capabilities):  02(replace/by_args) → followups (03/ADR-007) → 08
 
-(14 lands with Phase C: it is the outlabsAPI adoption surface and the recommended
-`_system`-queue claimer for facade hosts — Unified Spec §20.2.)
+(14 lands with Phase C: it is the outlabsAPI adoption surface; its role as the
+`_system`-queue claimer is a 0.2 concern — in 0.1 the housekeeper tick runs the
+janitor directly, ADR-009/011.)
 
 ## Release staging (ADR-009 — authoritative)
 

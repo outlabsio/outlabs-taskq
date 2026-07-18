@@ -7,7 +7,7 @@ Canonical home for the taskq protocol and library design. Host apps (Diverse, QD
 0. **[ADRs](./adr/README.md)** — the accepted decision records (ADR-001..010, 2026-07-18). Where any doc below disagrees with an ADR, the ADR wins. Provenance: the [design review](./design-review/README.md) (7 docs, assessed and folded in same day).
 1. **[Task Queue — Unified Design Spec](./Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md)** — SQL-first protocol, state machine, functions, ops runbook
 2. **[Library Extraction Design Brief](./Task%20Queue%20Library%20Extraction%20Design%20Brief.md)** — package layout, auth layers, optional outlabs-auth
-3. **[Authorization & Queue Permissions](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md)** — queue-scoped facade authz, `taskq.{queue}:{action}` convention, provisioning DX
+3. **[Authorization & Queue Permissions](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md)** — queue-scoped facade authz, `taskq_{queue}:{action}` grammar, provisioning DX
 4. **[Test & Benchmark Harness](./Task%20Queue%20Test%20%26%20Benchmark%20Harness.md)** — the package's own suites (T1–T8), CI matrix, benchmarks (B1–B13) + calibrated envelope gates
 5. **[Growth, Topology & Live Visibility](./Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md)** — retention profiles at millions-scale, optional dedicated queue database, read-model/stats API for frontends, SSE bridge (§3–§5 proposals pending acceptance)
 6. **[Borrowed Features](./taskq-borrowed-features/README.md)** — normative product features (typed enqueue, job keys, snooze, embedded worker, …)

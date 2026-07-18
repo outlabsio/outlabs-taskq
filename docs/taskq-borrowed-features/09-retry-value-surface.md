@@ -28,7 +28,7 @@ Make common retry configuration **one token** at task definition time, while sti
         mode: Literal["exponential", "fixed"] = "exponential"
         base_seconds: float = 30
         cap_seconds: float = 3600
-        jitter_ratio: float = 0.2
+        # jitter is fixed ±15% in 0.1 (no stamped ratio field — R2-19)
         retry_exceptions: tuple[type[BaseException], ...] | None = None
         # if set: only these types are retryable; others → NonRetryable
 

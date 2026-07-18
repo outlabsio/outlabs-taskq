@@ -9,7 +9,7 @@
 
 ## 0. Verdict
 
-Per-queue permissions are a **facade-tier feature**. The SQL contract stays IAM-agnostic (L1: `taskq_worker` can drive any queue — extraction brief §5.1 unchanged, stated honestly in §7 below). The facade grows one concept — every route is annotated with an **action** and a **queue extractor** — and adapters decide what a `(action, queue)` pair requires. The outlabs-auth adapter maps it onto a two-candidate permission check with a naming convention that survives outlabs-auth's wildcard parser, plus an **opt-in provisioning helper** that makes "new queue + permissions + roles" a one-liner in host bootstrap.
+Per-queue permissions are a **facade-tier feature**. The SQL contract stays IAM-agnostic (L1: the capability roles are queue-global — ADR-010/011; stated honestly in §7 below). The facade grows one concept — every route is annotated with an **action** and a **queue extractor** — and adapters decide what a `(action, queue)` pair requires. The outlabs-auth adapter maps it onto a two-candidate permission check with a naming convention that survives outlabs-auth's wildcard parser, plus an **opt-in provisioning helper** that makes "new queue + permissions + roles" a one-liner in host bootstrap.
 
 Design goal, in the owner's words: *"super simple just to set up queues with different permissions."* Concretely:
 
@@ -56,7 +56,7 @@ Rules:
 | `POST /jobs/{id}/cancel·redrive` | `control` | job lookup |
 | `GET /jobs`, `GET /jobs/{id}`, stats views | `read` | query filter / job lookup; unfiltered list requires global `read` |
 | `POST /queues/{queue}/pause·resume` | `control` | path |
-| `POST /tick` | `control` | none (global) |
+| (no HTTP tick route — the housekeeper is runtime-internal, ADR-011; manual surface is the operator CLI) | — | — |
 | queue/limit/schedule CRUD | `admin` | path / body |
 
 **Job-lookup order (normative, ADR-006):** authenticate → **`taskq.get_authorization_projection(job_id)`** (a `SECURITY DEFINER` read granted to the facade's observer role, exposing only id, queue, job_type, status — never payloads or attempt fences) → authorize `(action, projection.queue)` → invoke the fenced mutation (which re-validates ownership atomically). Caller-supplied queue/job_type in payloads are **assertions**: rejected on mismatch (409/422 per the ADR-005 protocol), never an authorization input. On authorization failure the default is **403 naming the queue** (single-tenant blast-radius scoping, not tenant isolation); hosts that want existence-hiding set `not_found_on_forbidden=True` to get 404.
@@ -80,7 +80,7 @@ Defined in `taskq.http.deps`, zero outlabs imports:
 
 ## 3. Permission naming under outlabs-auth (the load-bearing convention)
 
-outlabs-auth validates permission names **at creation** (`validate_permission_name` + the router schema, both in `0.1.0a24`): exactly one colon, each component matching `^[a-z0-9_-]+$` or being exactly `*`. **Dots are invalid** — a dotted convention could never exist as catalog rows. Queue names match `^[a-z0-9_]{1,63}$` and the `taskq_` prefix is fixed, so the underscore join is injective (`taskq_X = taskq_Y` iff `X = Y`):
+outlabs-auth validates permission names **at creation** (`validate_permission_name` + the router schema, both in `0.1.0a24`): exactly one colon, each component matching `^[a-z0-9_-]+$` or being exactly `*`. **Dots are invalid** — a dotted convention could never exist as catalog rows. Queue names match `^[a-z0-9_]{1,57}$` (57-byte cap per spec §4 v1.6) and the `taskq_` prefix is fixed, so the underscore join is injective (`taskq_X = taskq_Y` iff `X = Y`):
 
 | Permission | Meaning |
 |---|---|
@@ -101,8 +101,9 @@ outlabs-auth builds permission checkers per name-set. The adapter builds them **
 
     # taskq/http/outlabs.py (sketch)
     class OutlabsQueueAuthorizer:
-        def __init__(self, *, auth, session_dependency, resource_prefix="taskq",
+        def __init__(self, *, auth, session_dependency,
                      actor_from_principal=None, not_found_on_forbidden=False): ...
+        # no resource_prefix: the taskq namespace is fixed (ADR-006; R2-17)
 
         async def authorize(self, request, action, queue):
             names = ([f"{self._prefix}_{queue}:{action}"] if queue else []) + [f"{self._prefix}:{action}"]
@@ -110,7 +111,7 @@ outlabs-auth builds permission checkers per name-set. The adapter builds them **
             result = await checker(request=request, session=await self._session(request))
             return _to_auth_context(result)                        # actor = email | key name | service id
 
-`resource_prefix` lets a host running two taskq installations (or a rename) shift the whole namespace in one place.
+There is **no** `resource_prefix`/namespace option (v1.6, R2-17): ADR-006 fixes the grammar and ADR-002 fixes the schema — isolated installations use separate databases. A configurable prefix would fork the permission namespace the provisioning helper, adapters, and catalogs all assume.
 
 ### 3.2 Legacy host mappings (strangler-compatible)
 
@@ -139,7 +140,7 @@ The extraction brief §5.3 said "the package never seeds IAM rows." **Amended, p
     from taskq.http.outlabs import taskq_permission_catalog, provision_taskq_auth
 
     # Pure function → tuple[PermissionSeed, ...] (feed to seed_system_records yourself)
-    catalog = taskq_permission_catalog(queues=["emails", "tools"], resource_prefix="taskq")
+    catalog = taskq_permission_catalog(queues=["emails", "tools"])
     # 5 global (taskq:enqueue…admin) + 5 per queue (taskq_emails:enqueue…)
     # every name is passed through outlabs-auth's real validator before returning
 
@@ -158,7 +159,7 @@ The extraction brief §5.3 said "the package never seeds IAM rows." **Amended, p
         mode="report",
     )
 
-**Standard roles** (created only when `roles="standard"`, idempotent, `is_system=True`):
+**Standard roles** (created only when `roles="standard"`, idempotent, `is_system=True`) — these are **outlabs-auth IAM roles, not PostgreSQL roles** (the DB capability roles are ADR-010/011's, a different trust layer):
 
 | Role | Grants |
 |---|---|
@@ -170,7 +171,7 @@ The extraction brief §5.3 said "the package never seeds IAM rows." **Amended, p
 
 ### 4.2 CLI
 
-    taskq auth sync-permissions --queues emails,tools [--roles standard] [--prefix taskq]
+    taskq auth sync-permissions --queues emails,tools [--roles standard]
 
 Requires `taskq[outlabs]` + host DSN/schema settings; calls the same helper; prints a diff (created / already-present) and **prints any host-config change it cannot make** (next section). Also: `ensure_queue(..., provision_auth=True)` forwards to the helper when an outlabs adapter is configured — declare a queue and its permissions in one call.
 

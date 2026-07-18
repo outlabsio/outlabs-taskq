@@ -28,7 +28,7 @@ Embedded is a **deployment choice, not an API**: the same `@tq.task` handlers mo
 ### 2.1 One-liner
 
     from fastapi import FastAPI
-    from taskq.contrib.fastapi import taskq_lifespan
+    from taskq.http import taskq_lifespan
 
     app = FastAPI(lifespan=taskq_lifespan(
         tq,
@@ -42,7 +42,7 @@ Embedded is a **deployment choice, not an API**: the same `@tq.task` handlers mo
 
 ### 2.2 Composable form (host already has a lifespan)
 
-    from taskq.contrib.fastapi import TaskqRuntime
+    from taskq.http import TaskqRuntime
 
     runtime = TaskqRuntime(tq, housekeeper=True, worker=WorkerOptions(...))
 
@@ -59,7 +59,7 @@ Embedded is a **deployment choice, not an API**: the same `@tq.task` handlers mo
 
 ### 2.3 Dependency injection
 
-    from taskq.contrib.fastapi import get_taskq
+    from taskq.http import get_taskq
 
     @app.post("/tools/{name}/runs/queued", status_code=202)
     async def queue_tool_run(
@@ -94,7 +94,7 @@ Running claims inside an API process trades isolation for simplicity. The rules 
 2. **Never embed heavy lanes.** Rendering, browser scraping, LLM batch work do not run embedded. Queue profiles for such lanes should set a marker (`embedded: discouraged` note field) — advisory, not enforced.
 3. **Pool split.** The embedded worker uses its own small connection pool (default 2) plus the dedicated LISTEN connection — it must not exhaust the API's request pool. Both pools may point at the same DSN; sizes are independent settings.
 4. **Ordinary worker semantics.** The embedded worker registers presence (`worker_id = "api:{hostname}:{pid}"`), heartbeats, and releases on shutdown exactly like an external worker. No special settle paths; lease expiry covers a SIGKILLed container.
-5. **Deploy behavior.** SIGTERM → ASGI shutdown → feature-11 soft stop → in-flight jobs released with `worker_shutdown`, budget untouched. On platforms with rolling deploys (Coolify), old and new processes may briefly claim concurrently — safe by construction (SKIP LOCKED + fencing).
+5. **Deploy behavior.** SIGTERM → ASGI shutdown → feature-11 soft stop → in-flight async jobs released with `worker_shutdown`, budget untouched; `blocking=True` thread handlers follow the R2-11 sync contract (cooperative token; no release while the thread lives — hold the lease or exit and let expiry reclaim). On platforms with rolling deploys (Coolify), old and new processes may briefly claim concurrently — safe by construction (SKIP LOCKED + fencing).
 6. **Graduation path.** When embedded stops being enough: run `taskq worker run --queues tools` pointing at the same DB with the same handler package, set `worker=None` in the API. Nothing else changes.
 
 ---

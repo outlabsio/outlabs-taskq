@@ -12,7 +12,7 @@
 
 Extract `taskq` into its own package. The protocol is already designed as SQL-first, multi-consumer, and “published like outlabs-auth.” Both production systems already prove the same transport shape (HTTP workers, no worker DB credentials, host-app auth in front of the facade). The extraction’s job is to make **one installer + one client + one contract** the source of truth, while treating **HTTP auth as a host-injected adapter** — first-class with outlabs-auth when the host uses it, fully usable without it.
 
-Correctness stays in Postgres (`taskq.*` functions + `taskq_worker` role). Identity stays in the host app (or nowhere, for CLI/psql). Those layers must never be fused in the package’s import graph.
+Correctness stays in Postgres (`taskq.*` functions + the capability roles, ADR-010/011). Identity stays in the host app (or nowhere, for CLI/psql). Those layers must never be fused in the package’s import graph.
 
 ---
 
@@ -124,7 +124,7 @@ Worker config is explicit about OutlabsAuth tokens:
 Despite the unified-spec wording “DB-connected workers (qdarte)” for housekeeper topology, **today’s qdarte-workers are HTTP-only** — same shape as Diverse. The library must support:
 
 1. **HTTP-facade topology** (both fleets today): API holds DB + ticker; workers are HTTP clients.
-2. **DB-direct topology** (allowed by the protocol, useful for CLI/ops and future in-process workers): process holds `taskq_worker` credentials and calls SQL functions directly.
+2. **DB-direct topology** (allowed by the protocol, useful for CLI/ops and future in-process workers): process holds capability-role credentials (runner+observer, ADR-011) and calls SQL functions directly.
 
 Do not bake “QDarte = DB-direct” into the package API; bake “transport is chosen by the host.”
 
@@ -280,7 +280,7 @@ Without outlabs-auth:
 
 ## 5. Auth architecture (the load-bearing section)
 
-> **Extended 2026-07-18:** queue-scoped authorization (per-queue permissions, the `QueueAuthorizer` protocol that supersedes the read/write/operator `TaskqAuth` shape, the `taskq.{queue}:{action}` naming convention, and the opt-in provisioning helper) is specified in [`Task Queue Authorization & Queue Permissions.md`](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md). This section remains authoritative for the trust layering and the optionality rules; where the two disagree on the dependency-protocol shape, the Authorization doc wins.
+> **Extended 2026-07-18:** queue-scoped authorization (per-queue permissions, the `QueueAuthorizer` protocol that supersedes the read/write/operator `TaskqAuth` shape, the `taskq_{queue}:{action}` naming grammar, and the opt-in provisioning helper) is specified in [`Task Queue Authorization & Queue Permissions.md`](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md). This section remains authoritative for the trust layering and the optionality rules; where the two disagree on the dependency-protocol shape, the Authorization doc wins.
 
 ### 5.1 Three layers of trust (must stay separate)
 
@@ -308,7 +308,7 @@ Without outlabs-auth:
 
 Unified-spec grounding:
 
-> a dedicated `taskq_worker` role has EXECUTE on the functions and **no direct DML on the tables**, so the fencing and budget invariants cannot be bypassed by a raw UPDATE.
+> dedicated capability roles have EXECUTE on the functions and **no direct DML on the tables**, so the fencing and budget invariants cannot be bypassed by a raw UPDATE.
 >
 > — *Unified Design Spec* §0
 
@@ -400,7 +400,7 @@ The adapter standardizes that pattern without owning permission catalogs:
 | Diverse | `job:read` | `job:write` | `job:write` (or future `job:admin`) |
 | QDarte | `qdarte:worker-run` | `qdarte:worker-run` | `qdarte:job-control` |
 
-Permission *names* stay in the host catalogs (`DiversePermission`, `QdartePermission`) during the strangler. The package never seeds IAM rows **implicitly** — no import-time, mount-time, or migration-time seeding, ever. It DOES ship an explicit, host-invoked provisioning helper (`provision_taskq_auth` / `taskq auth sync-permissions`) that seeds the canonical `taskq.{queue}:{action}` catalog + optional standard roles when the host calls it from its own bootstrap — the same place `seed_qdarte_auth_records` / `bootstrap init-local` already run. See the Authorization doc §4; role names stay prefixable so hosts keep naming authority.
+Permission *names* stay in the host catalogs (`DiversePermission`, `QdartePermission`) during the strangler. The package never seeds IAM rows **implicitly** — no import-time, mount-time, or migration-time seeding, ever. It DOES ship an explicit, host-invoked provisioning helper (`provision_taskq_auth` / `taskq auth sync-permissions`) that seeds the canonical `taskq_{queue}:{action}` catalog + optional standard roles when the host calls it from its own bootstrap — the same place `seed_qdarte_auth_records` / `bootstrap init-local` already run. See the Authorization doc §4; role names stay prefixable so hosts keep naming authority.
 
 ### 5.4 Non-outlabs auth adapters (must ship in core `[http]`)
 
@@ -666,7 +666,7 @@ Extraction is “done” when all of the following are true:
 4. Workers in both fleets import settle/enqueue models from `taskq` only — zero hand mirrors.
 5. Claim/settle/fencing tests pass against the package installer on PG16+ (PG18 target).
 6. Diverse cutover allowlists and QDarte fleet/proxy domains remain outside the package.
-7. `taskq_worker` still cannot `UPDATE taskq.jobs` directly.
+7. No application capability role can `UPDATE taskq.jobs` directly (ADR-010/011).
 
 ---
 

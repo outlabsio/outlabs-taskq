@@ -2,7 +2,7 @@
 
 > **Provenance:** Produced 2026-07-06 by a cross-repo audit of the Postgres task queues in `diverse-data-api` (`scrape_jobs` queue domain) and `qdarteAPI` (`qdarte_ops.worker_jobs` platform). The input reports cited by code (DC, DCP, QC, QO, PA, gap_analysis) were working artifacts of that analysis session; all `file:line` citations refer to the two repos as of this date. **Canonical home since 2026-07-18: the `outlabs-taskq` repo (this copy).** In-repo copies at diverse-data-api may lag (see its `Task Queue Docs Canonical Home.md`); qdarteAPI carries no copy. Vault index note: `lifeOS/Projects/Business/QDarte/Postgres Task Queue Cross-Repo Audit & Unified Design.md`.
 
-**Status:** Design v1.5, 2026-07-18 — v1.1-final (adversarial review, 35 findings) + v1.2/v1.3 Codex confirmation addenda + v1.4 library-extraction fixes + v1.5 ADR fold-in (accepted [ADR-001..010](./adr/README.md); see revision notes in §19). Synthesized from three competing designs (`design_simplicity.md`, `design_robustness.md`, `design_pg_native.md`) under a three-judge panel (votes: pg_native 2, simplicity 1). Skeleton = **pg_native**; every judge-mandated graft applied; conflicts reconciled explicitly in section 19.
+**Status:** Design v1.6, 2026-07-18 — v1.1-final (adversarial review) + v1.2/v1.3 Codex addenda + v1.4 extraction fixes + v1.5 ADR fold-in + **v1.6 round-2 fold-in** (R2-01..R2-13 applied; ADR-011 accepted; see revision notes in §19). Synthesized from three competing designs (`design_simplicity.md`, `design_robustness.md`, `design_pg_native.md`) under a three-judge panel (votes: pg_native 2, simplicity 1). Skeleton = **pg_native**; every judge-mandated graft applied; conflicts reconciled explicitly in section 19.
 **Replaces:** the `scrape_jobs` queue in diverse-data-api AND the `qdarte_ops.worker_jobs` platform in qdarteAPI.
 **Baseline:** PostgreSQL 18 (both systems run it). Degrades to PG16/17; PG19 features are optional accelerators (section 15).
 **Inputs:** gap_analysis.md, diverse_core.md (DC), diverse_control.md (DCP), qdarte_core.md (QC), qdarte_orchestration.md (QO), pg18.md, pg19.md, prior_art.md (PA).
@@ -20,7 +20,7 @@ Idempotency is a partial unique index plus `ON CONFLICT DO NOTHING` — the only
 
 Per-resource concurrency caps (`concurrency_key` stamped at enqueue, `taskq.concurrency_limits` rows) are enforced at claim with a **try-lock admission protocol that is provably deadlock-free and never overshoots**. Orchestration is one layer: dependency edges + workflows for DAG/fan-in, and **followup enqueues executed inside the settle transaction** (with derived dedup keys) as the default chain mechanism — exactly-once chaining without a second state machine. Batch-run expansion is itself an ordinary claimed job with a cursor checkpoint, deleting Diverse's second lease system.
 
-Housekeeping never rides a *successful* claim: a 5-second advisory-lock-deduped tick (savepoint-per-pass, so one failing pass cannot kill the rest) reaps leases and fires cron; a bounded **idle-claim micro-reap** (an *empty* claim runs one reap pass, limit 5) guarantees lease recovery even if every ticker dies; the daily janitor is **seeded as a `taskq.schedules` row at install time**, so "nothing ever calls maintenance" is structurally impossible. Terminal rows move to a partitioned archive whose retention is partition DROP — deletion without dead tuples. Pure lease-bump heartbeats are HOT updates that touch zero indexes (the lease column is deliberately unindexed — the single highest-leverage bloat decision for the per-job hot path; lifecycle status flips are structurally non-HOT and get scheduled index maintenance instead, §13).
+Housekeeping never rides a *successful* claim: a 5-second advisory-lock-deduped tick (savepoint-per-pass, so one failing pass cannot kill the rest) reaps leases and fires cron; a bounded **idle-claim micro-reap** (an *empty* claim runs one reap pass, limit 5) guarantees lease recovery even if every ticker dies; the daily janitor is structurally triggered — in 0.1 by a due-gated pass hardwired into the housekeeper tick, from 0.2 by a **seeded `taskq.schedules` row** — so "nothing ever calls maintenance" is impossible. Terminal rows move to a partitioned archive whose retention is partition DROP — deletion without dead tuples. Pure lease-bump heartbeats are HOT updates that touch zero indexes (the lease column is deliberately unindexed — the single highest-leverage bloat decision for the per-job hot path; lifecycle status flips are structurally non-HOT and get scheduled index maintenance instead, §13).
 
 The whole 2am incident surface is one page of psql (section 11.5), and the design ships with a mandatory pre-cutover validation-gate test suite and an adversarial failure-mode audit (section 17). Migration is strangler-style, **qdarte first** (personal blast radius), **Diverse second** (protected income realm), per-lane, no big bang.
 
@@ -208,7 +208,11 @@ CREATE TYPE taskq.settle_result AS (
 -- Queue registry: pause switch, per-queue defaults, optional depth guard
 -- ---------------------------------------------------------------------------
 CREATE TABLE taskq.queues (
-    name                  text PRIMARY KEY CHECK (name ~ '^[a-z0-9_]{1,63}$'),
+    name                  text PRIMARY KEY CHECK (name ~ '^[a-z0-9_]{1,57}$'),
+                          -- 57, not 63 (v1.6, R2-07): the per-queue NOTIFY channel is
+                          -- 'taskq_' || name and PostgreSQL identifiers truncate at 63
+                          -- bytes — a 63-byte queue name would produce a silently
+                          -- truncated 69-byte channel.
     paused_at             timestamptz,                 -- pauses CLAIMS; intake continues
     pause_reason          text,
     default_priority      smallint    NOT NULL DEFAULT 100 CHECK (default_priority BETWEEN 0 AND 1000),
@@ -221,7 +225,8 @@ CREATE TABLE taskq.queues (
     retention_hours       int         NOT NULL DEFAULT 48,  -- terminal rows stay hot this long
     failed_retention_hours int        NOT NULL DEFAULT 336, -- dead letters stay hot LONGER (14d):
                                                             -- redrive targets the hot table only (§13.1)
-    max_depth             int,        -- NULL = unlimited; ADVISORY producer backpressure (TQ429)
+    max_depth             int CHECK (max_depth IS NULL OR max_depth > 0),
+                                      -- NULL = unlimited; ADVISORY producer backpressure (TQ429)
     notify_enabled        boolean     NOT NULL DEFAULT true,
     created_at            timestamptz NOT NULL DEFAULT now(),
     updated_at            timestamptz NOT NULL DEFAULT now()
@@ -515,10 +520,10 @@ CREATE TABLE taskq.meta (
 -- min_client_version). The library maps package version -> supported contract range.
 ```
 
-**Installer seeding (one INSERT each — structural, not conventional):**
+**Installer seeding — staged by release (v1.6, R2-09/ADR-009):** the **0.1** migration seeds only real queues/profiles and the `control_state` rows (`tick`, `janitor_daily` due marker) — the 0.1 janitor trigger is the housekeeper tick's due-gated pass (§11.4), and neither `_system` nor `taskq.schedules` exists yet. The block below is the **0.2** migration's seeding, restoring the structural schedule-row trigger:
 
 ```sql
--- The janitor is a schedule row FROM DAY ONE, so "nothing ever calls maintenance"
+-- 0.2: the janitor becomes a schedule row, so "nothing ever calls maintenance"
 -- (DC 11.3) is impossible even if the worker-tick convention erodes (robustness graft):
 INSERT INTO taskq.queues (name) VALUES ('_system') ON CONFLICT DO NOTHING;
 INSERT INTO taskq.schedules (name, queue, job_type, cron, next_fire_at, catchup_policy, max_catchup)
@@ -565,7 +570,7 @@ Human operators use a personal role granted `taskq_operator`; superuser DML on t
 
 All lifecycle functions run in one short transaction, use DB time exclusively, and return **typed results** for expected races (`'lost'`, `'already_settled'`) so clients and the HTTP facade map them deterministically (409, not 500). Exceptions are reserved for caller errors (unknown queue `TQ001`, depth `TQ429`, redrive collision `TQ409`). Row locks are never held while a job executes — ownership during execution is the lease.
 
-**Status of the SQL below:** these bodies are the *normative reference implementation* — the load-bearing lines (the CAS WHERE clauses, the ON CONFLICT predicate, the try-lock admission, the lock-ordering discipline) are contract, not illustration. The shipping source of truth is the `taskq` package installer; this document is re-synced only when contract-visible behavior changes. **Lock-ordering discipline (global, deadlock-freedom):** whenever a function locks multiple `taskq.jobs` rows, it acquires them in **ascending `id` order**. Because a dependent is always enqueued after its dependencies and ids are uuidv7 (time-ordered), ascending-id order coincides with parents-before-children everywhere — `complete_job`'s own-job-CAS-then-children sequence, `enqueue`'s dep pass, and sibling settles all take locks in one global order, so no lock-wait cycle can form. (Client-supplied ids must be uuidv7 to preserve this; the library only generates v7.) **PL/pgSQL rowcount discipline:** zero-row `UPDATE ... RETURNING ... INTO` leaves its target NULL and `IF NOT <null>` never fires — every fence check below therefore uses `IF NOT FOUND` (or `GET DIAGNOSTICS`), never a `RETURNING true INTO`-style flag. This is a normative rule for the implementation, and the validation gates assert the fenced paths (§16.3).
+**Status of the SQL below:** these bodies are the *normative reference implementation* — the load-bearing lines (the CAS WHERE clauses, the ON CONFLICT predicate, the try-lock admission, the lock-ordering discipline) are contract, not illustration. The shipping source of truth is the `taskq` package installer; this document is re-synced only when contract-visible behavior changes. **Lock-ordering discipline (global, deadlock-freedom — v1.6, R2-06, replaces the uuidv7 time-ordering argument):** the proof is **graph-based**, never time-based. Invariants: (1) a dependency edge is only ever created from a newly inserted dependent to already-existing parents, and edges are immutable until deletion — so the public contract cannot introduce cycles; (2) every multi-row operation acquires **ancestor/parent rows before dependent rows**; (3) rows at the **same graph frontier** (a dep list, a dependent set, an arbitrary operator batch) are locked in ascending-id order as a deterministic *tie-break only*; (4) no function may use creation time, uuid version, or generator behavior as a correctness premise — uuidv7 buys index locality and FIFO tie-breaking, nothing more (two sessions in the same millisecond can produce ids whose sort order reverses causality); (5) `SKIP LOCKED` passes stay convergent via bounded tick sweeps; waiting operations all share the parent-frontier-then-id order. Caller-supplied job ids are **not accepted in 0.x** (no host needs them; if ever added, any UUID version must be safe because the proof no longer depends on id order). **PL/pgSQL rowcount discipline:** zero-row `UPDATE ... RETURNING ... INTO` leaves its target NULL and `IF NOT <null>` never fires — every fence check below therefore uses `IF NOT FOUND` (or `GET DIAGNOSTICS`), never a `RETURNING true INTO`-style flag. **Public-boundary validation (v1.6, R2-07):** every application-callable function validates its inputs at entry with registered TQ SQLSTATEs (`USING ERRCODE`) — worker/actor ids non-empty, claim batch 1–50, lease override 15–86400s, retry/snooze/release delays 0–30d, priority 0–1000, JSON arguments type/size-checked — so direct SQL callers get the same failure shapes the facade models, never raw cast/check errors. These are normative rules for the implementation, and the validation gates assert the fenced paths (§16.3). **PL/pgSQL rowcount discipline:** zero-row `UPDATE ... RETURNING ... INTO` leaves its target NULL and `IF NOT <null>` never fires — every fence check below therefore uses `IF NOT FOUND` (or `GET DIAGNOSTICS`), never a `RETURNING true INTO`-style flag. This is a normative rule for the implementation, and the validation gates assert the fenced paths (§16.3).
 
 ### 5.1 Backoff helper
 
@@ -606,8 +611,11 @@ CREATE OR REPLACE FUNCTION taskq.enqueue(
     p_workflow_id      uuid         DEFAULT NULL,
     p_step_key         text         DEFAULT NULL,
     p_parent_job_id    uuid         DEFAULT NULL,
-    p_headers          jsonb        DEFAULT NULL,
-    p_internal         boolean      DEFAULT false   -- settle-path followups: skips the depth gate
+    p_headers          jsonb        DEFAULT NULL
+    -- v1.6 (R2-07): p_internal is GONE from the public signature — a producer
+    -- could pass it to bypass the depth gate. The depth exemption for settle-path
+    -- followups lives in the OWNER-ONLY taskq._enqueue_followup (0.2), which
+    -- producers cannot execute.
 ) RETURNS TABLE (job_id uuid, created boolean)
 LANGUAGE plpgsql SECURITY DEFINER AS $$
 DECLARE
@@ -631,11 +639,13 @@ BEGIN
     -- against is happening. Skipped for settle-path followups (p_internal): chain steps
     -- are continuations of already-admitted work; a deep child queue must never fail a
     -- parent's settle (§5.5, §8).
-    IF NOT p_internal AND q.max_depth IS NOT NULL AND EXISTS (
+    -- v1.6 (R2-07): probe at max_depth - 1 — the v1.5 OFFSET max_depth accepted
+    -- row N+1 before rejecting. Still explicitly ADVISORY under concurrency/bulk.
+    IF q.max_depth IS NOT NULL AND EXISTS (
         SELECT 1 FROM taskq.jobs
         WHERE queue = p_queue AND status IN ('blocked','queued')
-        OFFSET q.max_depth LIMIT 1) THEN
-        RAISE EXCEPTION 'taskq: queue % at max_depth %', p_queue, q.max_depth USING ERRCODE = 'TQ429';
+        OFFSET greatest(q.max_depth - 1, 0) LIMIT 1) THEN
+        RAISE EXCEPTION 'queue % at max_depth %', p_queue, q.max_depth USING ERRCODE = 'TQ429';
     END IF;
 
     -- Dependencies: lock dep rows FOR SHARE so a dependency cannot complete between
@@ -665,6 +675,10 @@ BEGIN
             SELECT d.d AS id FROM (SELECT DISTINCT unnest(p_depends_on) AS d) d
             WHERE NOT EXISTS (SELECT 1 FROM taskq.jobs j WHERE j.id = d.d)
         LOOP
+            -- [0.3 contract only — R2-13/ADR-009: the archive does not exist before
+            -- 0.3. In 0.1 (no dependencies) this path is absent; in 0.2 a missing
+            -- parent is a typed TQ001 error — dependency resolution is hot-table-only
+            -- until the archive capability activates.]
             SELECT a.status INTO v_arch FROM taskq.jobs_archive a WHERE a.id = v_dep.id;
             IF NOT FOUND THEN
                 RAISE EXCEPTION 'taskq: unknown dependency id % ', v_dep.id USING ERRCODE = 'TQ001';
@@ -758,7 +772,7 @@ END $$;
 
 **Transactional enqueue is the point:** callers invoke `taskq.enqueue()` inside their own domain transaction — the queue is the outbox (the Go/Postgres job queue's core argument, PA §1.2).
 
-**Bulk enqueue** — `taskq.enqueue_many(p_queue text, p_jobs jsonb)`: one multi-row `INSERT ... ON CONFLICT DO NOTHING` against the same partial index, `RETURNING id, idempotency_key` to report exactly what landed (Diverse's proven bulk shape), capped at 1000 specs/call, **one** NOTIFY per queue per call, and **one depth probe per call** (never per spec). Bulk specs may not declare dependencies (fast path stays fast; DAG jobs use `enqueue`).
+**Bulk enqueue** — `taskq.enqueue_many(p_queue text, p_jobs jsonb)` (v1.6, R2-12 — the single `RETURNING` cannot by itself satisfy the one-result-per-input contract: `DO NOTHING RETURNING` reports inserted rows only, never the existing holder ids): one transaction, **one queue per call**, ≤1000 specs, dependencies forbidden, all validation before insert. Result is **one typed row per input in input order** — `(input_index, job_id, outcome created|existed)` — duplicates within the same request resolved deterministically (first occurrence may create; later ones report `existed` of it). Conflict holders are resolved by follow-up snapshot statements with the same convergence rule as single enqueue (a holder that settles mid-call is retried; exhaustion raises `TQ500` and rolls back the whole batch — no partial batches, no per-item errors, no HTTP 207 in 0.1). Still: **one** NOTIFY per queue per call and **one depth probe per call** (never per spec).
 
 ### 5.3 Claim — batch, cap-aware, deadlock-free, idle micro-reap
 
@@ -955,29 +969,86 @@ DECLARE
     v_notify_queues text[];
     v_spec jsonb;
     v_i int := 0;
+    v_job record;
 BEGIN
+    -- v1.6 (R2-01/ADR-007): LOCK-AND-READ FIRST — no mutation until replay
+    -- recognition, the fence, and every followup gate have all passed. The row
+    -- lock (own job = the graph parent, acquired before any dependent — R2-06)
+    -- makes the later plain UPDATE safe; replays of an already-settled complete
+    -- return here without ever reaching the followup gates, so a queue dropped
+    -- after the original success can never turn a harmless network retry into
+    -- an error.
+    SELECT j.status, j.current_attempt_id, j.finished_by_attempt_id, j.queue
+      INTO v_job
+      FROM taskq.jobs j WHERE j.id = p_job_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RETURN ('lost', NULL, NULL)::taskq.settle_result;          -- archived/unknown id
+    END IF;
+    IF v_job.status = 'succeeded' AND v_job.finished_by_attempt_id = p_attempt_id THEN
+        RETURN ('already_settled', 'succeeded', NULL)::taskq.settle_result;
+    END IF;
+    IF v_job.status <> 'running' OR v_job.current_attempt_id IS DISTINCT FROM p_attempt_id THEN
+        RETURN ('lost', NULL, NULL)::taskq.settle_result;          -- genuinely fenced out
+    END IF;
+
+    -- FOLLOWUP GATES — before any state change (ADR-007's order, executable).
+    -- 0.1 capability gate: the 0.1 contract ships without followups; a non-empty
+    -- array is client/contract skew. Registered SQLSTATE 'TQ501' (never message-
+    -- text-only — a bare RAISE would be P0001, invisible to SQLSTATE dispatch,
+    -- R2-01). The worker's response: terminal-fail the parent as
+    -- 'unsupported_followup', then soft-stop (version skew is fatal, feature 12).
+    IF p_followups IS NOT NULL AND jsonb_typeof(p_followups) = 'array'
+       AND jsonb_array_length(p_followups) > 0
+       AND NOT taskq.has_capability('followups') THEN
+        RAISE EXCEPTION 'followups are not enabled by this contract version'
+            USING ERRCODE = 'TQ501';
+    END IF;
+    -- 0.2 validation (active once the followups capability exists): every raise
+    -- carries USING ERRCODE = 'TQ422'. Deterministic invalids fail the settle
+    -- atomically; the worker terminal-fails the parent 'invalid_followup'
+    -- (dead-lettered, redrivable after the code fix). Nothing is truncated.
+    IF p_followups IS NOT NULL THEN
+        IF jsonb_typeof(p_followups) <> 'array' THEN
+            RAISE EXCEPTION 'p_followups must be a jsonb array, got %',
+                jsonb_typeof(p_followups) USING ERRCODE = 'TQ422';
+        END IF;
+        IF jsonb_array_length(p_followups) > 20 THEN
+            RAISE EXCEPTION
+                'followup cap is 20/settle, got % — wide fan-out goes through a planner job (§10)',
+                jsonb_array_length(p_followups) USING ERRCODE = 'TQ422';
+        END IF;
+        FOR v_spec IN SELECT * FROM jsonb_array_elements(p_followups) LOOP
+            v_i := v_i + 1;
+            IF COALESCE(v_spec->>'job_type', '') = '' THEN
+                RAISE EXCEPTION 'followup spec % has no job_type', v_i
+                    USING ERRCODE = 'TQ422';
+            END IF;
+            IF v_spec ? 'queue' AND NOT EXISTS
+               (SELECT 1 FROM taskq.queues q WHERE q.name = v_spec->>'queue') THEN
+                RAISE EXCEPTION 'followup spec % names unknown queue "%"',
+                    v_i, v_spec->>'queue' USING ERRCODE = 'TQ422';
+            END IF;
+        END LOOP;
+        v_i := 0;
+    END IF;
+
+    -- GRAPH-ORDER LOCKS (R2-06): the parent (own row) is locked above; dependents
+    -- are the next frontier — lock them now, id order as the deterministic
+    -- SAME-FRONTIER tie-break only (never a causality claim), before any mutation
+    -- of parent or children.
+    PERFORM 1 FROM taskq.jobs d
+     WHERE d.id IN (SELECT e.job_id FROM taskq.job_deps e WHERE e.depends_on = p_job_id)
+     ORDER BY d.id
+     FOR UPDATE;
+
+    -- All gates passed — mutate. Parent completion, attempt settle, children,
+    -- dependency unlock, and events commit in ONE transaction (lossless-atomic).
     UPDATE taskq.jobs j SET
         status = 'succeeded', outcome = 'success',
         worker_id = NULL, current_attempt_id = NULL, lease_expires_at = NULL,
         result = COALESCE(p_result, j.result), error = NULL, expiry_streak = 0,
         finished_at = now(), finished_by_attempt_id = p_attempt_id, updated_at = now()
-    WHERE j.id = p_job_id AND j.status = 'running' AND j.current_attempt_id = p_attempt_id;
-    -- The fencing CAS: rowcount is the fence. Checked via FOUND — NEVER via
-    -- `RETURNING true INTO flag` (a zero-row UPDATE leaves the flag NULL and
-    -- `IF NOT NULL-flag` silently skips the not-found branch, which would let a
-    -- fenced-out complete falsely succeed, promote dependents of an uncompleted
-    -- job, and gut the fencing story; §5 preamble, gate §16.3.1).
-
-    IF NOT FOUND THEN
-        -- Idempotent replay: did THIS attempt already settle it? (network-retried
-        -- complete after a lost response is a success, not a 409 — gap item 8)
-        IF EXISTS (SELECT 1 FROM taskq.jobs
-                    WHERE id = p_job_id AND finished_by_attempt_id = p_attempt_id
-                      AND status = 'succeeded') THEN
-            RETURN ('already_settled', 'succeeded', NULL)::taskq.settle_result;
-        END IF;
-        RETURN ('lost', NULL, NULL)::taskq.settle_result;  -- genuinely fenced out (reaped/superseded)
-    END IF;
+    WHERE j.id = p_job_id;
 
     UPDATE taskq.job_attempts SET status = 'succeeded', outcome = 'success',
            finished_at = now(), stats = COALESCE(p_stats, stats)
@@ -985,76 +1056,31 @@ BEGIN
 
     PERFORM taskq.emit_event(p_job_id, p_attempt_id, 'succeeded', p_worker_id, NULL, NULL);
 
-    -- Chain followups INSIDE the settle transaction (exactly-once): each spec gets a
-    -- derived idempotency key, so a chain step is enqueued exactly once no matter how
-    -- many times complete is retried or the job re-runs after a lost response.
-    -- ATOMIC AND LOSSLESS (ADR-007, v1.5 — supersedes v1.1's savepoint-per-spec and
-    -- v1.4's truncation guard): a successful parent MEANS every requested child is
-    -- durably enqueued. Deterministic invalids (cap exceeded, missing job_type,
-    -- unknown queue) raise TQ422, unwinding the WHOLE settle including the CAS above —
-    -- the worker then terminal-fails the parent (fail_job retryable=false,
-    -- 'invalid_followup: ...'), which is visible in dead letters and redrivable after
-    -- the code fix. That escape valve is what prevents the old wedge (an unsettleable
-    -- success re-executing into poison) WITHOUT ever committing success-minus-children.
-    -- Validation runs AFTER the fence/replay checks, so a replay of an
-    -- already-settled complete returns 'already_settled' untouched even if a followup
-    -- queue was since dropped. 'existed' from the derived key is success. Transient
-    -- errors unwind and retry the settle normally (replay-safe, §5 preamble). The
-    -- depth gate stays skipped (p_internal): child-queue backpressure must not fail a
-    -- parent settle (§8). Contract staging (ADR-009): the 0.1 contract raises TQ501
-    -- on non-empty p_followups; this design activates with the 0.2 contract.
+    -- Chain followups INSIDE the settle transaction — validated above, inserted
+    -- here, atomic with the parent (ADR-007). Each spec gets a derived idempotency
+    -- key, so a chain step is enqueued exactly once no matter how many times
+    -- complete is retried after a lost response; 'existed' from the derived key is
+    -- success. Casts inside the helper surface as TQ422, never native 22P02
+    -- (R2-07). Inserts go through the OWNER-ONLY taskq._enqueue_followup — it
+    -- holds the depth exemption (child-queue backpressure must not fail a parent
+    -- settle, §8) that the public enqueue no longer exposes (R2-07: p_internal is
+    -- gone from the producer surface). A failed parent has NO committed children —
+    -- a rejected complete rolls all of this back, so redrive cannot duplicate
+    -- chain steps (R2-01 redrive note).
     IF p_followups IS NOT NULL THEN
-        IF jsonb_typeof(p_followups) <> 'array' THEN
-            RAISE EXCEPTION 'TQ422: p_followups must be a jsonb array, got %',
-                jsonb_typeof(p_followups);
-        END IF;
-        IF jsonb_array_length(p_followups) > 20 THEN
-            RAISE EXCEPTION
-                'TQ422: followup cap is 20/settle, got % — wide fan-out goes through a planner job (§10)',
-                jsonb_array_length(p_followups);
-        END IF;
         FOR v_spec IN SELECT * FROM jsonb_array_elements(p_followups) LOOP
             v_i := v_i + 1;
-            IF COALESCE(v_spec->>'job_type', '') = '' THEN
-                RAISE EXCEPTION 'TQ422: followup spec % has no job_type', v_i;
-            END IF;
-            IF v_spec ? 'queue' AND NOT EXISTS
-               (SELECT 1 FROM taskq.queues q WHERE q.name = v_spec->>'queue') THEN
-                RAISE EXCEPTION 'TQ422: followup spec % names unknown queue "%"',
-                    v_i, v_spec->>'queue';
-            END IF;
-        END LOOP;
-        v_i := 0;
-        FOR v_spec IN SELECT * FROM jsonb_array_elements(p_followups) LOOP
-            v_i := v_i + 1;
-            PERFORM taskq.enqueue(
-                    p_queue           => COALESCE(v_spec->>'queue', (SELECT queue FROM taskq.jobs WHERE id = p_job_id)),
-                    p_job_type        => v_spec->>'job_type',
-                    p_payload         => COALESCE(v_spec->'payload', '{}'::jsonb),
-                    p_idempotency_key => COALESCE(v_spec->>'idempotency_key',
-                                                  format('chain:%s:%s', p_job_id,
-                                                         COALESCE(v_spec->>'step', v_i::text))),
-                    p_priority        => (v_spec->>'priority')::smallint,
-                    p_scheduled_at    => (v_spec->>'scheduled_at')::timestamptz,
-                    p_concurrency_key => v_spec->>'concurrency_key',
-                    p_workflow_id     => COALESCE((v_spec->>'workflow_id')::uuid,
-                                                  (SELECT workflow_id FROM taskq.jobs WHERE id = p_job_id)),
-                    p_step_key        => v_spec->>'step',
+            PERFORM taskq._enqueue_followup(
                     p_parent_job_id   => p_job_id,
-                    p_internal        => true);
+                    p_parent_queue    => v_job.queue,
+                    p_spec            => v_spec,
+                    p_spec_index      => v_i);
         END LOOP;
     END IF;
 
-    -- Pre-lock dependents in ascending id order (§5 preamble lock discipline) before
-    -- the DELETE/UPDATE cascade below, whose CTE would otherwise lock children in
-    -- arbitrary row order — two parents completing simultaneously with shared children
-    -- could deadlock each other, and a dep-declaring enqueue could deadlock a settle.
-    -- Child ids always sort after parent ids (uuidv7 + deps-exist-at-enqueue), so this
-    -- is one global order across enqueue, settle, and sibling settles.
-    PERFORM 1 FROM taskq.jobs d
-     WHERE d.id IN (SELECT e.job_id FROM taskq.job_deps e WHERE e.depends_on = p_job_id)
-     ORDER BY d.id
-     FOR UPDATE;
+    -- Dependents were already locked above (graph order, before mutation); the
+    -- cascade below therefore cannot deadlock a sibling settle or a dep-declaring
+    -- enqueue that follows the same parent-frontier-then-id discipline (R2-06).
 
     -- Dependency unlock: delete satisfied edges, decrement, promote at zero.
     -- O(direct dependents); no scan, no starvation window (kills qdarte F14).
@@ -1118,12 +1144,44 @@ BEGIN
         RETURN ('lost', NULL, NULL)::taskq.settle_result;
     END IF;
 
+    -- v1.6 (R2-03): PENDING CANCEL BRANCHES BEFORE FAILURE ACCOUNTING. A worker
+    -- failing a job whose cancellation an operator already requested lands
+    -- cancelled with the budget UNTOUCHED and the attempt marked cancelled — the
+    -- v1.5 body marked the attempt failed and charged failure_count on this path,
+    -- contradicting §3.3 and the snooze/release cancel branches. Only the
+    -- non-cancel paths below may touch failure accounting. (complete_job
+    -- deliberately does NOT check pending cancel: a valid completion wins until
+    -- the worker observes cancellation — §3.2.)
+    IF v_job.cancel_requested_at IS NOT NULL THEN
+        UPDATE taskq.jobs SET
+            status = 'cancelled', outcome = 'canceled',
+            worker_id = NULL, current_attempt_id = NULL, lease_expires_at = NULL,
+            progress = COALESCE(p_progress, progress),
+            error = left(p_error, 2000),
+            finished_at = now(), finished_by_attempt_id = p_attempt_id, updated_at = now()
+        WHERE id = p_job_id;
+        UPDATE taskq.job_attempts SET status = 'cancelled', outcome = 'canceled',
+               finished_at = now(), error = left(p_error, 2000), stats = COALESCE(p_stats, stats)
+        WHERE id = p_attempt_id AND status = 'running';
+        PERFORM taskq.emit_event(p_job_id, p_attempt_id, 'cancelled', p_worker_id,
+            left(p_error, 500), NULL);
+        PERFORM taskq.cancel_dependents(p_job_id, 'dependency cancelled');
+        RETURN ('ok', 'cancelled', NULL)::taskq.settle_result;
+    END IF;
+
+    -- v1.6 (R2-07): validate the caller-supplied retry hint at the public
+    -- boundary — negative or absurd delays are caller errors, not data.
+    IF p_retry_after_seconds IS NOT NULL
+       AND (p_retry_after_seconds < 0 OR p_retry_after_seconds > 2592000) THEN
+        RAISE EXCEPTION 'retry_after_seconds must be 0..2592000, got %',
+            p_retry_after_seconds USING ERRCODE = 'TQ422';
+    END IF;
+
     UPDATE taskq.job_attempts SET status = 'failed',
            finished_at = now(), error = left(p_error, 2000), stats = COALESCE(p_stats, stats)
     WHERE id = p_attempt_id AND status = 'running';
 
     IF p_retryable
-       AND v_job.cancel_requested_at IS NULL
        AND v_job.failure_count + 1 < v_job.max_attempts
     THEN
         v_delay := COALESCE(p_retry_after_seconds,
@@ -1144,13 +1202,11 @@ BEGIN
         RETURN ('retry_scheduled', 'queued', v_next)::taskq.settle_result;
     END IF;
 
-    -- Terminal failure = the dead-letter state.
+    -- Terminal failure = the dead-letter state. (Pending cancel already branched
+    -- above — v1.6; no cancel CASEs remain here.)
     UPDATE taskq.jobs SET
-        status = CASE WHEN v_job.cancel_requested_at IS NOT NULL THEN 'cancelled' ELSE 'failed' END,
-        outcome = CASE
-            WHEN v_job.cancel_requested_at IS NOT NULL THEN 'canceled'
-            WHEN NOT p_retryable THEN 'non_retryable'
-            ELSE 'retry_exhausted' END,
+        status = 'failed',
+        outcome = CASE WHEN NOT p_retryable THEN 'non_retryable' ELSE 'retry_exhausted' END,
         failure_count = failure_count + 1, expiry_streak = 0,
         worker_id = NULL, current_attempt_id = NULL, lease_expires_at = NULL,
         progress = COALESCE(p_progress, progress),
@@ -1158,16 +1214,12 @@ BEGIN
         finished_at = now(), finished_by_attempt_id = p_attempt_id, updated_at = now()
     WHERE id = p_job_id;
     UPDATE taskq.job_attempts
-        SET outcome = CASE WHEN v_job.cancel_requested_at IS NOT NULL THEN 'canceled'
-                           WHEN p_retryable THEN 'retry_exhausted' ELSE 'non_retryable' END
+        SET outcome = CASE WHEN p_retryable THEN 'retry_exhausted' ELSE 'non_retryable' END
         WHERE id = p_attempt_id;
-    PERFORM taskq.emit_event(p_job_id, p_attempt_id,
-        CASE WHEN v_job.cancel_requested_at IS NOT NULL THEN 'cancelled' ELSE 'failed' END,
+    PERFORM taskq.emit_event(p_job_id, p_attempt_id, 'failed',
         p_worker_id, left(p_error, 500), NULL);
     PERFORM taskq.cancel_dependents(p_job_id, 'dependency failed');
-    RETURN ('dead',
-            CASE WHEN v_job.cancel_requested_at IS NOT NULL THEN 'cancelled' ELSE 'failed' END,
-            NULL)::taskq.settle_result;
+    RETURN ('dead', 'failed', NULL)::taskq.settle_result;
 END $$;
 ```
 
@@ -1414,15 +1466,34 @@ END $$;                                 -- share one code path (one reclaim auth
 
 -- Operator "this WORKER is dead" — the 2am bulk verb (robustness graft, all judges):
 -- sugar over the one reclaim authority; budget/backoff/poison all apply normally.
+-- v1.6 (R2-02): capture the TARGET ids and reap exactly those. The v1.5 body called
+-- the generic reap_expired(N), whose global oldest-first selection could spend its
+-- limit on OTHER workers' older expired rows — reporting success while the named
+-- worker's jobs stayed running. Typed result: matched (backdated), reaped
+-- (reclaimed here), skipped (state changed between backdate and lock — e.g. the
+-- worker settled mid-call; reap_job re-checks under lock and declines).
 CREATE OR REPLACE FUNCTION taskq.expire_worker_leases(p_worker_id text, p_actor text)
-RETURNS int LANGUAGE plpgsql SECURITY DEFINER AS $$
-DECLARE v_n int;
+RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER AS $$
+DECLARE v_ids uuid[]; v_id uuid; v_reaped int := 0;
 BEGIN
-    UPDATE taskq.jobs SET lease_expires_at = now() - interval '1 second', updated_at = now()
-    WHERE status = 'running' AND worker_id = p_worker_id;
-    GET DIAGNOSTICS v_n = ROW_COUNT;
-    PERFORM taskq.reap_expired(greatest(v_n, 1));
-    RETURN v_n;
+    WITH backdated AS (
+        UPDATE taskq.jobs SET lease_expires_at = now() - interval '1 second', updated_at = now()
+        WHERE status = 'running' AND worker_id = p_worker_id
+        RETURNING id
+    ) SELECT array_agg(id ORDER BY id) INTO v_ids FROM backdated;
+
+    IF v_ids IS NOT NULL THEN
+        FOREACH v_id IN ARRAY v_ids LOOP
+            IF taskq.reap_job(v_id) THEN v_reaped := v_reaped + 1; END IF;
+        END LOOP;
+    END IF;
+    -- Per-job audit events come from reap_job itself (actor 'system', cause
+    -- lease_expired); the operator invocation is audited by the caller (CLI log /
+    -- facade actor) — job_events.job_id is NOT NULL, so no summary row here.
+    RETURN jsonb_build_object(
+        'matched', COALESCE(array_length(v_ids, 1), 0),
+        'reaped',  v_reaped,
+        'skipped', COALESCE(array_length(v_ids, 1), 0) - v_reaped);
 END $$;
 ```
 
@@ -1494,7 +1565,7 @@ Three distinct layers, one mechanism each:
 - **Ordering:** `(priority ASC, scheduled_at ASC, id ASC)` — priority bands, then due-time FIFO, then uuidv7 id as the deterministic tiebreaker both systems lacked. `jobs_claim_idx` serves this exact sort per queue (fixes qdarte F10).
 - **Fairness policy for these codebases:** big batches enqueue at `BACKGROUND`; interactive/chained work at `NORMAL`+. A 500k agent-refresh cannot starve a render because renders outrank it; two same-priority batches interleave FIFO. Queues are the isolation unit (each queue's claim scan is its own index prefix). Per-tenant round-robin engines are out of scope until sustained load approaches ~20k jobs/min in one queue (a multi-tenant task-orchestration platform territory — documented reopen boundary, not built).
 - **Backpressure:** producer side — optional `queues.max_depth` (advisory admission, `TQ429`, off by default); consumer side — bounded claim batch (≤50), `concurrency_limits` caps, `max_running = 0` resource pause valve, snooze/retry-after for provider quota latches (quota exhaustion becomes a scheduled retry, not budget burn).
-- **max_depth cost and scope (normative):** the gate is a bounded *existence probe* (`OFFSET max_depth LIMIT 1` — walks at most `max_depth` index entries, no aggregation), checked **once per `enqueue_many` call**, never per spec — an exact `count(*)` would be most expensive exactly when the flood it guards against is happening. And it applies to **producer intake only**: settle-path followups (`p_internal`, §5.5) are exempt — chain steps are continuations of already-admitted work, and backpressure on a child queue must never fail a parent's settle (it would convert a finished job into lease-expiry re-execution). Enabling `max_depth` on a chain-target queue is therefore safe by construction.
+- **max_depth cost and scope (normative):** the gate is a bounded *existence probe* (`OFFSET max_depth LIMIT 1` — walks at most `max_depth` index entries, no aggregation), checked **once per `enqueue_many` call**, never per spec — an exact `count(*)` would be most expensive exactly when the flood it guards against is happening. And it applies to **producer intake only**: settle-path followups (the owner-only followup inserter, §5.5) are exempt — chain steps are continuations of already-admitted work, and backpressure on a child queue must never fail a parent's settle (it would convert a finished job into lease-expiry re-execution). Enabling `max_depth` on a chain-target queue is therefore safe by construction. The exemption lives in `taskq._enqueue_followup` (owner-only, 0.2) — the public enqueue has no bypass parameter (v1.6, R2-07).
 
 ---
 
@@ -1591,6 +1662,7 @@ BEGIN
         UPDATE taskq.control_state SET last_error = 'cancel: ' || SQLERRM WHERE key = 'tick';
     END;
 
+    -- [0.2 contract only — absent from the 0.1 migration, ADR-009]
     BEGIN
         -- Cancel blocked/queued rows gated by a terminal dep — the convergence backstop
         -- for cancel_dependents' SKIP LOCKED skips (§5.9).
@@ -1600,6 +1672,7 @@ BEGIN
         UPDATE taskq.control_state SET last_error = 'deps: ' || SQLERRM WHERE key = 'tick';
     END;
 
+    -- [0.2 contract only — absent from the 0.1 migration, ADR-009]
     BEGIN
         v_n := taskq.finalize_workflows(50);   -- stamp workflows whose members are all terminal
         v_out := v_out || jsonb_build_object('workflows_finalized', v_n);
@@ -1607,9 +1680,38 @@ BEGIN
         UPDATE taskq.control_state SET last_error = 'workflows: ' || SQLERRM WHERE key = 'tick';
     END;
 
+    BEGIN
+        -- Stats snapshot for exporters/dashboards (§12.1): bounded, index-backed,
+        -- written to control_state key 'stats_snapshot' with as_of.
+        PERFORM taskq.refresh_stats_snapshot();
+    EXCEPTION WHEN OTHERS THEN
+        UPDATE taskq.control_state SET last_error = 'stats: ' || SQLERRM WHERE key = 'tick';
+    END;
+
+    -- v1.6 (R2-09, ADR-009 carve-out): the 0.1 DUE-GATED DAILY JANITOR. Schedules
+    -- are a 0.2 capability, so the tick itself carries the trigger: atomically
+    -- claim the 'janitor_daily' due marker (control_state.data holds next_due);
+    -- if due, run the janitor's independently bounded passes. Ordering is
+    -- load-bearing: reaping ALWAYS ran first (above) — a slow janitor can degrade
+    -- retention, never lease recovery. Row/time budgets inside taskq.janitor keep
+    -- the pass smaller than the tick cadence's overlap tolerance; an exception
+    -- block is a subtransaction, not an independent commit, so the janitor's own
+    -- per-pass error records (not this savepoint) are the observability surface.
+    -- Marker policy: advance next_due on successful claim; a failed pass records
+    -- last_error and stays due on the next tick. In 0.2 the seeded schedule row
+    -- replaces this trigger; the janitor function and its bounds are unchanged.
+    BEGIN
+        IF taskq.claim_janitor_due() THEN
+            v_out := v_out || jsonb_build_object('janitor', taskq.janitor());
+        END IF;
+    EXCEPTION WHEN OTHERS THEN
+        UPDATE taskq.control_state SET last_error = 'janitor: ' || SQLERRM WHERE key = 'tick';
+    END;
+
     UPDATE taskq.control_state SET last_finished_at = now() WHERE key = 'tick';
     RETURN v_out;
 END $$;
+-- EXECUTE: taskq_housekeeper + taskq_operator (ADR-011). No public HTTP route.
 ```
 
 **Who runs it — per deployment topology (normative):**
@@ -1662,6 +1764,8 @@ SELECT taskq.purge_queued('old_lane', NULL, 'operator:andi', 10000);
 SELECT taskq.expire_job($1, 'operator:andi');
 SELECT taskq.tick(); SELECT taskq.janitor();
 ```
+
+**Read surface (v1.6, ADR-011):** the psql one-liners below are illustrative of the *questions*; the granted answers are the safe views/functions (`queue_stats`, `dead_jobs`, `worker_status`, `get_job`, `taskq.metrics()`) — `taskq_observer`/`taskq_operator` hold no base-table SELECT, and raw `SELECT ... FROM taskq.jobs` is an audited owner break-glass path, not the runbook.
 
 **Hard operator rules:** (1) **never `UPDATE taskq.jobs SET status = ...` by hand** — always the functions, so events, budget, and invariants stay true (the Diverse rendering-reset bug, DC 11.10, now has a paved alternative AND a role grant blocking the unpaved one); (2) **no table outside `taskq` may FK into `taskq` tables** — enforced by the ownership split (`taskq_owner` owns the schema; the app/migration role holds no `REFERENCES` grant on it) plus the migration-time information_schema sweep (§16.2.5). Where migrations run as an owner/superuser role, the rail is convention + that sweep — stated honestly in §4; it is not a `REVOKE ... FROM PUBLIC` (which would be a no-op).
 
@@ -1743,7 +1847,7 @@ Per-job timeline = `job_events` ordered by identity `id` (no timestamp ties) + `
 Layered so the hot table stays small **by construction** (PA §2.1: hot-table churn is the #1 killer):
 
 1. **In-table terminal retention:** terminal rows stay in `taskq.jobs` for `queues.retention_hours` (default 48h) for the ops UI and workflow rollups. **Exception — `failed` rows (the dead-letter set) use `queues.failed_retention_hours` (default 336h = 14 days):** `redrive_job` targets the hot table only, and there is no unarchive path, so archiving dead letters at 48h would silently amputate redrive after a weekend (batch poisons Friday night, inspected Monday-after-next — still redrivable). Dead letters are few by definition; 14 days of them is cheap. Redriven or purge-cancelled rows age out on the normal clock. Partial indexes already exclude terminal rows from every hot path.
-2. **Archive move (janitor):** `DELETE ... RETURNING` into the partitioned `taskq.jobs_archive`, attempts aggregated into the row as jsonb, batched with `FOR UPDATE SKIP LOCKED`, guarded by `NOT EXISTS (job_deps.depends_on = id)` — the archiver **skips** parents still gating a dependent instead of wedging (kills DC 11.2's retry-the-poisoned-batch-forever) and can never un-gate anything (kills qdarte F15). Events are pruned, not archived.
+2. **Archive move (janitor, 0.3):** normative ordering (v1.6, R2-13 — never rely on cascade/`RETURNING` evaluation order against `job_attempts`' `ON DELETE CASCADE`): **select-and-lock** bounded candidates (`FOR UPDATE SKIP LOCKED`, guarded by `NOT EXISTS (job_deps.depends_on = id)`) → **aggregate attempts while the rows still exist** → **insert** complete archive rows → **delete** the hot jobs, all one transaction with a row-count conservation assertion (inserted == deleted) — the archiver **skips** parents still gating a dependent instead of wedging (kills DC 11.2's retry-the-poisoned-batch-forever) and can never un-gate anything (kills qdarte F15). Events are pruned, not archived.
 3. **Archive retention = partition DROP.** `taskq.rotate_archive_partitions(keep_months => 6)` runs inside the janitor — deletion without dead tuples, `n_dead_tup = 0` on the archive. Because a partition CREATE is DDL and the janitor runs under an application capability role, the function is **`SECURITY DEFINER` owned by `taskq_owner`** and EXECUTE-granted to `taskq_operator` (§4, ADR-010) — a permissions mismatch cannot silently disable retention. Rotation is engineered around a Postgres fact the naive design ignored: **you cannot CREATE/ATTACH a partition whose range overlaps rows already in the DEFAULT partition** — the DDL fails after scanning the default under ACCESS EXCLUSIVE, and there is no automatic re-split. Therefore:
    - **Rotate ahead:** every run ensures partitions exist for the current month **and the next two** — one missed janitor run (fleet down over a month boundary) can never strand rows in the default.
    - **Self-healing default:** before each CREATE, rotation checks the default partition for rows in the target range and **re-homes them first** (batched move: `DELETE ... RETURNING` from the default, `INSERT` into the freshly created partition — create under a temporary name, move, attach), so a default landing is repaired on the next run, not permanent.
@@ -1809,9 +1913,9 @@ await worker.run()
 Handler control flow: `return dict`/`Result.success` → `complete_job`; `raise Retry(after="1h30m")` → `fail_job(retryable=True, retry_after_seconds=...)` (hints normalized client-side); `raise NonRetryable(...)` → `fail_job(retryable=False)`; `raise Snooze(3600)` → budget-free snooze; unhandled exception → `fail_job(retryable=True)`.
 
 **Worker-loop guarantees (normative — where both systems' worker bugs are fixed):**
-1. **Heartbeat task per job** at `min(lease/3, 30s)`, retry+backoff on transport errors — never exits on one failure (kills DCP 7.2's one-strike death). On `ok = false` or 3 consecutive transport failures: **cancel the handler task immediately** — a fenced-out worker stops producing side effects. On `cancel_requested = true`: signal cooperative cancel (`ctx.raise_if_cancelled` fires at the next checkpoint) and **hard-cancel the handler asyncio task after a grace period (default 30s)** even if the handler never reaches a cooperative checkpoint — operator cancel of asyncio-cancellable code must not depend on handler cooperation (a handler hung in a non-cooperative section while its heartbeat coroutine stays alive would otherwise be uncancellable; the DB-side backstop for that wedge is `taskq.expire_job`'s synchronous reap, §5.9).
+1. **Heartbeat task per job** at `min(lease/3, 30s)`, retry+backoff on transport errors — never exits on one failure (kills DCP 7.2's one-strike death). On `ok = false` or 3 consecutive transport failures: **stop the handler** — for async handlers, cancel the task immediately; for thread-offloaded sync handlers (which Python cannot kill — a running call ignores `Future.cancel()`, v1.6/R2-11) signal the cooperative token, **suppress any later settlement from this attempt, and never release/snooze while the thread may still run** — keep the lease-loss loud (process exit if the thread never yields) and let lease expiry reclaim. On `cancel_requested = true`: signal cooperative cancel (`ctx.raise_if_cancelled` fires at the next checkpoint) and **hard-cancel the handler asyncio task after a grace period (default 30s)** even if the handler never reaches a cooperative checkpoint — operator cancel of asyncio-cancellable code must not depend on handler cooperation (a handler hung in a non-cooperative section while its heartbeat coroutine stays alive would otherwise be uncancellable; the DB-side backstop for that wedge is `taskq.expire_job`'s synchronous reap, §5.9).
 2. **Settle retries** on 5xx/timeout; `already_settled` = success; `lost` = ERROR log with the attempts-ledger reference, never report results elsewhere. No discarded finished batches.
-3. **Graceful shutdown:** SIGTERM / `shutdown_requested_at` → stop claiming → `ctx.cancel` after grace → `release_job(p_cause='worker_shutdown')` (budget-free, checkpoint attached) → presence bye.
+3. **Graceful shutdown:** SIGTERM / `shutdown_requested_at` → stop claiming → cooperative cancel, then after grace: async handlers are hard-cancelled and released (`release_job(p_cause='worker_shutdown')`, budget-free, checkpoint attached); **sync/thread handlers are never released while the thread lives** (R2-11) — the runtime either keeps the lease alive and waits, or exits the whole process and lets lease expiry reclaim → presence bye.
 4. **Unknown `job_type`** → `release_job(p_cause='no_handler', delay=60)` + loud log + startup assertion that subscribed queues' types are all handled (no budget burn, no spin, typed outcome for the `release_count` alert).
 5. **Housekeeper coroutine:** `taskq.tick()` + schedule firing (croniter) every ~5s, advisory-lock-deduped fleet-wide.
 6. **LISTEN** on `taskq_{queue}` via one dedicated non-pooled connection; degrade silently to polling; polling is always the correctness mechanism; skip LISTEN behind transaction-pooling pgbouncer.
@@ -1827,7 +1931,7 @@ Handler control flow: `return dict`/`Result.success` → `complete_job`; `raise 
 Installer detects `server_version_num`, records capabilities in `taskq.meta`, and swaps function bodies where profitable. Nothing above PG16 is load-bearing.
 
 ### 15.1 Baseline (PG16/17) — everything works
-`FOR UPDATE SKIP LOCKED`, partial unique indexes, `ON CONFLICT DO NOTHING` with index predicate, advisory locks, LISTEN/NOTIFY, per-table autovacuum/fillfactor, range partitioning: the correctness core is PG9.5–13 era. `taskq.uuid7()` uses the pure-SQL RFC-9562 fallback (both codebases also carry app-side generators; ids are accepted as enqueue parameters). Global vacuum backstops unavailable — per-table settings carry the load.
+`FOR UPDATE SKIP LOCKED`, partial unique indexes, `ON CONFLICT DO NOTHING` with index predicate, advisory locks, LISTEN/NOTIFY, per-table autovacuum/fillfactor, range partitioning: the correctness core is PG9.5–13 era. `taskq.uuid7()` uses the pure-SQL RFC-9562 fallback. (Caller-supplied job ids are **not accepted** in 0.x — v1.6/R2-06; ids are server-generated, and the deadlock proof no longer depends on id ordering anyway.) Global vacuum backstops unavailable — per-table settings carry the load.
 
 ### 15.2 PG18 — the deploy target (both systems already run it)
 
@@ -1969,7 +2073,7 @@ must be recorded explicitly; do not infer it from the final-gate packet alone.
 | Janitor meets a parent still referenced by edges | Skipped this pass (predicate) + RESTRICT FK backstop; archived after its dependent. No FK violation, no wedged batch, no un-gated dependent. |
 | Archive partition rotation missed | Rotate-ahead means one missed run strands nothing; if rows do land in the DEFAULT partition, `taskq_archive_default_rows > 0` alerts and the next janitor run **re-homes them before creating the overlapping partition** (Postgres refuses the CREATE otherwise — §13.3). Archival never blocks; recovery is automatic and loud. |
 | A followup spec is invalid at complete (unknown queue, malformed, cap exceeded) | Validation raises `TQ422` and the whole settle unwinds atomically — CAS included, nothing commits. The worker terminal-fails the parent (`fail_job` retryable=false, `invalid_followup`), which lands in dead letters and is redrivable after the code fix. Success-minus-children can never commit; the wedge (a finished job re-executing via lease expiry) is prevented by the terminal-fail escape, not by dropping children (§5.5, ADR-007). |
-| Downstream chain-target queue hits `max_depth` while a parent settles | Settle-path followups are exempt from the depth gate (`p_internal`) — backpressure is producer-intake-only; a deep child queue never fails a parent settle (§8). |
+| Downstream chain-target queue hits `max_depth` while a parent settles | Settle-path followups are exempt from the depth gate (owner-only inserter) — backpressure is producer-intake-only; a deep child queue never fails a parent settle (§8). |
 | Two parents of one dependent settle simultaneously, one succeeds and one fails | Promotion and cascade lock children in ascending-id order (no deadlock); if the fail-side cascade SKIP-LOCKED-skips the child, `finalize_dep_stragglers` cancels it within ~one tick. No permanently-blocked dependent (§5.9). |
 | Operator `expire_job` races a live heartbeat | Backdate + reap happen in one transaction under the row lock; the racing heartbeat blocks, then returns `ok=false` and the worker aborts the handler. The expire cannot be silently reverted (§5.9). |
 | Fenced-out worker calls complete with a stale attempt_id after reclaim | CAS matches zero rows; `IF NOT FOUND` (never a NULLable flag) routes to `already_settled` (its own prior settle) or `'lost'`. No false success, no dependent promotion, no followups (§5.5; gate §16.3.1). |
@@ -2006,6 +2110,8 @@ must be recorded explicitly; do not infer it from the final-gate packet alone.
 **Revision note (v1.1):** an adversarial review pass produced 35 findings; all substantive ones are folded into the sections above. The load-bearing corrections: `IF NOT FOUND` fencing discipline (a `RETURNING true INTO flag` fence was dead code on the zero-row path); the schedule/operator/workflow raw-DML flows moved behind `SECURITY DEFINER` functions to honor the role model; the claim path's per-candidate correlated cap count replaced with a per-call saturated-key set; ascending-id lock ordering across the dependency graph; savepoint-isolated, depth-exempt settle followups; synchronous-reap `expire_job`; snooze honoring pending cancels; the archive rotation re-written around Postgres's actual default-partition semantics (rotate-ahead + re-home + alert); dead letters retained 14 days; the fillfactor/HOT story corrected to heartbeats-only with scheduled REINDEX; heartbeat/checkpoint split with TOAST budgeting; the enqueue idempotency-loser convergence loop; archived-parent dependency resolution; and the full set of Diverse/qdarte migration dispositions (targeted claim, planner-job schedules, retry shim, terminal-failure reconciler, orchestration/rescue/artifact schedule owners, LLM engine queues, drain bridge, facade-hosted housekeeper).
 
 **Revision note (v1.2, Codex confirmation review 2026-07-09):** the qdarte-first migration now has explicit staging/prod/job-type interlocks, a rollback flag, a first-lane eligibility rule, a required per-job-type side-effect disposition matrix, and a worker-runtime compatibility decision before staging tests. This reconciles the external Codex review into the canonical spec without changing the target taskq state.
+
+**Revision note (v1.6, round-2 review fold-in 2026-07-18):** the second external review's 19 findings were accepted and folded in ([ADR-011](./adr/ADR-011-housekeeper-role-credentials.md) + this pass). Contract-visible changes: (1) **§5.5 `complete_job` reordered** — lock-and-read replay/fence recognition first, followup gates (`TQ501` capability gate + `TQ422` validation, both `USING ERRCODE` — a bare RAISE is `P0001` and invisible to SQLSTATE dispatch) before ANY mutation, graph-order dependent locks, then the mutation block; children insert via the owner-only `taskq._enqueue_followup` (R2-01). (2) **`fail_job` branches to budget-free `cancelled` before failure accounting** — the v1.5 body charged `failure_count` on the pending-cancel path (R2-03); retry hints bounds-checked. (3) **`expire_worker_leases` reaps captured target ids** via `reap_job`, returning `{matched, reaped, skipped}` — the generic-reaper form could spend its limit on other workers' rows (R2-02). (4) **Lock-order proof rebased from uuidv7 time-ordering to the dependency graph** (parents-before-dependents; id order = same-frontier tie-break only; caller-supplied ids not accepted in 0.x; §5 preamble, R2-06). (5) **Public-boundary hardening** — `p_internal` removed from `enqueue` (depth exemption moved to the owner-only inserter), input bounds validated with registered SQLSTATEs, `max_depth` probe off-by-one fixed + positive CHECK, queue names capped at 57 bytes for NOTIFY-channel safety (R2-07). (6) **Tick gains the 0.1 due-gated janitor pass + stats-snapshot pass**, reaper-first; dep/workflow finalizers badged 0.2; installer seeding staged by release (R2-09). (7) **Sync/thread handlers get an honest cancellation contract** — never released while the thread may run (§14, features 11/14, R2-11). (8) Bulk enqueue's one-result-per-input convergence contract (R2-12); archive-move ordering + 0.3 staging of archived-dependency resolution (R2-13); observer read surface = safe views/functions only (§11.5, ADR-011). The remaining round-2 deliverables — the canonical transport protocol (from review draft 03) and the complete 0.1 function bodies/manifest (R2-08) — are tracked as Stage-0 exit work, not doc amendments.
 
 **Revision note (v1.5, ADR fold-in 2026-07-18):** the design-review decisions (D-01..D-12) were accepted as [ADR-001..010](./adr/README.md) and folded in. Contract-visible changes: (1) **§4 role model** replaced by the five capability roles (`taskq_owner` NOLOGIN + producer/runner/observer/operator) with the SECURITY DEFINER hardening contract — pinned `search_path = pg_catalog, taskq, pg_temp`, `REVOKE EXECUTE FROM PUBLIC` at creation, qualified references, privilege-regression tests (ADR-010; the missing search_path/PUBLIC-revoke was a verified escalation surface). (2) **§5.5 followups** rewritten lossless-atomic: validate-then-enqueue with `TQ422` rejects, no savepoints, no truncation — supersedes v1.1's savepoint-per-spec and v1.4's truncation guard; §16.3/§17 entries updated; `followup_failed`/`followups_truncated` events removed; 0.1 contract raises `TQ501` on non-empty followups (ADR-007/009). (3) **`taskq.cancel_running_job`** added as the fenced worker-side cancel (ADR-007). (4) **§13.5 janitor** loses REINDEX — concurrent reindexing cannot run inside a function; it moves to the external `taskq maintenance` CLI; 0.1's janitor trigger is a hardwired daily tick pass until schedules land (ADR-009/010). (5) **Fixed `taskq` schema** — `schema=` removed from the public surface (ADR-002). (6) §14 route sketches demoted to illustrative pending the versioned transport protocol (ADR-005); facade authorization now cites ADR-006's authoritative-projection rule. Release staging (what ships in 0.1 vs 0.2/0.3) is ADR-009's, not this document's, concern — this spec remains the destination design.
 

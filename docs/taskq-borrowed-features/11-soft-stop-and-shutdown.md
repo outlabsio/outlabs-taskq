@@ -18,7 +18,7 @@ Define one shutdown contract so Diverse and QDarte workers behave identically un
 |---|---|
 | **0 Running** | Claiming + heartbeating |
 | **1 Soft stop** | Stop claiming new jobs; in-flight continue; cooperative cancel signals may be set |
-| **2 Grace deadline** | After `soft_stop_timeout`, hard-cancel handler tasks (`asyncio.CancelledError` / thread interrupt policy) |
+| **2 Grace deadline** | After `soft_stop_timeout`: async handlers are hard-cancelled (`asyncio.CancelledError`); **sync/thread handlers cannot be killed (R2-11)** — signal the cooperative token; if it never yields, hold the lease and wait, or exit the process (lease expiry reclaims). Never proceed to release while a thread may still run |
 | **3 Settle** | For each in-flight job: `release_job(p_cause='worker_shutdown', p_progress=...)` unless already settled |
 | **4 Stopped** | Heartbeats done; LISTEN closed; `stopped` event set; process may exit |
 
@@ -53,7 +53,8 @@ If `soft_stop_timeout is None`: wait indefinitely in phase 1 until in-flight com
 |---|---|
 | Handler returns normally during soft stop | `Complete` / etc. as usual |
 | Handler checkpoints then returns `Snooze(0)` | Allowed; budget-safe park |
-| Grace exceeded | Cancel task → `release_job(worker_shutdown)` with last progress |
+| Grace exceeded (async handler) | Cancel task → `release_job(worker_shutdown)` with last progress |
+| Grace exceeded (sync/thread handler) | No release while the thread lives (R2-11): wait with lease alive, or exit the process and let lease expiry reclaim; suppress settlement from the abandoned attempt |
 | Settle returns `already_settled` | Success |
 | Settle returns `lost` | Loud error; process still exits after logging attempt id |
 

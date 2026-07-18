@@ -27,13 +27,13 @@ Stored on `taskq.queues` (extend Unified Spec columns as needed):
 | `retry_mode` | `exponential` \| `fixed` | exponential |
 | `retry_base_seconds` | Backoff base | 30 |
 | `retry_cap_seconds` | Backoff cap | 3600 |
-| `retry_jitter_ratio` | 0–1 | 0.2 |
+| (retry jitter is FIXED ±15% in 0.1 — the SQL stamps no jitter column; a real stamped ratio is a possible 0.2+ addition, never a phantom field — R2-19) | | |
 | `default_priority` | 0–1000, lower wins | 100 |
 | `heartbeat_seconds` | Hint for workers | min(lease/3, 30) |
 | `failed_retention_hours` | Hot failed retention | 336 (14d) |
 | `terminal_retention_hours` | succeeded/cancelled | 48 |
 | `depth_limit` | Optional enqueue gate | null |
-| `dead_letter_queue` | Optional redirect name (see feature 07) | null (= stay on same queue as `failed`) |
+| `dead_letter_queue` | Optional redirect name (feature 07 — **0.3 conditional**, absent from the 0.1 model/migration) | null (= stay on same queue as `failed`) |
 
 Workers do **not** re-read these mid-flight for retries — values are **stamped onto the job at enqueue** (Unified Spec anti-KeyError rule). Changing a queue profile affects **future** enqueues only.
 

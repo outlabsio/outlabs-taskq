@@ -1,6 +1,6 @@
 # 13 — SQL Packaging Conventions
 
-> **Priority:** NICE (but do this early — cheap and prevents drift)
+> **Priority:** MUST for 0.1 (ADR-004/009 — canonical migrations are first-release scope)
 > **Provenance:** the mature Python/Postgres task library named queries + pre/post migrations; the Node/Postgres SQL-first worker numbered `.sql` files; Extraction Design Brief installer ownership
 > **Rejects:** the Node/Postgres queue library SQL-in-TypeScript monolith; dual Django+SQL tracks
 
@@ -84,7 +84,7 @@ startup verifies compatibility and stops on skew (feature 12), it never migrates
 - Required tables/views exist
 - Required functions exist with expected argument names (best-effort)
 - Critical indexes exist (`jobs_claim_idx`, `jobs_idem_uq`, attempts partial unique)
-- `taskq_worker` lacks direct DML on `taskq.jobs` (privilege probe when possible)
+- every application capability role (and PUBLIC, and `taskq_housekeeper`) lacks direct DML on `taskq.jobs`; function owners/ACLs/`proconfig` match the manifest (ADR-011)
 
 This is the anti-drift test Unified Spec mandates.
 
@@ -92,8 +92,8 @@ This is the anti-drift test Unified Spec mandates.
 
 ## 5. Acceptance tests
 
-1. Fresh DB `install` → `verify().ok`
-2. Double `install` idempotent
+1. Fresh DB `migrate` → `verify().ok`
+2. Double invocation of `migrate()` is idempotent (never `schema.sql` replay against a live DB)
 3. Mutate an index away → `verify()` fails
 4. Named query keys stable (`claim_jobs`, `enqueue`, `complete_job`, `fail_job`, `release_job`, `snooze_job`, `redrive_job`, `tick`)
 
