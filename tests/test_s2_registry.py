@@ -10,6 +10,7 @@ from hypothesis import given, strategies as st
 from pydantic import BaseModel, ValidationError
 
 from taskq import (
+    JobContext,
     ClaimedJob,
     EnqueueResult,
     EnqueueStatus,
@@ -143,6 +144,11 @@ def sync_handler(payload: Input) -> Output:
     return Output(doubled=payload.value * 2)
 
 
+async def contextual_handler(ctx: JobContext, payload: Input) -> Output:
+    ctx.raise_if_cancelled()
+    return Output(doubled=payload.value * 2)
+
+
 async def wrong_handler(payload: Output) -> Input:
     return Input(value=payload.doubled)
 
@@ -156,15 +162,23 @@ def test_optional_handler_annotations_are_validated() -> None:
         handler=valid_handler,
     )
     assert task.handler is valid_handler
-    with pytest.raises(TaskqConfigError, match="async"):
-        Task(
-            name="math.sync",
-            queue="default",
-            input_model=Input,
-            output_model=Output,
-            handler=sync_handler,
-        )
-    with pytest.raises(TaskqConfigError, match="annotations"):
+    sync_task = Task(
+        name="math.sync",
+        queue="default",
+        input_model=Input,
+        output_model=Output,
+        handler=sync_handler,
+    )
+    contextual_task = Task(
+        name="math.contextual",
+        queue="default",
+        input_model=Input,
+        output_model=Output,
+        handler=contextual_handler,
+    )
+    assert sync_task.handler_is_async is False
+    assert contextual_task.handler_is_async is True
+    with pytest.raises(TaskqConfigError, match="input annotation"):
         Task(
             name="math.wrong",
             queue="default",

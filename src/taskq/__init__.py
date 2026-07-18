@@ -18,19 +18,41 @@ from taskq.errors import (
     UnknownTaskError,
 )
 from taskq.client import TaskQ
+from taskq.execution import (
+    Cancel,
+    CancellationReason,
+    CancellationToken,
+    Complete,
+    HandlerResult,
+    JobContext,
+    NonRetryable,
+    Retry,
+    Snooze,
+    TaskCancelled,
+)
 from taskq.protocol import ClaimedJob, EnqueueResult, EnqueueStatus, TqCode
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.transport import TaskqTransport
 
 __all__ = [
     "ClaimedJob",
+    "Cancel",
+    "CancellationReason",
+    "CancellationToken",
+    "Complete",
     "EnqueueResult",
     "EnqueueStatus",
+    "HandlerResult",
+    "JobContext",
+    "NonRetryable",
+    "Retry",
     "RetryStrategy",
     "RetryValue",
+    "Snooze",
     "Task",
     "TaskQ",
     "TaskRegistry",
+    "TaskCancelled",
     "TaskqTransport",
     "TaskqBackpressureError",
     "TaskqCapabilityError",

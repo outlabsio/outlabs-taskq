@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import inspect
 import re
-from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
-from typing import Any, Generic, TypeAlias, TypeVar, get_type_hints
+from types import NoneType, UnionType
+from typing import Any, Generic, TypeAlias, TypeVar, Union, get_args, get_origin, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from taskq.errors import TaskqConfigError, UnknownTaskError
+from taskq.execution import HANDLER_RESULT_TYPES, JobContext
 
 InT = TypeVar("InT", bound=BaseModel)
 OutT = TypeVar("OutT", bound=BaseModel)
@@ -61,7 +63,7 @@ class RetryStrategy(BaseModel):
 
 
 RetryValue: TypeAlias = bool | int | RetryStrategy
-Handler: TypeAlias = Callable[..., Awaitable[Any]]
+Handler: TypeAlias = Callable[..., Any]
 
 
 def _validate_wire_name(value: str, *, field: str) -> None:
@@ -72,22 +74,36 @@ def _validate_wire_name(value: str, *, field: str) -> None:
 def _validate_handler(
     handler: Handler, input_model: type[BaseModel], output_model: type[BaseModel]
 ) -> None:
-    if not inspect.iscoroutinefunction(handler):
-        raise TaskqConfigError("handler must be async")
     try:
         hints = get_type_hints(handler)
     except Exception as exc:
         raise TaskqConfigError("handler annotations could not be resolved") from exc
+    signature = inspect.signature(handler)
+    if any(
+        parameter.kind is parameter.VAR_POSITIONAL for parameter in signature.parameters.values()
+    ):
+        raise TaskqConfigError("handler cannot declare variadic positional parameters")
     parameters = [
         parameter
-        for parameter in inspect.signature(handler).parameters.values()
+        for parameter in signature.parameters.values()
         if parameter.kind in (parameter.POSITIONAL_ONLY, parameter.POSITIONAL_OR_KEYWORD)
     ]
-    if not parameters:
-        raise TaskqConfigError("handler must declare an input parameter")
+    if len(parameters) not in (1, 2):
+        raise TaskqConfigError("handler must declare payload or context plus payload")
     input_name = parameters[-1].name
-    if hints.get(input_name) is not input_model or hints.get("return") is not output_model:
-        raise TaskqConfigError("handler input/output annotations must match the task models")
+    if hints.get(input_name) is not input_model:
+        raise TaskqConfigError("handler input annotation must match the task input model")
+    if len(parameters) == 2 and hints.get(parameters[0].name) is not JobContext:
+        raise TaskqConfigError("two-argument handler context must be annotated as JobContext")
+
+    result_hint = hints.get("return")
+    allowed = {output_model, NoneType, *HANDLER_RESULT_TYPES}
+    if get_origin(result_hint) in (Union, UnionType):
+        result_types = set(get_args(result_hint))
+    else:
+        result_types = {result_hint}
+    if None in result_types or not result_types or not result_types <= allowed:
+        raise TaskqConfigError("handler return annotation must use the task output or result types")
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +148,10 @@ class Task(Generic[InT, OutT]):
         if not isinstance(payload, dict):  # defensive: BaseModel currently always dumps an object
             raise TaskqConfigError("task input must serialize to a JSON object")
         return payload
+
+    @property
+    def handler_is_async(self) -> bool:
+        return self.handler is not None and inspect.iscoroutinefunction(self.handler)
 
 
 class TaskRegistry:
