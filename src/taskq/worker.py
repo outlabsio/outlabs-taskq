@@ -125,6 +125,7 @@ class _RunControl:
         self.runtime_failed = False
         self.handler: asyncio.Future[Any] | None = None
         self.operator_grace: asyncio.Task[None] | None = None
+        self.shutdown_deadline = False
 
 
 def _safe_handler_error(exc: BaseException) -> str:
@@ -152,9 +153,65 @@ class WorkerSupervisor:
         self.options = options or WorkerOptions()
         self.clock = clock or RealWorkerClock()
         self._executor: ThreadPoolExecutor | None = None
+        self._accepting = False
+        self._stopping = False
+        self._stopped = asyncio.Event()
+        self._capacity_changed = asyncio.Event()
+        self._capacity_changed.set()
+        self._force_stop = asyncio.Event()
+        self._active: dict[tuple[UUID, UUID], asyncio.Task[JobRunReport]] = {}
+        self._controls: dict[tuple[UUID, UUID], _RunControl] = {}
+        self._stop_task: asyncio.Task[None] | None = None
+        self._deadline_reached = False
 
     def __repr__(self) -> str:
         return f"WorkerSupervisor(worker_id={self.worker_id!r})"
+
+    @property
+    def available_slots(self) -> int:
+        return self._free_slots if self._accepting else 0
+
+    @property
+    def _free_slots(self) -> int:
+        return max(0, self.options.concurrency - len(self._active))
+
+    @property
+    def accepting(self) -> bool:
+        return self._accepting
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped.is_set()
+
+    @property
+    def requires_process_exit(self) -> bool:
+        return self._deadline_reached and any(
+            control.is_sync and control.handler is not None and not control.handler.done()
+            for control in self._controls.values()
+        )
+
+    def start(self) -> None:
+        if self._stopping or self.stopped:
+            raise WorkerCapacityError("worker supervisor is stopping")
+        self._accepting = True
+        self._refresh_capacity_event()
+
+    async def wait_for_capacity(self) -> None:
+        while self._free_slots == 0:
+            if not self._accepting:
+                raise WorkerCapacityError("worker supervisor is not accepting jobs")
+            self._capacity_changed.clear()
+            if self._free_slots > 0:
+                self._capacity_changed.set()
+                return
+            await self._capacity_changed.wait()
+        if not self._accepting:
+            raise WorkerCapacityError("worker supervisor is not accepting jobs")
+
+    def submit(self, claim: ClaimedJob) -> asyncio.Task[JobRunReport]:
+        if not self._accepting:
+            raise WorkerCapacityError("worker supervisor is not accepting jobs")
+        return self._reserve(claim)
 
     def _executor_for_sync(self) -> ThreadPoolExecutor:
         if self._executor is None:
@@ -165,6 +222,46 @@ class WorkerSupervisor:
         return self._executor
 
     async def run_job(self, claim: ClaimedJob) -> JobRunReport:
+        """Reserve and await one job without requiring the submission intake to be open."""
+        if self._stopping or self.stopped:
+            raise WorkerCapacityError("worker supervisor is stopping")
+        running = self._reserve(claim)
+        try:
+            return await asyncio.shield(running)
+        except asyncio.CancelledError:
+            await self.stop()
+            raise
+
+    def _reserve(self, claim: ClaimedJob) -> asyncio.Task[JobRunReport]:
+        key = (claim.job_id, claim.attempt_id)
+        if key in self._active:
+            raise WorkerCapacityError("job attempt is already running")
+        if self._free_slots == 0:
+            raise WorkerCapacityError("worker supervisor is at capacity")
+        running = asyncio.create_task(
+            self._run_reserved(claim, key),
+            name="taskq-job-supervisor",
+        )
+        self._active[key] = running
+        self._refresh_capacity_event()
+        return running
+
+    async def _run_reserved(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
+        fatal = False
+        try:
+            report = await self._execute_job(claim, key)
+            if report.fatal:
+                fatal = True
+                self._begin_soft_stop()
+            return report
+        finally:
+            self._controls.pop(key, None)
+            self._active.pop(key, None)
+            self._refresh_capacity_event()
+            if fatal and self._stop_task is None:
+                self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
+
+    async def _execute_job(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
         task = self.registry.resolve(claim.job_type)
         if task is None or task.handler is None:
             return await self._release_no_handler(claim)
@@ -190,8 +287,15 @@ class WorkerSupervisor:
             max_attempts=claim.max_attempts,
         )
         control = _RunControl(is_sync=not task.handler_is_async)
+        self._controls[key] = control
+        if self._stopping:
+            control.cancellation.cancel(CancellationReason.SHUTDOWN)
+        if self._deadline_reached:
+            self._enforce_shutdown_deadline(control)
         context.cancellation = control.cancellation
         control.handler = self._start_handler(task, context, payload)
+        if self._deadline_reached:
+            self._enforce_shutdown_deadline(control)
         heartbeat = asyncio.create_task(
             self._heartbeat_loop(claim, context, control), name="taskq-job-heartbeat"
         )
@@ -223,6 +327,7 @@ class WorkerSupervisor:
                     state=JobRunState.RUNTIME_FAILED,
                     outcome=JobRunOutcome.RUNTIME_ERROR,
                     cancellation_reason=reason,
+                    fatal=True,
                 )
             return JobRunReport(
                 job_id=claim.job_id,
@@ -238,13 +343,83 @@ class WorkerSupervisor:
         reason = control.cancellation.reason
         if reason is CancellationReason.OPERATOR:
             intent = Cancel(reason="operator_cancel_requested")
-        elif reason is CancellationReason.SHUTDOWN and isinstance(handler_error, TaskCancelled):
+        elif reason is CancellationReason.SHUTDOWN and (
+            isinstance(handler_error, TaskCancelled) or control.shutdown_deadline
+        ):
             intent = None
 
         report = await self._settle_intent(claim, intent, reason, context=context)
         heartbeat.cancel()
         await asyncio.gather(heartbeat, return_exceptions=True)
         return report
+
+    def _refresh_capacity_event(self) -> None:
+        if self._accepting and self._free_slots > 0:
+            self._capacity_changed.set()
+        elif self._free_slots == 0:
+            self._capacity_changed.clear()
+
+    def _begin_soft_stop(self) -> None:
+        self._accepting = False
+        self._stopping = True
+        self._capacity_changed.set()
+        for control in self._controls.values():
+            control.cancellation.cancel(CancellationReason.SHUTDOWN)
+
+    def _enforce_shutdown_deadline(self, control: _RunControl) -> None:
+        control.cancellation.cancel(CancellationReason.SHUTDOWN)
+        if not control.is_sync and control.handler is not None and not control.handler.done():
+            control.shutdown_deadline = True
+            control.handler.cancel()
+
+    def _enforce_all_shutdown_deadlines(self) -> None:
+        self._deadline_reached = True
+        for control in self._controls.values():
+            self._enforce_shutdown_deadline(control)
+
+    async def stop(self, *, cancel: bool = False) -> None:
+        self._begin_soft_stop()
+        if cancel:
+            self._force_stop.set()
+            self._enforce_all_shutdown_deadlines()
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
+        await asyncio.shield(self._stop_task)
+
+    async def _stop(self) -> None:
+        active = tuple(self._active.values())
+        if active:
+            drain = asyncio.gather(*active, return_exceptions=True)
+            if self.options.soft_stop_timeout is None and not self._force_stop.is_set():
+                force = asyncio.create_task(
+                    self._force_stop.wait(), name="taskq-worker-stop-escalation"
+                )
+                done, _ = await asyncio.wait((drain, force), return_when=asyncio.FIRST_COMPLETED)
+                if force in done and not drain.done():
+                    self._enforce_all_shutdown_deadlines()
+                force.cancel()
+                await asyncio.gather(force, return_exceptions=True)
+            elif not self._force_stop.is_set():
+                deadline = asyncio.create_task(
+                    self.clock.sleep(self.options.soft_stop_timeout),
+                    name="taskq-worker-stop-deadline",
+                )
+                force = asyncio.create_task(
+                    self._force_stop.wait(), name="taskq-worker-stop-escalation"
+                )
+                done, _ = await asyncio.wait(
+                    (drain, deadline, force), return_when=asyncio.FIRST_COMPLETED
+                )
+                if drain not in done:
+                    self._enforce_all_shutdown_deadlines()
+                deadline.cancel()
+                force.cancel()
+                await asyncio.gather(deadline, force, return_exceptions=True)
+            await drain
+        if self._executor is not None:
+            await asyncio.to_thread(self._executor.shutdown, True)
+            self._executor = None
+        self._stopped.set()
 
     def _start_handler(
         self, task: Task[Any, Any], context: JobContext, payload: BaseModel
@@ -558,9 +733,7 @@ class WorkerSupervisor:
         )
 
     async def aclose(self) -> None:
-        if self._executor is not None:
-            await asyncio.to_thread(self._executor.shutdown, True)
-            self._executor = None
+        await self.stop(cancel=True)
 
 
 __all__ = [
