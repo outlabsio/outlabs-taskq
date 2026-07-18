@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.1.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.2.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.1.1"
+CONTRACT_VERSION = "0.1.2"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -139,6 +139,7 @@ COMPOSITES = {
         ("lease_expires_at", "timestamp with time zone"),
         ("workflow_id", "uuid"),
         ("step_key", "text"),
+        ("lease_seconds", "integer"),
     ),
     "settle_result": (
         ("result", "text"),
@@ -279,4 +280,4 @@ REPLAY_RULES = {
 # Mutable values are deliberately not frozen; only required seed identities and
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
-META_SEEDS = {"contract_version": '"0.1.1"', "capabilities": '{"active": []}'}
+META_SEEDS = {"contract_version": '"0.1.2"', "capabilities": '{"active": []}'}

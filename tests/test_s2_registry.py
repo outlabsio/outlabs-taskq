@@ -278,6 +278,7 @@ def test_claimed_job_fence_is_excluded_from_repr_and_dump() -> None:
         failure_count=0,
         max_attempts=5,
         lease_expires_at=datetime.now(UTC),
+        lease_seconds=300,
     )
     assert job.attempt_id == fence
     assert str(fence) not in repr(job)

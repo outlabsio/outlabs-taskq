@@ -55,7 +55,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same 0.1.1 ledger and version."""
+    """Both supported paths end at the same full 0.1.2 ledger and version."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -69,6 +69,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
         assert [migration.id for migration in migrations] == [
             "0001_initial",
             "0002_contract_0_1_1",
+            "0003_contract_0_1_2",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -80,15 +81,27 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 )
                 assert before.scalar_one() == "0.1"
                 await conn.commit()
+                second: Migration = migrations[1]
+                applied = await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, [second]))
+                assert applied == ["0002_contract_0_1_1"]
+                at_0_1_1 = await conn.exec_driver_sql(
+                    "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
+                )
+                assert at_0_1_1.scalar_one() == "0.1.1"
+                await conn.commit()
             await migrate(conn)
             version = await conn.exec_driver_sql(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            assert version.scalar_one() == "0.1.1"
+            assert version.scalar_one() == "0.1.2"
             ledger = await conn.exec_driver_sql(
                 "SELECT id FROM taskq.schema_migrations ORDER BY id"
             )
-            assert list(ledger.scalars()) == ["0001_initial", "0002_contract_0_1_1"]
+            assert list(ledger.scalars()) == [
+                "0001_initial",
+                "0002_contract_0_1_1",
+                "0003_contract_0_1_2",
+            ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname='taskq' AND p.prokind='f'"

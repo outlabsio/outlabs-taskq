@@ -177,7 +177,7 @@ async def test_runner_presence_heartbeat_snooze_and_cancel_replays(
     assert replay is not None and replay["result"] == "already_settled"
 
     presence = await runner.fetchrow(
-        "SELECT * FROM taskq.worker_heartbeat($1, $2, 'host', 42, '0.1.1', '{}'::jsonb)",
+        "SELECT * FROM taskq.worker_heartbeat($1, $2, 'host', 42, '0.1.2', '{}'::jsonb)",
         "presence-worker",
         ["r3_runner"],
     )
@@ -223,7 +223,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.1.1"
+    assert meta["contract_version"] == "0.1.2"
     assert _json(meta["capabilities"]) == {"active": []}
 
     await runner.fetchrow(

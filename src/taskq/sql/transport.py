@@ -270,6 +270,7 @@ class SqlTaskqTransport:
                 "lease_expires_at",
                 "workflow_id",
                 "step_key",
+                "lease_seconds",
             )
             decoded_jobs = []
             for value in row["jobs"] or ():

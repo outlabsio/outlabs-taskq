@@ -92,6 +92,7 @@ def main() -> None:
     assert [migration.id for migration in discover_migrations()] == [
         "0001_initial",
         "0002_contract_0_1_1",
+        "0003_contract_0_1_2",
     ]
     assert len(FUNCTIONS) == 40
 
@@ -115,6 +116,7 @@ def main() -> None:
         migrated = _run([str(taskq_cli), "migrate", dsn], cwd=Path.cwd()).stdout
         assert "applied 0001_initial" in migrated
         assert "applied 0002_contract_0_1_1" in migrated
+        assert "applied 0003_contract_0_1_2" in migrated
         verified = _run([str(taskq_cli), "verify", dsn], cwd=Path.cwd()).stdout
         assert "[ok] function_catalog" in verified
         assert verified.endswith("verify: ok\n")

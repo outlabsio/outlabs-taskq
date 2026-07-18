@@ -146,7 +146,9 @@ async def test_runner_transport_all_commands_and_fence_redaction(
     assert await transports["runner"].worker_heartbeat("worker", [queue]) is False
 
     await _enqueue(transports, queue)
-    job_id, attempt_id = await _claim(transports, queue, "worker")
+    claim = await transports["runner"].claim(queue, "worker")
+    assert claim.state is ClaimState.CLAIMED and claim.jobs[0].lease_seconds == 300
+    job_id, attempt_id = claim.jobs[0].job_id, claim.jobs[0].attempt_id
     assert str(attempt_id) not in caplog.text
     heartbeat = await transports["runner"].heartbeat(
         job_id, attempt_id, "worker", progress={"cursor": 1}, stats={"cpu": 2}
@@ -196,7 +198,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.1.1"
+    assert meta.contract_version == "0.1.2"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -282,7 +284,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.1.1"
+    assert (await transport.get_contract_meta()).contract_version == "0.1.2"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

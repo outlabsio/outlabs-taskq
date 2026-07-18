@@ -557,6 +557,7 @@ class ClaimedJob(BaseModel):
     lease_expires_at: datetime
     workflow_id: UUID | None = None
     step_key: str | None = None
+    lease_seconds: int = Field(ge=15, le=86400)
 
 
 ClaimResult.model_rebuild()

@@ -42,7 +42,11 @@ async def test_benchmark_scenario_records_json(
     assert fingerprint["jobs_rows"] == 0
     assert fingerprint["jobs_live_tuples"] == 0
     assert fingerprint["jobs_dead_tuples"] == 0
-    assert fingerprint["migration_ledger"] == ["0001_initial", "0002_contract_0_1_1"]
+    assert fingerprint["migration_ledger"] == [
+        "0001_initial",
+        "0002_contract_0_1_1",
+        "0003_contract_0_1_2",
+    ]
     assert len(result["runs"]) == 3
     assert result["summary"]["median_throughput_rows_per_second"] > 0
     assert result["database"]["wal_bytes"] >= 0

@@ -25,15 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Contract 0.1.2 implementation open** — ADR-013 resolves S2-CQ-01 docs-first; migration 0003 gates S2-04 |
-| Suite | 217/217 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
+| Stage | **Stage 2B S2-04 specification open** — contract 0.1.2 is implemented, verified, and cross-version green |
+| Suite | 221/221 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Implement and prove immutable migration 0003 on PG18/PG16, then freeze S2-04 |
+| Next review | Freeze the S2-04 worker lifecycle, cancellation matrix, APIs, and acceptance evidence |
 
 ## Now — Stage 2B worker runtime
 
-- [ ] **S2-CI-01 contract 0.1.2 implementation** — immutable `0003`, appended effective lease projection, Python decode, exact verifier/parity, fresh-chain and full upgrade evidence on PG16/PG18
-- [ ] **S2-04-SPEC** — freeze worker lifecycle, state machine, cancellation matrix, module/API boundary, and acceptance matrix *(blocked until S2-CI-01 is green)*
+- [ ] **S2-04-SPEC** — freeze worker lifecycle, state machine, cancellation matrix, module/API boundary, and acceptance matrix
 - [ ] **S2-04A** — execution context, cancellation token, closed handler-result types, sync/async registration, and deterministic test utilities
 - [ ] **S2-04B** — heartbeat-per-job and fenced per-job supervision
 - [ ] **S2-04C** — verb-aware settlement replay policy and programmable lost-response injection
@@ -59,7 +58,8 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
-- [x] **S2-CQ-01 · Effective claimed lease adjudicated docs-first** — accepted ADR-013 and amended Protocol v1, the Function Manifest, and Unified Spec §14 before SQL: contract 0.1.2 appends the exact effective `lease_seconds`, retains `lease_expires_at`, and bans client-wall-clock duration derivation; implementation remains separately gated as S2-CI-01.
+- [x] **S2-CI-01 · Contract 0.1.2 implemented and proven** — immutable migration `0003` appends `claimed_job.lease_seconds`, returns the exact effective duration, advances meta without changing the 40-function surface, and is decoded by the Python transport; `verify()` plus an independent ordered catalog assertion, default/stamped/override vectors, fresh install, and the full `0001 → 0002 → 0003` upgrade chain pass on PG18.3 and PG16.14 (221/221 plus the million-row plan gate on both).
+- [x] **S2-CQ-01 · Effective claimed lease adjudicated docs-first** — accepted ADR-013 and amended Protocol v1, the Function Manifest, and Unified Spec §14 before SQL: contract 0.1.2 appends the exact effective `lease_seconds`, retains `lease_expires_at`, and bans client-wall-clock duration derivation; implementation was separately gated as S2-CI-01.
 - [x] **S2-AUDIT-03 · Function-specific outcome enforcement** — every scalar and composite transport result is checked against its command's own protocol-owned outcome set; rollback-only wrong-command outcomes become `TQ500` even when the value is valid for a different command (217/217 on PG18 and PG16, plus the plan gate on both).
 - [x] **S2-AUDIT-02 · Permanent acceptance evidence** — transport-level 20-way dedup proves one `created`/19 `existed`, captured logs remain fence-free, SQL construction/commands leave no background tasks or checked-out connections, transaction vectors conserve domain/job/event rows, and CI now runs the full suite on PG16/PG18 plus explicit core/HTTP/outlabs isolation on Python 3.12/3.13 and on every Python-3.12 wheel/sdist; all local mirrors pass (216/216 + plan gate on both PG versions, 73 Python-3.13 unit tests).
 - [x] **S2-AUDIT-01 · Protocol single-source correction** — `taskq.protocol` now owns the closed 30-command names, SQL identities, capability roles, outcomes, TQ errors/retryability, and replay rules; typed settle/job/operator enums reject invented values, while independent parity proves exact agreement with the Tier-0-derived machine manifest (214/214 on PG18).
