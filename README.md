@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stage 1 and Stage 2A complete** — typed tasks, registry, the complete async SQL transport, and caller-transactional `TaskQ` enqueue are implemented; the worker runtime is next. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1, 2A, and 2B complete** — SQL kernel (contract 0.1.2), typed tasks/registry, the complete async SQL transport, caller-transactional `TaskQ` enqueue, and the worker supervisor (execution primitives, heartbeat supervision, settlement replay, bounded lifecycle) are implemented; S2-05 (NOTIFY loop + worker CLI) is next after the round-4 review. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -12,7 +12,7 @@ Start here:
 
 | Doc | What it is |
 |---|---|
-| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..012) — override conflicting passages elsewhere** |
+| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..013) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
 | [`TASKS.md`](TASKS.md) | **Live execution tracker — start here to contribute** |
 | [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |
@@ -36,16 +36,18 @@ pip install outlabs-taskq[http]     # + FastAPI facade / HTTP client
 pip install outlabs-taskq[outlabs]  # + outlabs-auth adapter
 ```
 
-## Package layout (target)
+## Package layout
 
 ```
 src/taskq/
-  sql/           # installer + schema
-  client.py      # asyncio SQL client
-  worker.py      # claim / heartbeat / settle loop
-  models.py      # pydantic contracts (only copy)
-  http/          # optional FastAPI facade
-  cli.py
+  sql/           # migrations 0001-0003, runner/verifier, manifest, SQL transport
+  protocol.py    # closed command/outcome/error single-source (Tier-0 parity-tested)
+  registry.py    # typed Task[In, Out] registry
+  client.py      # TaskQ facade: transactional typed enqueue
+  transport.py   # TaskqTransport protocol
+  worker.py      # supervisor: heartbeat, settle replay, bounded lifecycle
+  cli.py         # migrate / verify (worker CLI lands with S2-05)
+  http/          # optional FastAPI facade (Stage 3, not started)
 ```
 
 ## Consumers
