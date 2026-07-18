@@ -173,6 +173,13 @@ async def _truncate_taskq(conn: asyncpg.Connection) -> None:
     if names:
         targets = ", ".join(f'taskq."{name}"' for name in names)
         await conn.execute(f"TRUNCATE {targets} CASCADE")
+    await conn.execute(
+        """
+        INSERT INTO taskq.control_state (key) VALUES
+            ('tick'), ('janitor_daily'), ('stats_snapshot')
+        ON CONFLICT (key) DO NOTHING
+        """
+    )
 
 
 @pytest.fixture

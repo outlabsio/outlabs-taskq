@@ -26,17 +26,16 @@
 | | |
 |---|---|
 | Stage | **1 — round-3 remediation in progress**; ADR-012 resolved Contract questions; Stage 2A closed |
-| Suite | 64/64 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
+| Suite | 102/102 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Round 3 verdict **BLOCKED**: 4 HIGH, 2 MEDIUM, 1 LOW, 2 Contract questions |
 
 ## Now — Round-3 remediation
 
-- [ ] **R3-F01 · Exact machine-readable manifest + verifier** — close R3-01 across object-set equality, function identity/attributes/ACLs, roles, tables/views/types/indexes/constraints, DML denial, seeds, and rollback-only corruption vectors.
+- [ ] **R3-F02 · Migration lock failure recovery** — close R3-02 for sync/async and caller/runner-owned transactions; prove concurrent recovery after injected failure.
 
 ## Next — Round-3 remediation
 
-- [ ] **R3-F02 · Migration lock failure recovery** — close R3-02 for sync/async and caller/runner-owned transactions; prove concurrent recovery after injected failure.
 - [ ] **R3-F03 · Reserved-role validation** — close R3-03 by atomically rejecting unsafe pre-existing LOGIN/elevated/member roles before grants and verifying the role manifest.
 - [ ] **R3-F04 · Manifest-complete T2/T8 coverage** — close R3-04 with collection completeness, all public-function behavior/error/grant vectors, shadow probes, installer concurrency/failure/CLI/sync/compatibility cases, and broader T4 operations where already contracted.
 - [ ] **R3-F05 · Built-artifact CI gate** — close R3-05 by installing wheel and sdist outside the source tree, checking import isolation, entry points, packaged migration discovery, migrate, and verify.
@@ -58,10 +57,11 @@
 
 ## Round-3 finding dispositions
 
-All seven findings are **accepted as source-backed**, pending the two contract decisions above. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
+All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
 
+- [x] **R3-F01 · Exact machine-readable manifest + verifier** — the independent 0.1.1 catalog projection closes the 40-function surface and exact role/relation/type/index/constraint/view/ACL/seed axes; read-only verification rejects 36 rollback-only corruptions, including all five R3-01 counterexamples, then proves restoration green (102/102 on PG18).
 - [x] **R3-CI · Implement contract 0.1.1** — immutable migration `0002_contract_0_1_1` adds the owner-only byte-safe truncation helper, applies ADR-012 null boundaries and diagnostic caps, advances the contract version, and passes fresh-chain plus `0001` upgrade vectors (64/64 on PG18).
 - [x] **R3-CQ · Contract questions adjudicated docs-first** — accepted [ADR-012](docs/adr/ADR-012-null-boundaries-byte-safe-diagnostics.md) makes explicit null invalid (`TQ422`), caps stored diagnostics by UTF-8 bytes with settlement-safe truncation, adds the owner-only helper to the Function Manifest before SQL, and advances the immutable migration chain to contract 0.1.1/`0002`.
 - [x] **R3-01 · External response processed** — the immutable [round-3 response](docs/design-review-3/RESPONSE.md) was independently adjudicated: verdict BLOCKED; all 7 findings accepted; CQ-01/CQ-02 recorded above; S2-01 remains closed.

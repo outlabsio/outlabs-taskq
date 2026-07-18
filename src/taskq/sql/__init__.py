@@ -50,6 +50,7 @@ from pydantic import BaseModel
 from sqlalchemy import bindparam, text
 
 from taskq import __version__
+from taskq.sql import manifest as _manifest
 
 if TYPE_CHECKING:
     from sqlalchemy.engine import Connection
@@ -435,11 +436,9 @@ class VerifyReport(BaseModel):
 async def verify(conn: AsyncConnection) -> VerifyReport:
     """Read-only check of the live database against the packaged contract.
 
-    Probes: schema exists; ledger checksums match the packaged migration
-    chain (no pending, no unknown, no drifted files); every ``taskq``
-    function is SECURITY DEFINER, owned by ``taskq_owner``, with the pinned
-    ``search_path``; no function is EXECUTE-grantable by PUBLIC; and the six
-    capability roles exist (ADR-010/011).
+    The probes compare exact closed object sets, catalog identities and
+    attributes, grants, role safety, relation shapes, seed identities, and
+    packaged migration checksums against the machine manifest (ADR-004/011).
     """
     return await conn.run_sync(_verify_impl)
 
@@ -457,9 +456,21 @@ def _verify_impl(conn: Connection, migrations: Sequence[Migration] | None = None
         checks = [
             _check_schema(conn),
             _check_ledger(conn, migrations),
+            _check_function_catalog(conn),
             _check_function_hardening(conn),
             _check_public_execute(conn),
+            _check_function_privileges(conn),
             _check_roles(conn),
+            _check_role_attributes(conn),
+            _check_relations(conn),
+            _check_composites(conn),
+            _check_table_shapes(conn),
+            _check_constraints(conn),
+            _check_indexes(conn),
+            _check_views(conn),
+            _check_relation_privileges(conn),
+            _check_seed_state(conn),
+            _check_external_foreign_keys(conn),
         ]
     finally:
         if opened and conn.in_transaction():
@@ -468,12 +479,20 @@ def _verify_impl(conn: Connection, migrations: Sequence[Migration] | None = None
 
 
 def _check_schema(conn: Connection) -> VerifyCheck:
-    found = conn.execute(
-        text("SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = :schema"),
+    owner = conn.execute(
+        text(
+            "SELECT pg_catalog.pg_get_userbyid(nspowner) "
+            "FROM pg_catalog.pg_namespace WHERE nspname = :schema"
+        ),
         {"schema": SCHEMA},
     ).scalar()
-    details = () if found else (f"schema '{SCHEMA}' does not exist (run `taskq migrate`)",)
-    return VerifyCheck(name="schema_exists", ok=found is not None, details=details)
+    if owner is None:
+        details = (f"schema '{SCHEMA}' does not exist (run `taskq migrate`)",)
+    elif owner != _manifest.SCHEMA_OWNER:
+        details = (f"schema '{SCHEMA}' is owned by {owner!r}, expected 'taskq_owner'",)
+    else:
+        details = ()
+    return VerifyCheck(name="schema_exists", ok=not details, details=details)
 
 
 def _check_ledger(conn: Connection, migrations: Sequence[Migration]) -> VerifyCheck:
@@ -514,15 +533,36 @@ def _check_ledger(conn: Connection, migrations: Sequence[Migration]) -> VerifyCh
 
 _FUNCTIONS_SQL = text(
     """
-    SELECT p.oid::regprocedure::text AS signature,
+    SELECT pg_catalog.format(
+               '%I.%I(%s)', n.nspname, p.proname,
+               pg_catalog.replace(pg_catalog.oidvectortypes(p.proargtypes), ', ', ',')
+           ) AS signature,
+           pg_catalog.pg_get_function_arguments(p.oid) AS arguments,
+           pg_catalog.pg_get_function_result(p.oid) AS result,
+           l.lanname AS language,
+           p.provolatile::text AS volatility,
+           p.proparallel::text AS parallel,
+           p.proisstrict AS strict,
+           p.proleakproof AS leakproof,
            pg_catalog.pg_get_userbyid(p.proowner) AS owner,
            p.prosecdef AS secdef,
            p.proconfig AS config,
            p.proacl IS NULL AS default_acl,
            EXISTS (SELECT 1 FROM pg_catalog.aclexplode(p.proacl) a
-                    WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute
+                    WHERE a.grantee = 0 AND a.privilege_type = 'EXECUTE') AS public_execute,
+           ARRAY(
+               SELECT COALESCE(r.rolname, 'PUBLIC') ||
+                      CASE WHEN a.is_grantable THEN '*' ELSE '' END || '/' ||
+                      pg_catalog.pg_get_userbyid(a.grantor)
+                 FROM pg_catalog.aclexplode(p.proacl) a
+                 LEFT JOIN pg_catalog.pg_roles r ON r.oid = a.grantee
+                WHERE a.privilege_type = 'EXECUTE'
+                  AND a.grantee <> p.proowner
+                ORDER BY 1
+           ) AS grants
       FROM pg_catalog.pg_proc p
       JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace
+      JOIN pg_catalog.pg_language l ON l.oid = p.prolang
      WHERE n.nspname = :schema AND p.prokind = 'f'
      ORDER BY 1
     """
@@ -537,10 +577,41 @@ def _pinned_search_path_of(config: Sequence[str] | None) -> tuple[str, ...] | No
     return None
 
 
+def _function_rows(conn: Connection) -> dict[str, Any]:
+    return {
+        row["signature"]: row for row in conn.execute(_FUNCTIONS_SQL, {"schema": SCHEMA}).mappings()
+    }
+
+
+def _set_details(label: str, expected: set[str], actual: set[str]) -> list[str]:
+    details = [f"missing {label} '{name}'" for name in sorted(expected - actual)]
+    details.extend(f"unexpected {label} '{name}'" for name in sorted(actual - expected))
+    return details
+
+
+def _check_function_catalog(conn: Connection) -> VerifyCheck:
+    rows = _function_rows(conn)
+    expected = set(_manifest.FUNCTIONS)
+    details = _set_details("function", expected, set(rows))
+    for identity in sorted(expected & rows.keys()):
+        row = rows[identity]
+        spec = _manifest.FUNCTIONS[identity]
+        for field in ("arguments", "result", "language", "volatility", "parallel"):
+            actual = row[field]
+            wanted = getattr(spec, field)
+            if actual != wanted:
+                details.append(f"{identity}: {field} is {actual!r}, expected {wanted!r}")
+        if row["strict"]:
+            details.append(f"{identity}: unexpectedly STRICT")
+        if row["leakproof"]:
+            details.append(f"{identity}: unexpectedly LEAKPROOF")
+    return VerifyCheck(name="function_catalog", ok=not details, details=tuple(details))
+
+
 def _check_function_hardening(conn: Connection) -> VerifyCheck:
     """Every taskq function: SECURITY DEFINER, owner taskq_owner, pinned search_path."""
     details: list[str] = []
-    for row in conn.execute(_FUNCTIONS_SQL, {"schema": SCHEMA}).mappings():
+    for row in _function_rows(conn).values():
         signature = row["signature"]
         if not row["secdef"]:
             details.append(f"{signature}: not SECURITY DEFINER")
@@ -564,7 +635,7 @@ def _check_public_execute(conn: Connection) -> VerifyCheck:
     grants EXECUTE to PUBLIC, so a never-revoked function is world-callable.
     """
     details: list[str] = []
-    for row in conn.execute(_FUNCTIONS_SQL, {"schema": SCHEMA}).mappings():
+    for row in _function_rows(conn).values():
         if row["default_acl"]:
             details.append(
                 f"{row['signature']}: default ACL — EXECUTE was never revoked from PUBLIC"
@@ -572,6 +643,21 @@ def _check_public_execute(conn: Connection) -> VerifyCheck:
         elif row["public_execute"]:
             details.append(f"{row['signature']}: EXECUTE granted to PUBLIC")
     return VerifyCheck(name="no_public_execute", ok=not details, details=tuple(details))
+
+
+def _check_function_privileges(conn: Connection) -> VerifyCheck:
+    rows = _function_rows(conn)
+    details: list[str] = []
+    for identity in sorted(set(_manifest.FUNCTIONS) & rows.keys()):
+        actual = frozenset(rows[identity]["grants"] or ())
+        expected = frozenset(
+            f"{role}/{_manifest.SCHEMA_OWNER}" for role in _manifest.FUNCTIONS[identity].grants
+        )
+        if actual != expected:
+            details.append(
+                f"{identity}: EXECUTE grants are {sorted(actual)!r}, expected {sorted(expected)!r}"
+            )
+    return VerifyCheck(name="function_privileges", ok=not details, details=tuple(details))
 
 
 _ROLES_SQL = text("SELECT rolname FROM pg_catalog.pg_roles WHERE rolname IN :names").bindparams(
@@ -584,3 +670,356 @@ def _check_roles(conn: Connection) -> VerifyCheck:
     missing = [role for role in TASKQ_ROLES if role not in found]
     details = tuple(f"role '{role}' does not exist" for role in missing)
     return VerifyCheck(name="capability_roles_exist", ok=not missing, details=details)
+
+
+_ROLE_ATTRIBUTES_SQL = text(
+    """
+    SELECT rolname, rolsuper, rolinherit, rolcreaterole, rolcreatedb,
+           rolcanlogin, rolreplication, rolbypassrls, rolconnlimit,
+           rolvaliduntil, rolconfig
+      FROM pg_catalog.pg_roles
+     WHERE rolname IN :names
+     ORDER BY rolname
+    """
+).bindparams(bindparam("names", expanding=True))
+
+
+def _check_role_attributes(conn: Connection) -> VerifyCheck:
+    details: list[str] = []
+    for row in conn.execute(_ROLE_ATTRIBUTES_SQL, {"names": list(_manifest.ROLES)}).mappings():
+        role = row["rolname"]
+        expected = {
+            "rolsuper": False,
+            "rolinherit": True,
+            "rolcreaterole": False,
+            "rolcreatedb": False,
+            "rolcanlogin": False,
+            "rolreplication": False,
+            "rolbypassrls": False,
+            "rolconnlimit": -1,
+            "rolvaliduntil": None,
+        }
+        for field, wanted in expected.items():
+            if row[field] != wanted:
+                details.append(f"role '{role}': {field} is {row[field]!r}, expected {wanted!r}")
+        actual_config = frozenset(row["rolconfig"] or ())
+        if actual_config != _manifest.ROLE_CONFIGS[role]:
+            details.append(
+                f"role '{role}': settings are {sorted(actual_config)!r}, "
+                f"expected {sorted(_manifest.ROLE_CONFIGS[role])!r}"
+            )
+
+    memberships = conn.execute(
+        text(
+            """
+            SELECT member.rolname, granted.rolname
+              FROM pg_catalog.pg_auth_members m
+              JOIN pg_catalog.pg_roles member ON member.oid = m.member
+              JOIN pg_catalog.pg_roles granted ON granted.oid = m.roleid
+             WHERE member.rolname IN :names
+             ORDER BY 1, 2
+            """
+        ).bindparams(bindparam("names", expanding=True)),
+        {"names": list(_manifest.ROLES)},
+    ).all()
+    details.extend(
+        f"role '{member}' is unexpectedly a member of '{granted}'"
+        for member, granted in memberships
+    )
+    return VerifyCheck(name="role_manifest", ok=not details, details=tuple(details))
+
+
+_RELATIONS_SQL = text(
+    """
+    SELECT c.relname, c.relkind::text AS relkind,
+           pg_catalog.pg_get_userbyid(c.relowner) AS owner
+      FROM pg_catalog.pg_class c
+      JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+     WHERE n.nspname = :schema AND c.relkind IN ('r', 'v', 'S', 'c')
+     ORDER BY c.relkind, c.relname
+    """
+)
+
+
+def _check_relations(conn: Connection) -> VerifyCheck:
+    rows = list(conn.execute(_RELATIONS_SQL, {"schema": SCHEMA}).mappings())
+    by_kind = {
+        kind: {row["relname"] for row in rows if row["relkind"] == kind}
+        for kind in ("r", "v", "S", "c")
+    }
+    details = _set_details("table", set(_manifest.TABLES), by_kind["r"])
+    details += _set_details("view", set(_manifest.VIEWS), by_kind["v"])
+    details += _set_details("sequence", set(_manifest.SEQUENCES), by_kind["S"])
+    details += _set_details("composite", set(_manifest.COMPOSITES), by_kind["c"])
+    for row in rows:
+        if row["owner"] != _manifest.SCHEMA_OWNER:
+            details.append(
+                f"{row['relname']}: owned by {row['owner']!r}, expected {_manifest.SCHEMA_OWNER!r}"
+            )
+    return VerifyCheck(name="relation_catalog", ok=not details, details=tuple(details))
+
+
+def _check_composites(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT c.relname, a.attname,
+                   pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+             WHERE n.nspname = :schema AND c.relkind = 'c'
+               AND a.attnum > 0 AND NOT a.attisdropped
+             ORDER BY c.relname, a.attnum
+            """
+        ),
+        {"schema": SCHEMA},
+    ).mappings()
+    actual: dict[str, list[tuple[str, str]]] = {}
+    for row in rows:
+        actual.setdefault(row["relname"], []).append((row["attname"], row["data_type"]))
+    details: list[str] = []
+    for name in sorted(set(_manifest.COMPOSITES) & actual.keys()):
+        shape = tuple(actual[name])
+        if shape != _manifest.COMPOSITES[name]:
+            details.append(
+                f"composite '{name}' shape is {shape!r}, expected {_manifest.COMPOSITES[name]!r}"
+            )
+    return VerifyCheck(name="composite_shapes", ok=not details, details=tuple(details))
+
+
+_TABLE_SHAPES_SQL = text(
+    """
+    WITH cols AS (
+        SELECT c.relname, a.attnum, a.attname,
+               pg_catalog.format_type(a.atttypid, a.atttypmod) AS data_type,
+               a.attnotnull,
+               COALESCE(pg_catalog.pg_get_expr(ad.adbin, ad.adrelid), '') AS default_expr
+          FROM pg_catalog.pg_class c
+          JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+          JOIN pg_catalog.pg_attribute a
+            ON a.attrelid = c.oid AND a.attnum > 0 AND NOT a.attisdropped
+          LEFT JOIN pg_catalog.pg_attrdef ad
+            ON ad.adrelid = c.oid AND ad.adnum = a.attnum
+         WHERE n.nspname = :schema AND c.relkind = 'r'
+    )
+    SELECT relname, count(*) AS item_count,
+           pg_catalog.md5(pg_catalog.string_agg(
+               attnum::text || '|' || attname || '|' || data_type || '|' ||
+               attnotnull::text || '|' || default_expr, E'\\n' ORDER BY attnum
+           )) AS digest
+      FROM cols GROUP BY relname ORDER BY relname
+    """
+)
+
+
+def _digest_check(
+    name: str, rows: Iterable[Any], expected: dict[str, tuple[int, str] | str]
+) -> VerifyCheck:
+    actual = {row["relname"]: row for row in rows}
+    details = _set_details(name, set(expected), set(actual))
+    for relname in sorted(set(expected) & actual.keys()):
+        wanted = expected[relname]
+        if isinstance(wanted, tuple):
+            got = (actual[relname]["item_count"], actual[relname]["digest"])
+        else:
+            got = actual[relname]["digest"]
+        if got != wanted:
+            details.append(f"{name} '{relname}' definition differs from manifest")
+    return VerifyCheck(name=name, ok=not details, details=tuple(details))
+
+
+def _check_table_shapes(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(_TABLE_SHAPES_SQL, {"schema": SCHEMA}).mappings()
+    return _digest_check("table_shapes", rows, _manifest.TABLE_SHAPES)
+
+
+def _check_constraints(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT rel.relname, count(*) AS item_count,
+                   pg_catalog.md5(pg_catalog.string_agg(
+                       con.conname || '|' || con.contype::text || '|' ||
+                       pg_catalog.pg_get_constraintdef(con.oid, false),
+                       E'\\n' ORDER BY con.conname
+                   )) AS digest
+              FROM pg_catalog.pg_constraint con
+              JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
+              JOIN pg_catalog.pg_namespace n ON n.oid = rel.relnamespace
+             WHERE n.nspname = :schema
+             GROUP BY rel.relname ORDER BY rel.relname
+            """
+        ),
+        {"schema": SCHEMA},
+    ).mappings()
+    return _digest_check("constraints", rows, _manifest.CONSTRAINTS)
+
+
+def _check_indexes(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT c.relname,
+                   pg_catalog.md5(pg_catalog.pg_get_indexdef(c.oid)) AS digest
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+              JOIN pg_catalog.pg_index i ON i.indexrelid = c.oid
+             WHERE n.nspname = :schema
+             ORDER BY c.relname
+            """
+        ),
+        {"schema": SCHEMA},
+    ).mappings()
+    return _digest_check("indexes", rows, _manifest.INDEXES)
+
+
+def _check_views(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT c.relname,
+                   pg_catalog.md5(pg_catalog.pg_get_viewdef(c.oid, false)) AS digest
+              FROM pg_catalog.pg_class c
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = :schema AND c.relkind = 'v'
+             ORDER BY c.relname
+            """
+        ),
+        {"schema": SCHEMA},
+    ).mappings()
+    return _digest_check("views", rows, _manifest.VIEW_DEFINITIONS)
+
+
+def _check_relation_privileges(conn: Connection) -> VerifyCheck:
+    details: list[str] = []
+    schema_grants = {
+        (row["grantee"], row["privilege_type"], row["is_grantable"], row["grantor"])
+        for row in conn.execute(
+            text(
+                """
+                SELECT COALESCE(r.rolname, 'PUBLIC') AS grantee, a.privilege_type,
+                       a.is_grantable,
+                       pg_catalog.pg_get_userbyid(a.grantor) AS grantor
+                  FROM pg_catalog.pg_namespace n,
+                       LATERAL pg_catalog.aclexplode(n.nspacl) a
+                  LEFT JOIN pg_catalog.pg_roles r ON r.oid = a.grantee
+                 WHERE n.nspname = :schema AND a.grantee <> n.nspowner
+                """
+            ),
+            {"schema": SCHEMA},
+        ).mappings()
+    }
+    expected_schema = {
+        (role, "USAGE", False, _manifest.SCHEMA_OWNER)
+        for role in _manifest.ROLES
+        if role != "taskq_owner"
+    }
+    if schema_grants != expected_schema:
+        details.append(
+            f"schema grants are {sorted(schema_grants)!r}, expected {sorted(expected_schema)!r}"
+        )
+
+    relation_grants = {
+        (
+            row["relname"],
+            row["grantee"],
+            row["privilege_type"],
+            row["is_grantable"],
+            row["grantor"],
+        )
+        for row in conn.execute(
+            text(
+                """
+                SELECT c.relname, COALESCE(r.rolname, 'PUBLIC') AS grantee,
+                       a.privilege_type, a.is_grantable,
+                       pg_catalog.pg_get_userbyid(a.grantor) AS grantor
+                  FROM pg_catalog.pg_class c
+                  JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace,
+                       LATERAL pg_catalog.aclexplode(c.relacl) a
+                  LEFT JOIN pg_catalog.pg_roles r ON r.oid = a.grantee
+                 WHERE n.nspname = :schema AND a.grantee <> c.relowner
+                """
+            ),
+            {"schema": SCHEMA},
+        ).mappings()
+    }
+    expected_relations = {
+        (view, "taskq_observer", "SELECT", False, _manifest.SCHEMA_OWNER)
+        for view in _manifest.VIEWS
+    }
+    if relation_grants != expected_relations:
+        details.append(
+            f"relation grants are {sorted(relation_grants)!r}, "
+            f"expected {sorted(expected_relations)!r}"
+        )
+
+    privilege_list = "SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER"
+    live_tables = {
+        row["relname"]
+        for row in conn.execute(_RELATIONS_SQL, {"schema": SCHEMA}).mappings()
+        if row["relkind"] == "r"
+    }
+    live_roles = set(conn.execute(_ROLES_SQL, {"names": list(_manifest.ROLES)}).scalars())
+    for role in set(_manifest.ROLES[1:]) & live_roles:
+        for table in sorted(_manifest.TABLES & live_tables):
+            granted = conn.execute(
+                text("SELECT pg_catalog.has_table_privilege(:role, :relation, :privileges)"),
+                {
+                    "role": role,
+                    "relation": f"{SCHEMA}.{table}",
+                    "privileges": privilege_list,
+                },
+            ).scalar_one()
+            if granted:
+                details.append(f"role '{role}' has direct/effective privilege on table '{table}'")
+    return VerifyCheck(name="relation_privileges", ok=not details, details=tuple(details))
+
+
+def _check_seed_state(conn: Connection) -> VerifyCheck:
+    details: list[str] = []
+    live = {
+        row["relname"]
+        for row in conn.execute(_RELATIONS_SQL, {"schema": SCHEMA}).mappings()
+        if row["relkind"] == "r"
+    }
+    if "meta" in live:
+        meta = dict(conn.execute(text(f"SELECT key, value::text FROM {SCHEMA}.meta")).all())
+        if meta != _manifest.META_SEEDS:
+            details.append(f"meta rows are {meta!r}, expected {_manifest.META_SEEDS!r}")
+    else:
+        details.append("cannot verify meta seeds: table 'meta' is missing")
+    if "control_state" in live:
+        controls = set(conn.execute(text(f"SELECT key FROM {SCHEMA}.control_state")).scalars())
+        details.extend(_set_details("control seed", set(_manifest.CONTROL_SEED_KEYS), controls))
+    else:
+        details.append("cannot verify control seeds: table 'control_state' is missing")
+    if (
+        "queues" in live
+        and conn.execute(text(f"SELECT 1 FROM {SCHEMA}.queues WHERE name = '_system'")).scalar()
+    ):
+        details.append("deferred seed queue '_system' is present")
+    return VerifyCheck(name="seed_state", ok=not details, details=tuple(details))
+
+
+def _check_external_foreign_keys(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT src_ns.nspname || '.' || src.relname || '.' || con.conname AS identity
+              FROM pg_catalog.pg_constraint con
+              JOIN pg_catalog.pg_class src ON src.oid = con.conrelid
+              JOIN pg_catalog.pg_namespace src_ns ON src_ns.oid = src.relnamespace
+              JOIN pg_catalog.pg_class dst ON dst.oid = con.confrelid
+              JOIN pg_catalog.pg_namespace dst_ns ON dst_ns.oid = dst.relnamespace
+             WHERE con.contype = 'f'
+               AND ((src_ns.nspname = :schema) <> (dst_ns.nspname = :schema))
+             ORDER BY 1
+            """
+        ),
+        {"schema": SCHEMA},
+    ).scalars()
+    details = tuple(
+        f"cross-schema foreign key '{identity}' is not in the manifest" for identity in rows
+    )
+    return VerifyCheck(name="external_foreign_keys", ok=not details, details=details)
