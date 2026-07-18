@@ -188,6 +188,11 @@ class EnqueueManyItem(BaseModel):
     headers: dict[str, Any] | None = None
 
 
+ENQUEUE_MANY_ITEMS_ADAPTER: Final[TypeAdapter[list[EnqueueManyItem]]] = TypeAdapter(
+    list[EnqueueManyItem]
+)
+
+
 class ClaimState(StrEnum):
     CLAIMED = "claimed"
     EMPTY = "empty"
@@ -614,11 +619,13 @@ class ClaimedJob(BaseModel):
 
 
 ClaimResult.model_rebuild()
+CLAIM_BATCH_ADAPTER: Final[TypeAdapter[ClaimResult]] = TypeAdapter(ClaimResult)
 
 
 __all__ = [
     "AuthorizationProjection",
     "COMMAND_SPECS",
+    "CLAIM_BATCH_ADAPTER",
     "CancelOutcome",
     "CancelResult",
     "CapabilityRole",
@@ -630,6 +637,7 @@ __all__ = [
     "CommandSpec",
     "ConfigChangeOutcome",
     "ContractMeta",
+    "ENQUEUE_MANY_ITEMS_ADAPTER",
     "ENQUEUE_RESULT_ADAPTER",
     "EnqueueCommand",
     "EnqueueCreatedResult",

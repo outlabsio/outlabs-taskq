@@ -9,7 +9,11 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from taskq.errors import TaskqConfigError
-from taskq.protocol import EnqueueCommand, EnqueueManyItem, EnqueueResult
+from taskq.protocol import (
+    ENQUEUE_MANY_ITEMS_ADAPTER,
+    EnqueueCommand,
+    EnqueueResult,
+)
 from taskq.registry import InT, OutT, RetryStrategy, Task, TaskRegistry
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.transport import TaskqTransport
@@ -181,20 +185,22 @@ class TaskQ:
         if len(keys) != len(payloads):
             raise TaskqConfigError("idempotency_keys must match payload count")
         retry = self._retry_fields(registered)
-        items = [
-            EnqueueManyItem(
-                job_type=registered.name,
-                payload=registered.validate_payload(payload),
-                idempotency_key=keys[index],
-                scheduled_at=scheduled_at,
-                priority=priority if priority is not None else registered.priority,
-                lease_seconds=(
-                    lease_seconds if lease_seconds is not None else registered.lease_seconds
-                ),
-                **retry,
-            )
-            for index, payload in enumerate(payloads)
-        ]
+        items = ENQUEUE_MANY_ITEMS_ADAPTER.validate_python(
+            [
+                {
+                    "job_type": registered.name,
+                    "payload": registered.validate_payload(payload),
+                    "idempotency_key": keys[index],
+                    "scheduled_at": scheduled_at,
+                    "priority": priority if priority is not None else registered.priority,
+                    "lease_seconds": (
+                        lease_seconds if lease_seconds is not None else registered.lease_seconds
+                    ),
+                    **retry,
+                }
+                for index, payload in enumerate(payloads)
+            ]
+        )
         supplied = self._supplied_sql_object(session, connection)
         if supplied is None:
             return await self.transport.enqueue_many(registered.queue, items)

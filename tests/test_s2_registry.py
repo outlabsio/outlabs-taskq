@@ -34,6 +34,8 @@ from taskq.errors import (
 )
 from taskq.protocol import (
     COMMAND_SPECS,
+    CLAIM_BATCH_ADAPTER,
+    ENQUEUE_MANY_ITEMS_ADAPTER,
     ENQUEUE_RESULT_ADAPTER,
     SETTLE_RESULT_ADAPTER,
     CommandName,
@@ -319,6 +321,53 @@ def test_outbound_result_ignores_unknown_additive_field() -> None:
         }
     )
     assert "future_server_field" not in result.model_dump()
+
+
+def test_bulk_item_adapter_validates_the_sequence_in_one_boundary_call() -> None:
+    items = ENQUEUE_MANY_ITEMS_ADAPTER.validate_python(
+        [
+            {"job_type": "math.double", "payload": {"value": 1}},
+            EnqueueManyItem(job_type="math.double", payload={"value": 2}),
+        ]
+    )
+    assert [item.payload for item in items] == [{"value": 1}, {"value": 2}]
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        ENQUEUE_MANY_ITEMS_ADAPTER.validate_python(
+            [{"job_type": "math.double", "payload": {}, "prioroty": 10}]
+        )
+
+
+def test_claim_batch_adapter_decodes_projection_and_enforces_state_shape() -> None:
+    fence = uuid4()
+    batch = CLAIM_BATCH_ADAPTER.validate_python(
+        {
+            "state": "claimed",
+            "future_batch_field": True,
+            "jobs": [
+                {
+                    "job_id": uuid4(),
+                    "queue": "default",
+                    "job_type": "math.double",
+                    "priority": 100,
+                    "payload": {"value": 3},
+                    "headers": {},
+                    "progress": None,
+                    "attempt_id": fence,
+                    "attempt_number": 1,
+                    "failure_count": 0,
+                    "max_attempts": 5,
+                    "lease_expires_at": datetime.now(UTC),
+                    "lease_seconds": 300,
+                    "future_job_field": True,
+                }
+            ],
+        }
+    )
+    assert batch.state.value == "claimed" and len(batch.jobs) == 1
+    assert batch.jobs[0].attempt_id == fence
+    assert str(fence) not in batch.model_dump_json()
+    with pytest.raises(ValidationError, match="claimed state"):
+        CLAIM_BATCH_ADAPTER.validate_python({"state": "claimed", "jobs": []})
 
 
 def test_claimed_job_fence_is_excluded_from_repr_and_dump() -> None:

@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S3-PREP boundary hardening active** — tagged result unions preserve the wire exactly; bulk/claim adapters and benchmark delta are next |
-| Suite | 283/283 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
+| Stage | **S3-PREP items 1–3 complete** — Python protocol boundaries are hardened; round 4 remains pending, S2-05 and CLI configuration stay closed |
+| Suite | 285/285 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | Hand off `docs/design-review-4/REQUEST.md`; adjudicate the response before opening S2-05 |
 
-## Now — S3-PREP Python-surface only
+## Now — gated pending round 4
 
-- [ ] **S3-PREP-03** — module-level bulk-item/claim-batch `TypeAdapter`s and B2/B3 before/after evidence
+*(none — do not open S2-05 until the Stage 2B review is adjudicated)*
 
 ## Next — gated after Stage 2B review
 
@@ -55,6 +55,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-PREP-03 · Batch boundary adapters and measured delta** — module-level adapters now validate bulk-enqueue items in one `TaskQ` boundary call and decode each SQL claim batch as one state-checked projection. Fixed-seed toy B2/B3 runs used five repetitions and fresh databases before/after: B2 median throughput 33,029.69→33,216.71 rows/s (+0.57%), worst p99 30.35→30.95 ms (+2.00%); B3 median throughput 798.42→799.90 rows/s (+0.18%), worst p99 3.76→3.09 ms (-17.63%). B2/B3 call SQL directly and do not traverse these Pydantic adapters, so all deltas are recorded as harness/environment noise, not a performance win (285/285 on PG18).
 - [x] **S3-PREP-02 · Tagged protocol result unions** — split enqueue dispositions on `status` and all six fenced settlement dispositions on `result` into Pydantic discriminated unions with public concrete variants and module-level parsers; Tier-0 parity proves the tag sets equal the closed protocol outcomes, while eight frozen representative vectors prove byte-identical JSON with no wire-contract change, ADR, or version bump (283/283 on PG18).
 - [x] **S3-PREP-01 · Direction-aware extras policy** — documented the ADR-005 boundary rule in `taskq.protocol`: inbound enqueue command/bulk-item models now forbid unknown fields so typos fail locally, while outbound projections/results explicitly ignore additive fields for forward-compatible decoding; typo and unknown-result vectors bring PG18 to 281/281 without changing wire or SQL contracts.
 - [x] **S2-04-R4 · Round-4 review packet** — registered an immutable, contract-first adversarial request covering the contract-0.1.2 additive upgrade and verifier, every S2-04 execution/heartbeat/replay/lifecycle acceptance row, mandatory R2-11 live-sync counterexamples, repeated races, real-SQL conservation, resource cleanup, artifact/import isolation, CI collection, and strict absence of S2-05/Stage-3 scope; the reviewer may add only `docs/design-review-4/RESPONSE.md` and must decide whether S2-05 may open.

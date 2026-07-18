@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_en
 from taskq.errors import TaskqConfigError, TaskqInternalError, taskq_error_from_exception
 from taskq.protocol import (
     AuthorizationProjection,
+    CLAIM_BATCH_ADAPTER,
     COMMAND_SPECS,
     CancelResult,
     ClaimResult,
@@ -286,7 +287,7 @@ class SqlTaskqTransport:
                 decoded["progress"] = _json(decoded["progress"])
                 decoded_jobs.append(decoded)
             jobs = tuple(decoded_jobs)
-            return ClaimResult.model_validate({"state": row["state"], "jobs": jobs})
+            return CLAIM_BATCH_ADAPTER.validate_python({"state": row["state"], "jobs": jobs})
 
         return await self._run(operation)
 
