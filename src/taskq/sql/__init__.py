@@ -323,6 +323,7 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
     lock_function = "pg_advisory_lock" if owns_txn else "pg_advisory_xact_lock"
     conn.execute(text(f"SELECT {lock_function}(:key)"), {"key": MIGRATE_LOCK_KEY})
     try:
+        _validate_reserved_roles(conn)
         pending = plan_pending(migrations, _applied_ids(conn))
         if owns_txn:
             conn.commit()  # close the probe txn; each migration gets its own
@@ -350,6 +351,65 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
             conn.commit()
             if not released:  # pragma: no cover - proves runner lock accounting
                 raise RuntimeError("taskq migration session lock was not held at release")
+
+
+def _validate_reserved_roles(conn: Connection) -> None:
+    """Reject unsafe pre-existing package role names before any migration DDL.
+
+    Missing roles are expected on a fresh cluster and migration 0001 creates
+    them. Existing names must already be safe capability-role containers; the
+    installer never strips cluster privileges that may belong to another
+    deployment merely because a name collided.
+    """
+    rows = conn.execute(
+        text(
+            """
+            SELECT rolname, rolsuper, rolcreaterole, rolcreatedb, rolcanlogin,
+                   rolreplication, rolbypassrls
+              FROM pg_catalog.pg_roles
+             WHERE rolname IN :names
+             ORDER BY rolname
+            """
+        ).bindparams(bindparam("names", expanding=True)),
+        {"names": list(TASKQ_ROLES)},
+    ).mappings()
+    details: list[str] = []
+    attributes = {
+        "rolsuper": "SUPERUSER",
+        "rolcreaterole": "CREATEROLE",
+        "rolcreatedb": "CREATEDB",
+        "rolcanlogin": "LOGIN",
+        "rolreplication": "REPLICATION",
+        "rolbypassrls": "BYPASSRLS",
+    }
+    for row in rows:
+        enabled = [label for field, label in attributes.items() if row[field]]
+        if enabled:
+            details.append(f"role '{row['rolname']}' has prohibited {'/'.join(enabled)}")
+
+    memberships = conn.execute(
+        text(
+            """
+            SELECT member.rolname AS member, granted.rolname AS granted
+              FROM pg_catalog.pg_auth_members m
+              JOIN pg_catalog.pg_roles member ON member.oid = m.member
+              JOIN pg_catalog.pg_roles granted ON granted.oid = m.roleid
+             WHERE member.rolname IN :names
+             ORDER BY member.rolname, granted.rolname
+            """
+        ).bindparams(bindparam("names", expanding=True)),
+        {"names": list(TASKQ_ROLES)},
+    ).mappings()
+    details.extend(
+        f"role '{row['member']}' is a member of prohibited role '{row['granted']}'"
+        for row in memberships
+    )
+    if details:
+        raise RuntimeError(
+            "unsafe pre-existing taskq reserved role(s); no migration was applied: "
+            + "; ".join(details)
+            + ". Remove the listed attributes/memberships or rename the colliding role."
+        )
 
 
 def _applied_ids(conn: Connection) -> set[str]:
