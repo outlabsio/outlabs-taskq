@@ -25,19 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2 complete** — consumer testing helpers are green; Stage 3 remains gated and untouched |
+| Stage | **Stage 3 contract gate blocked** — S3-CQ-01 must be adjudicated docs-first; Stage-3 implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Stage-3 round-5 contract/design boundary before integration implementation |
+| Next review | Held until S3-CQ-01 closes, then Stage-3 round-5 contract/design boundary |
 
 ## Now
 
-*(Stage 2 is complete; stop at the Stage-3 gate.)*
+- [ ] S3-CQ-01 adjudicate the missing HTTP worker-presence command in Protocol v1; S3-00 remains closed
 
 
 ## Next — after S2-06
 
-- [ ] S3-00 freeze the FastAPI + OutLabs authorization integration specification and assemble the round-5 review gate; do not implement integrations before acceptance
+- [ ] S3-00 freeze the FastAPI + OutLabs authorization integration specification and assemble the round-5 review gate after S3-CQ-01 closes; do not implement integrations before acceptance
 
 ## Later
 
@@ -45,7 +45,15 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-*(none open — ADR-013 resolves S2-CQ-01 as contract 0.1.2: append the effective lease duration to `claimed_job`; workers schedule from it monotonically and never subtract local wall time from the absolute expiry. ADR-012 resolves round-3 CQ-01/CQ-02.)*
+### S3-CQ-01 — HTTP worker presence is absent from Protocol v1
+
+**Blocking evidence:** the Tier-0 Function Manifest 0.1.2 exposes runner command `taskq.worker_heartbeat(...)` with closed `continue | shutdown_requested` semantics, ADR-011 requires the facade runtime to call it on behalf of HTTP workers, and the completed Stage-2 `WorkerService` depends on it for advisory presence and remote drain. But the Tier-0 Protocol v1 adopted HTTP table defines claim, per-job heartbeat, worker reads, and shutdown requests without a canonical worker-presence HTTP command. ADR-005 makes route shape, authorization inputs, outcomes, and HTTP mapping contract-owned; S3-00 cannot invent them in Tier 3 or claim SQL/HTTP worker parity without this closure.
+
+**Recommended adjudication:** accept ADR-014 plus an additive Protocol-v1 revision defining `POST /taskq/v1/workers/heartbeat`: body `worker_id`, non-empty distinct `queues`, and bounded safe presence fields; authenticate first, authorize `run` for every distinct declared queue, treat `worker_id` as an advisory validated label while actor remains the authenticated subject, call `worker_heartbeat`, and return HTTP 200 with typed `continue | shutdown_requested`. The route must never accept actor, credentials, attempts, payloads, or fences. Add it to the H-13 generated HTTP-client/conformance surface. SQL contract 0.1.2 and the Function Manifest remain unchanged; the adjudication must state the required additive protocol-document version marker before S3-00 resumes.
+
+**Decision needed:** approve the recommendation, or choose a different canonical route/auth/wire shape through ADR-014. Do not resume S3-00 until the Tier-0 amendment lands.
+
+Resolved history: ADR-013 resolves S2-CQ-01 as contract 0.1.2; ADR-012 resolves round-3 CQ-01/CQ-02.
 
 ## Round-4 finding dispositions
 
