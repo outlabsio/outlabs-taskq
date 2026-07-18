@@ -48,6 +48,12 @@ async def _claim_one(runner: asyncpg.Connection, queue: str, worker: str = "w-1"
     return jobs[0]
 
 
+def _failed_check(report: object, name: str) -> object:
+    matches = [check for check in report.failures if check.name == name]
+    assert len(matches) == 1, f"expected one failed {name!r} check, got {matches!r}"
+    return matches[0]
+
+
 # ---------------------------------------------------------------------------
 # Installer + verify (feature 13 §5 acceptance 1–3; ADR-004; T8 seeds)
 # ---------------------------------------------------------------------------
@@ -103,14 +109,130 @@ class TestMigrateAndVerify:
                 async with engine.connect() as conn:
                     report = await verify(conn)
                 assert not report.ok
+                hardening = _failed_check(report, "function_hardening")
                 assert any(
                     "enqueue" in detail and "taskq_owner" in detail
-                    for check in report.failures
-                    for detail in check.details
+                    for detail in hardening.details
                 )
             finally:
                 await pg.execute(f"ALTER FUNCTION {signature} OWNER TO taskq_owner")
             # Restoration proven: verify is green again (read-only both times).
+            async with engine.connect() as conn:
+                report = await verify(conn)
+            assert report.ok
+        finally:
+            await engine.dispose()
+
+    async def test_verify_detects_missing_search_path(
+        self, pg: asyncpg.Connection, sqlalchemy_dsn: str
+    ) -> None:
+        signature = await pg.fetchval(
+            "SELECT p.oid::regprocedure::text FROM pg_catalog.pg_proc p "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'taskq' AND p.proname = 'heartbeat'"
+        )
+        assert signature
+
+        engine = create_async_engine(sqlalchemy_dsn)
+        try:
+            await pg.execute(f"ALTER FUNCTION {signature} RESET search_path")
+            try:
+                async with engine.connect() as conn:
+                    report = await verify(conn)
+                hardening = _failed_check(report, "function_hardening")
+                assert any(
+                    "heartbeat" in detail and "no pinned search_path" in detail
+                    for detail in hardening.details
+                )
+            finally:
+                await pg.execute(
+                    f"ALTER FUNCTION {signature} "
+                    "SET search_path TO pg_catalog, taskq, pg_temp"
+                )
+            async with engine.connect() as conn:
+                report = await verify(conn)
+            assert report.ok
+        finally:
+            await engine.dispose()
+
+    async def test_verify_detects_public_execute(
+        self, pg: asyncpg.Connection, sqlalchemy_dsn: str
+    ) -> None:
+        signature = await pg.fetchval(
+            "SELECT p.oid::regprocedure::text FROM pg_catalog.pg_proc p "
+            "JOIN pg_catalog.pg_namespace n ON n.oid = p.pronamespace "
+            "WHERE n.nspname = 'taskq' AND p.proname = 'complete_job'"
+        )
+        assert signature
+
+        engine = create_async_engine(sqlalchemy_dsn)
+        try:
+            await pg.execute(f"GRANT EXECUTE ON FUNCTION {signature} TO PUBLIC")
+            try:
+                async with engine.connect() as conn:
+                    report = await verify(conn)
+                public = _failed_check(report, "no_public_execute")
+                assert any(
+                    "complete_job" in detail and "EXECUTE granted to PUBLIC" in detail
+                    for detail in public.details
+                )
+            finally:
+                await pg.execute(f"REVOKE EXECUTE ON FUNCTION {signature} FROM PUBLIC")
+            async with engine.connect() as conn:
+                report = await verify(conn)
+            assert report.ok
+        finally:
+            await engine.dispose()
+
+    async def test_verify_detects_ledger_checksum_tamper(
+        self, pg: asyncpg.Connection, sqlalchemy_dsn: str
+    ) -> None:
+        ledger = await pg.fetchrow(
+            "SELECT id, checksum FROM taskq.schema_migrations ORDER BY id LIMIT 1"
+        )
+        assert ledger is not None
+
+        engine = create_async_engine(sqlalchemy_dsn)
+        try:
+            await pg.execute(
+                "UPDATE taskq.schema_migrations SET checksum = repeat('0', 64) WHERE id = $1",
+                ledger["id"],
+            )
+            try:
+                async with engine.connect() as conn:
+                    report = await verify(conn)
+                migration_ledger = _failed_check(report, "migration_ledger")
+                assert any(
+                    ledger["id"] in detail and "checksum mismatch" in detail
+                    for detail in migration_ledger.details
+                )
+            finally:
+                await pg.execute(
+                    "UPDATE taskq.schema_migrations SET checksum = $1 WHERE id = $2",
+                    ledger["checksum"],
+                    ledger["id"],
+                )
+            async with engine.connect() as conn:
+                report = await verify(conn)
+            assert report.ok
+        finally:
+            await engine.dispose()
+
+    async def test_verify_detects_missing_capability_role(
+        self, pg: asyncpg.Connection, sqlalchemy_dsn: str
+    ) -> None:
+        original = "taskq_housekeeper"
+        displaced = "taskq_housekeeper_verify_missing"
+        engine = create_async_engine(sqlalchemy_dsn)
+        try:
+            await pg.execute(f"ALTER ROLE {original} RENAME TO {displaced}")
+            try:
+                async with engine.connect() as conn:
+                    report = await verify(conn)
+                roles = _failed_check(report, "capability_roles_exist")
+                assert roles.details == (f"role '{original}' does not exist",)
+            finally:
+                await pg.execute(f"ALTER ROLE {displaced} RENAME TO {original}")
             async with engine.connect() as conn:
                 report = await verify(conn)
             assert report.ok
