@@ -257,6 +257,43 @@ async def test_second_stop_call_escalates_shared_infinite_drain() -> None:
     assert supervisor._stop_task is not None and supervisor._stop_task.done()
 
 
+async def test_external_submit_cancellation_releases_then_reraises() -> None:
+    started = asyncio.Event()
+
+    async def handler(payload: Input) -> Output:
+        started.set()
+        await asyncio.Event().wait()
+        return Output(doubled=payload.value * 2)
+
+    transport = ScriptedTransport()
+    supervisor = _supervisor(handler, clock=ManualClock(), transport=transport)
+    supervisor.start()
+    running = supervisor.submit(_claim())
+    await started.wait()
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert running.cancelled()
+    assert [call.command for call in transport.calls] == ["release"]
+    await supervisor.aclose()
+
+
+async def test_external_submit_cancellation_before_start_still_releases() -> None:
+    async def handler(payload: Input) -> Output:
+        return Output(doubled=payload.value * 2)
+
+    transport = ScriptedTransport()
+    supervisor = _supervisor(handler, clock=ManualClock(), transport=transport)
+    supervisor.start()
+    running = supervisor.submit(_claim())
+    running.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await running
+    assert running.cancelled()
+    await _spin_until(lambda: [call.command for call in transport.calls] == ["release"])
+    await supervisor.aclose()
+
+
 async def test_job_and_lifecycle_tasks_are_joined_after_stop() -> None:
     async def handler(payload: Input) -> Output:
         return Output(doubled=payload.value * 2)

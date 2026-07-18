@@ -127,6 +127,7 @@ class _RunControl:
         self.handler: asyncio.Future[Any] | None = None
         self.operator_grace: asyncio.Task[None] | None = None
         self.shutdown_deadline = False
+        self.external_cancelled = False
 
 
 def _safe_handler_error(exc: BaseException) -> str:
@@ -244,11 +245,48 @@ class WorkerSupervisor:
             name="taskq-job-supervisor",
         )
         self._active[key] = running
+        running.add_done_callback(
+            lambda completed: self._recover_prestart_cancellation(
+                completed, claim=claim, key=key
+            )
+        )
         self._refresh_capacity_event()
         return running
 
+    def _recover_prestart_cancellation(
+        self,
+        completed: asyncio.Task[JobRunReport],
+        *,
+        claim: ClaimedJob,
+        key: tuple[UUID, UUID],
+    ) -> None:
+        if (
+            not completed.cancelled()
+            or self._active.get(key) is not completed
+            or key in self._controls
+        ):
+            return
+        recovery = asyncio.create_task(
+            self._release_prestart_cancellation(claim, key),
+            name="taskq-prestart-cancellation",
+        )
+        self._active[key] = recovery
+
+    async def _release_prestart_cancellation(
+        self, claim: ClaimedJob, key: tuple[UUID, UUID]
+    ) -> None:
+        self._begin_soft_stop()
+        try:
+            await self._settle_intent(claim, None, CancellationReason.SHUTDOWN)
+        finally:
+            self._active.pop(key, None)
+            self._refresh_capacity_event()
+            if self._stop_task is None:
+                self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
+
     async def _run_reserved(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
         fatal = False
+        external_cancelled = False
         try:
             report = await self._execute_job(claim, key)
             if report.fatal:
@@ -256,10 +294,14 @@ class WorkerSupervisor:
                 self._begin_soft_stop()
             return report
         finally:
+            control = self._controls.get(key)
+            external_cancelled = control is not None and control.external_cancelled
             self._controls.pop(key, None)
             self._active.pop(key, None)
             self._refresh_capacity_event()
             if fatal and self._stop_task is None:
+                self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
+            if external_cancelled and self._stop_task is None:
                 self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
 
     async def _execute_job(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
@@ -304,13 +346,24 @@ class WorkerSupervisor:
         handler_value: Any = None
         handler_error: BaseException | None = None
         try:
-            handler_value = await control.handler
+            handler_value = await asyncio.shield(control.handler)
         except TaskCancelled as exc:
             handler_error = exc
         except asyncio.CancelledError:
-            handler_error = TaskCancelled(
-                control.cancellation.reason or CancellationReason.SHUTDOWN
-            )
+            if (
+                control.cancellation.reason is None
+                and not control.shutdown_deadline
+                and not control.ownership_lost.is_set()
+            ):
+                control.external_cancelled = True
+                self._begin_soft_stop()
+                if not control.is_sync and not control.handler.done():
+                    control.handler.cancel()
+                await asyncio.gather(control.handler, return_exceptions=True)
+            else:
+                handler_error = TaskCancelled(
+                    control.cancellation.reason or CancellationReason.SHUTDOWN
+                )
         except BaseException as exc:
             handler_error = exc
 
@@ -336,6 +389,23 @@ class WorkerSupervisor:
                 outcome=JobRunOutcome.OWNERSHIP_LOST,
                 cancellation_reason=reason,
             )
+
+        if control.external_cancelled:
+            try:
+                await self._shielded_settlement(
+                    self._settle_intent(
+                        claim,
+                        None,
+                        CancellationReason.SHUTDOWN,
+                        context=context,
+                        control=control,
+                    )
+                )
+            finally:
+                control.settlement_terminal.set()
+                heartbeat.cancel()
+                await asyncio.gather(heartbeat, return_exceptions=True)
+            raise asyncio.CancelledError
 
         try:
             intent = self._normalize_handler_result(task, handler_value, handler_error)
@@ -733,6 +803,18 @@ class WorkerSupervisor:
         lost.cancel()
         await asyncio.gather(sleeping, lost, return_exceptions=True)
         return lost in done
+
+    @staticmethod
+    async def _shielded_settlement(
+        settlement: Awaitable[JobRunReport],
+    ) -> JobRunReport:
+        running = asyncio.create_task(settlement, name="taskq-shielded-settlement")
+        while not running.done():
+            try:
+                await asyncio.shield(running)
+            except asyncio.CancelledError:
+                continue
+        return running.result()
 
     @staticmethod
     def _ownership_lost_report(job_id: UUID, control: _RunControl) -> JobRunReport:
