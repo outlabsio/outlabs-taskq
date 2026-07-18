@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..011](docs/adr/README.md) accepted; both review rounds folded in; protocol v1 + 0.1 function manifest canonical). **Stage 1 in progress** — see the live [`TASKS.md`](TASKS.md) board for current counts and work; stage strategy lives in the [build plan](docs/Task%20Queue%20Build%20Plan.md).
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..012](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.1 function manifest canonical). **Stage 1 complete; Stage 2A open** — see the live [`TASKS.md`](TASKS.md) board for current counts and work; stage strategy lives in the [build plan](docs/Task%20Queue%20Build%20Plan.md).
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -12,7 +12,7 @@ Start here:
 
 | Doc | What it is |
 |---|---|
-| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..011) — override conflicting passages elsewhere** |
+| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..012) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
 | [`TASKS.md`](TASKS.md) | **Live execution tracker — start here to contribute** |
 | [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |

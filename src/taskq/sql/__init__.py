@@ -911,6 +911,7 @@ def _check_constraints(conn: Connection) -> VerifyCheck:
               JOIN pg_catalog.pg_class rel ON rel.oid = con.conrelid
               JOIN pg_catalog.pg_namespace n ON n.oid = rel.relnamespace
              WHERE n.nspname = :schema
+               AND con.contype <> 'n'
              GROUP BY rel.relname ORDER BY rel.relname
             """
         ),

@@ -70,19 +70,22 @@ TABLE_SHAPES = {
     "workflows": (10, "13447b7e9f326989906a2f341a0c6dc8"),
 }
 
-# relname -> (constraint count, digest of ordered name/type/definition rows)
+# relname -> (constraint count, digest of ordered name/type/definition rows).
+# PostgreSQL 18 also projects NOT NULL through pg_constraint while PostgreSQL
+# 16 does not; exact column nullability is already closed by TABLE_SHAPES, so
+# this axis deliberately covers the portable structural constraint kinds.
 CONSTRAINTS = {
-    "concurrency_limits": (6, "3f77e9dafb7dd2811875a17c7b7ffd3c"),
-    "control_state": (2, "beb0982d42ce624222df05859e6e178a"),
-    "job_attempts": (9, "9267c1981e975abd52c56379f09a95b5"),
-    "job_deps": (6, "c194d152e93008dca2eba839ea1a3bc2"),
-    "job_events": (6, "b3e092ddcf3bf7401c36fb0743b6bcc4"),
-    "jobs": (34, "31cdfed49f25b22c5a1a73ec9d097116"),
-    "meta": (4, "df64636c92f6d9e105aa5b91f40fadd0"),
-    "queues": (21, "6cf33a141c254139c477ec5f7d47c20b"),
-    "schema_migrations": (2, "194f73c9b925a5b725b9d4790c959ee0"),
-    "workers": (5, "f15ddafbc0c52e082d989d4c3e4d1dd2"),
-    "workflows": (9, "9f619cfe7bd8859881cb2d189b5102d6"),
+    "concurrency_limits": (3, "66936c03f772ba78965bf60edcc5dd5c"),
+    "control_state": (1, "65d3c0be64a45faf70dc5ecfc465bb71"),
+    "job_attempts": (3, "1b3551d273ad80b3a1914494ac750057"),
+    "job_deps": (3, "fa4b0e4d226160305724e3e9fd330390"),
+    "job_events": (2, "190355e5ad2160ab5d9d5adf84016b61"),
+    "jobs": (15, "3d09e31c7533969bb143c22eda670788"),
+    "meta": (1, "b8a6f433ca275e289861f29159c6d4f3"),
+    "queues": (9, "b565d95eb81c18bd78660ebe7230dc2a"),
+    "schema_migrations": (1, "9a70b629e02d9c9c4c87285047e4c5fa"),
+    "workers": (1, "21a9c8f0ac7e4e770db780e76f5c2909"),
+    "workflows": (4, "3506dec54a346f6bfada5e6fa75c36f9"),
 }
 
 INDEXES = {

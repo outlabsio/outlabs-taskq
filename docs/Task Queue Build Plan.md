@@ -4,11 +4,11 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, but the [round-3 implementation review](./design-review-3/RESPONSE.md) returned **BLOCKED**. ADR-012 resolves its two Contract questions as SQL contract 0.1.1; all seven findings are now closed, with only the final PG16/PG18 portability audit remaining before the Python runtime begins.
+Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012 resolves its two Contract questions as SQL contract 0.1.1; the final PG16/PG18 portability audit is green and Stage 2A is open.
 
 ## Stage 1 — secure SQL kernel (ROUND-3 REMEDIATION IN PROGRESS — CONTRACT QUESTIONS RESOLVED 2026-07-18)
 
-**Landed:** immutable migrations `0001_initial.sql` + `0002_contract_0_1_1.sql` (6 validated capability roles, 11 tables, 3 composites, 40 hardened functions, byte-safe diagnostics, 0.1-only seeding); the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI) with transaction-safe lock ownership; the exact machine-readable catalog verifier; manifest-complete T2/T8/T4 coverage; T3 deterministic and randomized concurrency, function-bound million-row structural plans, fresh-database/conservation-proven B1–B4 benchmarks, and source plus built-artifact CI. The regular suite is **126/126 green against PostgreSQL 18.3**, the wheel/sdist four-environment smoke is green, and the opt-in million-row plan gate is green; the final cross-version remediation rerun is in progress. Manifest §8/§9 record the integration errata and contract patch; no Stage-1 contract questions remain open.
+**Landed:** immutable migrations `0001_initial.sql` + `0002_contract_0_1_1.sql` (6 validated capability roles, 11 tables, 3 composites, 40 hardened functions, byte-safe diagnostics, 0.1-only seeding); the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI) with transaction-safe lock ownership; the exact machine-readable catalog verifier; manifest-complete T2/T8/T4 coverage; T3 deterministic and randomized concurrency, function-bound million-row structural plans, fresh-database/conservation-proven B1–B4 benchmarks, and source plus built-artifact CI. The regular suite is **126/126 green against PostgreSQL 16.14 and 18.3**, the wheel/sdist four-environment smoke is green, and the opt-in million-row plan gate is green on both database versions. Manifest §8/§9 record the integration errata and contract patch; no Stage-1 contract questions remain open.
 
 Build, in one vertical slice against ephemeral PostgreSQL 18:
 
@@ -22,7 +22,7 @@ Build, in one vertical slice against ephemeral PostgreSQL 18:
 
 Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/handler-result unions; async SQL transport implementing `TaskqTransport`; SQLAlchemy `AsyncSession` transactional enqueue; worker supervisor (heartbeat-per-job, verb-aware settle retries, R2-11 split cancellation contracts, soft stop); NOTIFY listener + poll; `taskq worker` CLI; `taskq.testing` fixtures + inline transport. Usability gate: a new FastAPI service goes install → typed task <15 lines → transactional enqueue → one-command worker → diagnose a retry from CLI/logs without opening tables.
 
-**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. Runtime implementation remains closed until the required Stage-1 remediation passes PostgreSQL 16 and 18.
+**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. The required Stage-1 remediation now passes PostgreSQL 16 and 18, so S2-01 is open.
 
 ## Stage 3 — FastAPI + outlabs-auth
 
