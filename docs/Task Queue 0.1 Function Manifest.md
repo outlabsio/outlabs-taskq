@@ -1,13 +1,13 @@
-# taskq — 0.1 Function Manifest
+# taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for the 0.1 migration — 2026-07-18. Closes R2-08: every function the 0.1 contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11). Migration 0001 is derived from THIS document + the spec bodies it references; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.1 — 2026-07-18. Closes R2-08 and incorporates ADR-012: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.1 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
 
 ## 0. Manifest conventions (apply to every entry)
 
-Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
+Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
 
 Composite types frozen for 0.1 (H-02; additive evolution only):
 
@@ -27,6 +27,7 @@ CREATE TYPE taskq.claim_batch AS (
 | `taskq.uuid7()` | spec §4 (PG18 native / SQL fallback) |
 | `taskq.backoff_seconds(mode,base,cap,failures)` | spec §5.1 (fixed ±15% jitter in 0.1) |
 | `taskq.emit_event(job_id,attempt_id,type,actor,msg,data)` | spec §4 (truncating) |
+| `taskq.truncate_utf8(value,max_bytes)` | below; added in 0.1.1 by ADR-012 |
 | `taskq.reap_job(job_id)` | below |
 | `taskq.finalize_cancel_stragglers(limit)` | below |
 | `taskq.claim_janitor_due()` | below |
@@ -34,6 +35,33 @@ CREATE TYPE taskq.claim_batch AS (
 | `taskq.has_capability(name)` | below |
 
 ```sql
+-- Longest valid UTF-8 prefix within a byte budget. Owner-only: no application
+-- capability role receives EXECUTE. Binary search keeps cost logarithmic.
+CREATE FUNCTION taskq.truncate_utf8(p_value text, p_max_bytes int)
+RETURNS text
+LANGUAGE plpgsql IMMUTABLE PARALLEL SAFE SECURITY DEFINER AS $$
+DECLARE
+    v_low int := 0;
+    v_high int;
+    v_mid int;
+BEGIN
+    IF p_value IS NULL THEN RETURN NULL; END IF;
+    IF p_max_bytes IS NULL OR p_max_bytes < 0 THEN
+        RAISE EXCEPTION 'byte limit must be non-negative' USING ERRCODE = '22023';
+    END IF;
+    IF octet_length(p_value) <= p_max_bytes THEN RETURN p_value; END IF;
+    v_high := least(char_length(p_value), p_max_bytes);
+    WHILE v_low < v_high LOOP
+        v_mid := (v_low + v_high + 1) / 2;
+        IF octet_length(left(p_value, v_mid)) <= p_max_bytes THEN
+            v_low := v_mid;
+        ELSE
+            v_high := v_mid - 1;
+        END IF;
+    END LOOP;
+    RETURN left(p_value, v_low);
+END $$;
+
 CREATE FUNCTION taskq.has_capability(p_name text) RETURNS boolean
 LANGUAGE sql STABLE AS $$
     SELECT COALESCE((SELECT (value -> 'active') ? p_name FROM taskq.meta
@@ -486,3 +514,25 @@ Resolved when migration 0001 + the harness first met live PostgreSQL (42/42 cont
 5. **Queue/worker-level operator verbs (pause/resume/shutdown-request/set-limit) emit no `job_events` row** — `job_events.job_id` is NOT NULL; their audit is the typed result + caller logging (facade actor / CLI).
 6. **Verb-aware replay includes the reaper:** an attempt settled as `expired` answers any worker settle with `settle_conflict`.
 7. 0.1 single-`enqueue` rejects `p_depends_on`/`p_workflow_id` with `TQ501` (capability gate); bulk specs carrying dependency fields are `TQ422` with the input index.
+
+## 9. Contract patch 0.1.1 — ADR-012 (2026-07-18)
+
+Migration `0002_contract_0_1_1.sql` applies these normative deltas without changing public identities or result shapes:
+
+1. **Explicit-null validation.** Every public parameter with a documented non-null domain checks `IS NULL` before state change and raises `TQ422`. In particular, the three round-3 counterexamples become:
+
+   ```sql
+   -- claim_jobs
+   IF p_batch IS NULL OR p_batch < 1 OR p_batch > 50 THEN ... ERRCODE = 'TQ422'; END IF;
+   -- release_job
+   IF p_delay_seconds IS NULL OR p_delay_seconds < 0 OR p_delay_seconds > 86400 THEN ... ERRCODE = 'TQ422'; END IF;
+   -- redrive_failed
+   IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 500 THEN ... ERRCODE = 'TQ422'; END IF;
+   ```
+
+   The migration audits all other public required/bounded arguments under the same rule; optional nullable arguments remain nullable. Function omission/default behavior is unchanged.
+
+2. **Byte-safe diagnostic storage.** All writes to `jobs.error`, `job_attempts.error`, and `jobs.cancel_reason` use `taskq.truncate_utf8(value, 2048)`. `emit_event` stores `taskq.truncate_utf8(p_message, 500)`, making the event cap universal. At minimum this replaces character-counted or unbounded writes in `reap_job`, `fail_job`, `snooze_job`, `cancel_running_job`, and `cancel_job`.
+3. **Exact helper surface.** `taskq.truncate_utf8(text,int)` is the sole new 0.1.1 function: owner `taskq_owner`, `SECURITY DEFINER`, immutable, parallel-safe, pinned path, PUBLIC EXECUTE revoked, and no application-role grant. The expected catalog therefore contains 40 functions.
+4. **Version state.** Migration 0002 updates `taskq.meta['contract_version']` from JSON string `"0.1"` to `"0.1.1"`; capabilities remain unchanged. Protocol major stays v1.
+5. **Required tests.** T2 includes omitted/null/min/max/out-of-range vectors for every public bounded parameter and ASCII/multibyte diagnostic vectors proving byte caps and successful settlement. T8 proves 0001→0002 upgrade, fresh-chain equivalence, immutable checksums, and old/new contract negotiation behavior.

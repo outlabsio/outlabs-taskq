@@ -17,5 +17,6 @@
 | [009](./ADR-009-first-release-scope.md) | First-release scope and deferred policies | D-08, D-12 |
 | [010](./ADR-010-db-roles-security-definer-maintenance.md) | Database roles, SECURITY DEFINER hardening, maintenance split | D-02, D-03 |
 | [011](./ADR-011-housekeeper-role-credentials.md) | Housekeeper role, deployment credentials, version-aware maintenance (amends 010) | R2-04, R2-05 |
+| [012](./ADR-012-null-boundaries-byte-safe-diagnostics.md) | Explicit-null boundaries and byte-safe stored diagnostics | R3 CQ-01, CQ-02 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

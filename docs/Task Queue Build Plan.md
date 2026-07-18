@@ -4,9 +4,9 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1 SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, but the [round-3 implementation review](./design-review-3/RESPONSE.md) returned **BLOCKED**: seven findings and two Tier-0 Contract questions must be resolved before the Python runtime begins.
+Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, but the [round-3 implementation review](./design-review-3/RESPONSE.md) returned **BLOCKED**. ADR-012 resolves its two Contract questions as SQL contract 0.1.1; seven implementation/evidence findings remain before the Python runtime begins.
 
-## Stage 1 — secure SQL kernel (ROUND-3 REMEDIATION REQUIRED — BLOCKED 2026-07-18)
+## Stage 1 — secure SQL kernel (ROUND-3 REMEDIATION IN PROGRESS — CONTRACT QUESTIONS RESOLVED 2026-07-18)
 
 **Landed:** migration `0001_initial.sql` (6 roles, 11 tables, 3 composites, 39 hardened functions, self-checking hardening block, 0.1-only seeding); the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI); T1/T2 contracts, T3 deterministic and randomized concurrency, T4 stateful modeling, corruption probes, million-row structural plans, B1–B4 smoke benchmarks, and CI. The regular suite is **58/58 green against PostgreSQL 18.3**, the opt-in million-row plan gate is green, and the pre-plan/benchmark **54/54 suite is green against PostgreSQL 16.14**. Manifest §8 records the resolved integration errata; no Stage-1 contract questions remain open.
 
@@ -22,7 +22,7 @@ Build, in one vertical slice against ephemeral PostgreSQL 18:
 
 Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/handler-result unions; async SQL transport implementing `TaskqTransport`; SQLAlchemy `AsyncSession` transactional enqueue; worker supervisor (heartbeat-per-job, verb-aware settle retries, R2-11 split cancellation contracts, soft stop); NOTIFY listener + poll; `taskq worker` CLI; `taskq.testing` fixtures + inline transport. Usability gate: a new FastAPI service goes install → typed task <15 lines → transactional enqueue → one-command worker → diagnose a retry from CLI/logs without opening tables.
 
-**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. Runtime implementation is closed until the round-3 Contract questions are adjudicated and the required Stage-1 remediation passes PostgreSQL 16 and 18.
+**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. Runtime implementation remains closed until the required Stage-1 remediation passes PostgreSQL 16 and 18.
 
 ## Stage 3 — FastAPI + outlabs-auth
 
