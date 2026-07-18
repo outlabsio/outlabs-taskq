@@ -26,13 +26,12 @@
 | | |
 |---|---|
 | Stage | **1 — secure SQL kernel** (opening slice landed) |
-| Suite | 48/48 green vs live PG 18.3 |
+| Suite | 49/49 green vs live PG 18.3 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
 | Next review | Round 3 after Stage-1 exit gate (migration 0001 + harness vs manifest) |
 
 ## Now — Stage 1 exit gate
 
-- [ ] **S1-02 · T3-R randomized stress.** K producers × M workers × mixed verbs for a bounded wall-clock (default 30s, env-scalable); invariants only: zero duplicate claims, conservation (every enqueued job exactly one terminal/active state after drain + final tick), no wedged rows. Seed logged for replay.
 - [ ] **S1-03 · T4 stateful model.** `tests/test_t4_model.py`: hypothesis stateful machine per Harness doc §3 — ops enqueue/claim/complete/fail/release/snooze/cancel/lease-rewind(tick)/redrive against real PG, model asserts §3.3 budget table + ≤1 running attempt + dedup + typed-results-only. Time travel via test-only owner function installed by conftest into the scratch DB only (never in migrations).
 - [ ] **S1-04 · verify corruption matrix.** Extend T2: each hardening axis deliberately broken then restored — drop pinned search_path, grant PUBLIC execute, wrong owner, ledger checksum tamper, missing role — `verify()` must name each precisely.
 - [ ] **S1-05 · PG16 lane.** Run the full suite against a PostgreSQL 16 container (uuid7 SQL fallback path). Fix version-specific breaks; document any PG16 caveat in the manifest errata. Acceptance: same 100% pass on 16 and 18.
@@ -59,3 +58,4 @@
 - [x] **Design phase** — spec v1.6, ADR-001..011, two review rounds folded, Protocol v1 + Function Manifest canonical, docs constitution (`6cf6793`..`e1237c5`)
 - [x] **S1 opening slice** — migration `0001_initial.sql` (6 roles, 39 hardened functions, self-checking), ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI), T1 (26) + T2 (15) suites, 42/42 green vs PG 18.3, wheel packaging fixed, single-writer ledger + typed-cancel reconciliations in manifest errata §8 (`3e7d55d`)
 - [x] **S1-01 · T3 choreographed races** — six advisory-barrier/hold-open race cases run deterministically for 20 rounds each: same-key convergence, double-claim exclusion, post-reap fence loss, cross-verb settle conflict, ten-way cap admission, and the single permitted pause slip.
+- [x] **S1-02 · T3-R randomized stress** — seed-replayable, env-scalable producer/worker/operator load mixes all 0.1 settle verbs, then drains and asserts durable duplicate-claim, attempt-token, conservation, terminal-state, and no-wedge invariants (30s default run green with seed `424242`).
