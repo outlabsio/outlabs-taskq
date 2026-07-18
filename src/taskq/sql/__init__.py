@@ -25,8 +25,9 @@ Design notes
 - The literal ``{{CHECKSUM}}`` inside a migration is replaced with that
   migration's own checksum before execution, so a migration can self-record
   ledger/meta rows that stay consistent with the runner's accounting.
-- Concurrent runners serialize on a session-level ``pg_advisory_lock`` keyed
-  by :data:`MIGRATE_LOCK_KEY`.
+- Concurrent runners serialize on :data:`MIGRATE_LOCK_KEY`: runner-owned
+  multi-transaction applies use a deliberately managed session lock, while a
+  caller-owned transaction uses ``pg_advisory_xact_lock``.
 - When the runner owns transaction scope, each migration (script + ledger
   row) commits in ONE transaction; inside a caller-managed transaction
   (Alembic) everything applies in the caller's transaction.
@@ -304,7 +305,7 @@ def _first_keyword(stmt: str) -> str:
 async def migrate(conn: AsyncConnection) -> list[str]:
     """Apply missing packaged migrations through an async connection.
 
-    Serialized by a session advisory lock; each missing migration and its
+    Serialized by the migration advisory key; each missing migration and its
     ``taskq.schema_migrations`` row commit together. Returns applied ids.
     """
     return await conn.run_sync(_migrate_impl)
@@ -319,7 +320,8 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
     if migrations is None:
         migrations = discover_migrations()
     owns_txn = not conn.in_transaction()
-    conn.execute(text("SELECT pg_advisory_lock(:key)"), {"key": MIGRATE_LOCK_KEY})
+    lock_function = "pg_advisory_lock" if owns_txn else "pg_advisory_xact_lock"
+    conn.execute(text(f"SELECT {lock_function}(:key)"), {"key": MIGRATE_LOCK_KEY})
     try:
         pending = plan_pending(migrations, _applied_ids(conn))
         if owns_txn:
@@ -339,14 +341,15 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
             applied.append(migration.id)
         return applied
     finally:
-        try:
-            if owns_txn and conn.in_transaction():
+        if owns_txn:
+            if conn.in_transaction():
                 conn.rollback()
-            conn.execute(text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATE_LOCK_KEY})
-            if owns_txn:
-                conn.commit()
-        except Exception:  # pragma: no cover - session close releases the lock anyway
-            pass  # never mask the original error with unlock noise
+            released = conn.execute(
+                text("SELECT pg_advisory_unlock(:key)"), {"key": MIGRATE_LOCK_KEY}
+            ).scalar_one()
+            conn.commit()
+            if not released:  # pragma: no cover - proves runner lock accounting
+                raise RuntimeError("taskq migration session lock was not held at release")
 
 
 def _applied_ids(conn: Connection) -> set[str]:

@@ -26,17 +26,16 @@
 | | |
 |---|---|
 | Stage | **1 — round-3 remediation in progress**; ADR-012 resolved Contract questions; Stage 2A closed |
-| Suite | 102/102 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
+| Suite | 106/106 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Round 3 verdict **BLOCKED**: 4 HIGH, 2 MEDIUM, 1 LOW, 2 Contract questions |
 
 ## Now — Round-3 remediation
 
-- [ ] **R3-F02 · Migration lock failure recovery** — close R3-02 for sync/async and caller/runner-owned transactions; prove concurrent recovery after injected failure.
+- [ ] **R3-F03 · Reserved-role validation** — close R3-03 by atomically rejecting unsafe pre-existing LOGIN/elevated/member roles before grants and verifying the role manifest.
 
 ## Next — Round-3 remediation
 
-- [ ] **R3-F03 · Reserved-role validation** — close R3-03 by atomically rejecting unsafe pre-existing LOGIN/elevated/member roles before grants and verifying the role manifest.
 - [ ] **R3-F04 · Manifest-complete T2/T8 coverage** — close R3-04 with collection completeness, all public-function behavior/error/grant vectors, shadow probes, installer concurrency/failure/CLI/sync/compatibility cases, and broader T4 operations where already contracted.
 - [ ] **R3-F05 · Built-artifact CI gate** — close R3-05 by installing wheel and sdist outside the source tree, checking import isolation, entry points, packaged migration discovery, migrate, and verify.
 - [ ] **R3-F06 · Benchmark reset and conservation** — close R3-06 with the normative fresh-database method and producer-stop→worker-drain B4 accounting.
@@ -61,6 +60,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **R3-F02 · Migration lock failure recovery** — caller-owned migrations now use a transaction advisory lock while runner-owned multi-transaction applies retain an explicitly released session lock; async/sync-adapter × caller/runner failure probes leave zero locks and prove immediate second-connection recovery (106/106 on PG18).
 - [x] **R3-F01 · Exact machine-readable manifest + verifier** — the independent 0.1.1 catalog projection closes the 40-function surface and exact role/relation/type/index/constraint/view/ACL/seed axes; read-only verification rejects 36 rollback-only corruptions, including all five R3-01 counterexamples, then proves restoration green (102/102 on PG18).
 - [x] **R3-CI · Implement contract 0.1.1** — immutable migration `0002_contract_0_1_1` adds the owner-only byte-safe truncation helper, applies ADR-012 null boundaries and diagnostic caps, advances the contract version, and passes fresh-chain plus `0001` upgrade vectors (64/64 on PG18).
 - [x] **R3-CQ · Contract questions adjudicated docs-first** — accepted [ADR-012](docs/adr/ADR-012-null-boundaries-byte-safe-diagnostics.md) makes explicit null invalid (`TQ422`), caps stored diagnostics by UTF-8 bytes with settlement-safe truncation, adds the owner-only helper to the Function Manifest before SQL, and advances the immutable migration chain to contract 0.1.1/`0002`.
