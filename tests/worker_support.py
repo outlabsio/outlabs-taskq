@@ -155,6 +155,29 @@ class ScriptedTransport:
             ClaimResult(state=ClaimState.EMPTY),
         )
 
+    async def worker_heartbeat(
+        self,
+        worker_id: str,
+        queues: Sequence[str],
+        *,
+        hostname: str | None = None,
+        pid: int | None = None,
+        version: str | None = None,
+        meta: Mapping[str, Any] | None = None,
+    ) -> bool:
+        return await self._next(
+            "worker_heartbeat",
+            {
+                "worker_id": worker_id,
+                "queues": tuple(queues),
+                "hostname": hostname,
+                "pid": pid,
+                "version": version,
+                "meta": dict(meta or {}),
+            },
+            False,
+        )
+
     async def complete(
         self,
         job_id: UUID,

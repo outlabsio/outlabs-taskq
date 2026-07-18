@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import socket
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
@@ -41,6 +43,8 @@ from taskq.protocol import (
 )
 from taskq.registry import Task, TaskRegistry
 from taskq.transport import TaskqTransport
+
+from taskq import __version__
 
 
 class WorkerClock(Protocol):
@@ -174,12 +178,15 @@ class WorkerServiceSnapshot(BaseModel):
     queues: tuple[str, ...]
     listener_requested: bool
     listener_connected: bool
+    presence_healthy: bool
     available_slots: int
     active_slots: int
     claim_sweeps: int
     claimed_jobs: int
     notification_nudges: int
     listener_reconnects: int
+    presence_failures: int
+    fatal: bool
 
 
 class _NotificationGeneration:
@@ -237,15 +244,20 @@ class WorkerService:
         self._stopped = asyncio.Event()
         self._listener_attempted = asyncio.Event()
         self._listener_connected = False
+        self._presence_healthy = True
         self._nudge = _NotificationGeneration()
         self._claim_task: asyncio.Task[None] | None = None
         self._listener_task: asyncio.Task[None] | None = None
+        self._presence_task: asyncio.Task[None] | None = None
         self._stop_task: asyncio.Task[None] | None = None
         self._claim_sweeps = 0
         self._claimed_jobs = 0
         self._listener_reconnects = 0
+        self._presence_failures = 0
         self._fatal_error: BaseException | None = None
         self._queue_index = 0
+        self._cancel_stop_requested = False
+        self._admission_closed = False
 
     @property
     def state(self) -> WorkerServiceState:
@@ -271,18 +283,26 @@ class WorkerService:
             queues=self.options.queues,
             listener_requested=self.options.listen,
             listener_connected=self._listener_connected,
+            presence_healthy=self._presence_healthy,
             available_slots=available,
-            active_slots=self.supervisor.options.concurrency - available,
+            active_slots=self.supervisor.active_slots,
             claim_sweeps=self._claim_sweeps,
             claimed_jobs=self._claimed_jobs,
             notification_nudges=self._nudge.nudges,
             listener_reconnects=self._listener_reconnects,
+            presence_failures=self._presence_failures,
+            fatal=self._fatal_error is not None,
         )
 
     async def start(self) -> None:
         if self._state is not WorkerServiceState.CONSTRUCTED:
             raise TaskqConfigError("worker service can only be started once")
         self._state = WorkerServiceState.STARTING
+        shutdown_requested = await self._write_presence()
+        if shutdown_requested:
+            self._stop_requested.set()
+            self._ensure_stop_task()
+            return
         self.supervisor.start()
         if self.options.listen:
             self._listener_task = asyncio.create_task(
@@ -290,45 +310,61 @@ class WorkerService:
             )
             await self._listener_attempted.wait()
         self._refresh_running_state()
+        self._presence_task = asyncio.create_task(
+            self._presence_loop(), name="taskq-worker-presence"
+        )
         self._claim_task = asyncio.create_task(self._claim_loop(), name="taskq-worker-claim")
 
     async def run(self, *, stop_signal: asyncio.Event | None = None) -> None:
-        if self._state is WorkerServiceState.CONSTRUCTED:
-            await self.start()
-        if stop_signal is None:
-            await self._stopped.wait()
-            return
-        signal_wait = asyncio.create_task(stop_signal.wait(), name="taskq-worker-stop-signal")
-        stopped_wait = asyncio.create_task(self._stopped.wait(), name="taskq-worker-stopped-wait")
-        done, _ = await asyncio.wait(
-            (signal_wait, stopped_wait), return_when=asyncio.FIRST_COMPLETED
-        )
-        if signal_wait in done and not self.stopped:
-            await self.stop()
-        signal_wait.cancel()
-        stopped_wait.cancel()
-        await asyncio.gather(signal_wait, stopped_wait, return_exceptions=True)
+        try:
+            if self._state is WorkerServiceState.CONSTRUCTED:
+                await self.start()
+            if stop_signal is None:
+                await self._stopped.wait()
+                return
+            signal_wait = asyncio.create_task(
+                stop_signal.wait(), name="taskq-worker-stop-signal"
+            )
+            stopped_wait = asyncio.create_task(
+                self._stopped.wait(), name="taskq-worker-stopped-wait"
+            )
+            done, _ = await asyncio.wait(
+                (signal_wait, stopped_wait), return_when=asyncio.FIRST_COMPLETED
+            )
+            if signal_wait in done and not self.stopped:
+                await self.stop()
+            signal_wait.cancel()
+            stopped_wait.cancel()
+            await asyncio.gather(signal_wait, stopped_wait, return_exceptions=True)
+        except asyncio.CancelledError:
+            await self._shielded_stop()
+            raise
 
     async def stop(self, *, cancel: bool = False) -> None:
         if self._state is WorkerServiceState.CONSTRUCTED:
             self._state = WorkerServiceState.STOPPED
             self._stopped.set()
             return
+        self._cancel_stop_requested = self._cancel_stop_requested or cancel
         if self._stop_task is None:
             self._stop_task = asyncio.create_task(
-                self._stop(cancel=cancel), name="taskq-worker-service-stop"
+                self._stop(), name="taskq-worker-service-stop"
             )
-        elif cancel:
+        elif cancel and self._admission_closed:
             await self.supervisor.stop(cancel=True)
         await asyncio.shield(self._stop_task)
 
-    async def _stop(self, *, cancel: bool) -> None:
+    async def _stop(self) -> None:
         self._state = WorkerServiceState.STOPPING
         self._stop_requested.set()
         self._nudge.nudge()
         if self._claim_task is not None:
             await asyncio.gather(self._claim_task, return_exceptions=True)
-        await self.supervisor.stop(cancel=cancel)
+        self._admission_closed = True
+        await self.supervisor.stop(cancel=self._cancel_stop_requested)
+        if self._presence_task is not None:
+            self._presence_task.cancel()
+            await asyncio.gather(self._presence_task, return_exceptions=True)
         if self.notifications is not None:
             await self.notifications.aclose()
         if self._listener_task is not None:
@@ -385,7 +421,8 @@ class WorkerService:
                         if len(result.jobs) > batch:
                             raise WorkerInvariantError("claim returned more jobs than requested")
                         for claim in result.jobs:
-                            self.supervisor.submit(claim)
+                            running = self.supervisor.submit(claim)
+                            running.add_done_callback(self._observe_job)
                         self._claimed_jobs += len(result.jobs)
                         claimed_in_sweep = True
                     elif result.state in (ClaimState.UNKNOWN_QUEUE, ClaimState.UNAVAILABLE):
@@ -406,7 +443,74 @@ class WorkerService:
 
     def _ensure_stop_task(self) -> None:
         if self._stop_task is None:
-            self._stop_task = asyncio.create_task(self._stop(cancel=False))
+            self._stop_task = asyncio.create_task(
+                self._stop(), name="taskq-worker-service-stop"
+            )
+
+    def _observe_job(self, completed: asyncio.Task[JobRunReport]) -> None:
+        if completed.cancelled():
+            return
+        try:
+            report = completed.result()
+        except BaseException as exc:
+            self._fail_service(exc)
+            return
+        if report.fatal:
+            self._fail_service(WorkerInvariantError(f"fatal job outcome: {report.outcome.value}"))
+
+    def _fail_service(self, error: BaseException) -> None:
+        if self._fatal_error is None:
+            self._fatal_error = error
+        self._state = WorkerServiceState.FAILED
+        self._stop_requested.set()
+        self._nudge.nudge()
+        self._ensure_stop_task()
+
+    async def _write_presence(self) -> bool:
+        try:
+            shutdown_requested = await self.transport.worker_heartbeat(
+                self.worker_id,
+                self.options.queues,
+                hostname=socket.gethostname(),
+                pid=os.getpid(),
+                version=__version__,
+                meta={
+                    "concurrency": self.supervisor.options.concurrency,
+                    "sync_workers": self.supervisor.options.effective_sync_workers,
+                    "batch": self.options.batch,
+                    "listen": self.options.listen,
+                },
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            self._presence_healthy = False
+            self._presence_failures += 1
+            self._refresh_running_state()
+            return False
+        self._presence_healthy = True
+        self._refresh_running_state()
+        return shutdown_requested
+
+    async def _presence_loop(self) -> None:
+        while not self._stop_requested.is_set():
+            await self._sleep_or_stop(self.options.presence_interval)
+            if self._stop_requested.is_set():
+                return
+            if await self._write_presence():
+                self._stop_requested.set()
+                self._nudge.nudge()
+                self._ensure_stop_task()
+                return
+
+    async def _shielded_stop(self) -> None:
+        stopping = asyncio.create_task(self.stop(), name="taskq-worker-cancel-cleanup")
+        while not stopping.done():
+            try:
+                await asyncio.shield(stopping)
+            except asyncio.CancelledError:
+                continue
+        stopping.result()
 
     async def _wait_for_capacity_or_stop(self) -> bool:
         capacity = asyncio.create_task(
@@ -456,11 +560,10 @@ class WorkerService:
             WorkerServiceState.FAILED,
         ):
             return
-        self._state = (
-            WorkerServiceState.DEGRADED
-            if self.options.listen and not self._listener_connected
-            else WorkerServiceState.RUNNING
+        degraded = (self.options.listen and not self._listener_connected) or not (
+            self._presence_healthy
         )
+        self._state = WorkerServiceState.DEGRADED if degraded else WorkerServiceState.RUNNING
 
     async def aclose(self) -> None:
         await self.stop(cancel=True)
@@ -522,6 +625,10 @@ class WorkerSupervisor:
     @property
     def available_slots(self) -> int:
         return self._free_slots if self._accepting else 0
+
+    @property
+    def active_slots(self) -> int:
+        return len(self._active)
 
     @property
     def _free_slots(self) -> int:
