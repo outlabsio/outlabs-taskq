@@ -25,14 +25,20 @@
 
 | | |
 |---|---|
-| Stage | **2A completion audit complete; Stage 2B open** — typed enqueue foundation is permanently gated and cross-version green |
+| Stage | **Stage 2B contract gate blocked** — S2-04 cannot freeze heartbeat timing until S2-CQ-01 is adjudicated docs-first |
 | Suite | 217/217 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
-| Next review | Stage 2A acceptance matrix independently re-audited green; S2-04 worker contracts govern the next slice |
+| Next review | Adjudicate S2-CQ-01; recommended resolution is additive `claimed_job.lease_seconds` in contract 0.1.2 |
 
 ## Now — Stage 2B worker runtime
 
-- [ ] S2-04 worker supervisor: heartbeat-per-job, verb-aware settle retries, R2-11 cancellation contracts, soft stop (feature 11)
+- [ ] **S2-CQ-01 contract adjudication** — expose the effective claimed lease duration without a worker-clock decision; recommended ADR-013 + additive `claimed_job.lease_seconds` + contract 0.1.2/`0003`
+- [ ] **S2-04-SPEC** — freeze worker lifecycle, state machine, cancellation matrix, module/API boundary, and acceptance matrix *(blocked by S2-CQ-01)*
+- [ ] **S2-04A** — execution context, cancellation token, closed handler-result types, sync/async registration, and deterministic test utilities
+- [ ] **S2-04B** — heartbeat-per-job and fenced per-job supervision
+- [ ] **S2-04C** — verb-aware settlement replay policy and programmable lost-response injection
+- [ ] **S2-04D** — bounded concurrency, bounded sync executor, and soft-stop lifecycle
+- [ ] **S2-04-AUDIT** — deterministic races, resource conservation, artifact/import isolation, and PG16/PG18 completion evidence
 
 ## Next — Stage 2B worker runtime
 
@@ -45,7 +51,13 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-*(none open — ADR-012 resolves round-3 CQ-01/CQ-02 as contract 0.1.1: explicit null → `TQ422`; stored diagnostics truncate to UTF-8 byte caps without blocking settlement)*
+### S2-CQ-01 — effective lease duration is absent from the claim projection
+
+**Evidence:** Tier-3 Unified Spec §14 requires one heartbeat per running job at `min(lease/3, 30s)`, and ADR-003 requires database-clock-only lease decisions. The Tier-0 `taskq.claimed_job` composite exposes `lease_expires_at` but not the row's effective `lease_seconds`; `claim_jobs` may use the stamped per-job value when `p_lease_seconds` is omitted. Python therefore cannot calculate the normative interval without either (a) subtracting the worker clock from a database timestamp, making clock skew load-bearing, or (b) always supplying a global claim/heartbeat override, silently defeating the per-task/per-queue lease stamped at enqueue. Neither is a valid implementation workaround.
+
+**Recommended adjudication:** ADR-013 appends non-null `lease_seconds integer` to `taskq.claimed_job` (additive evolution expressly permitted by Protocol H-02), updates `claim_jobs` to return the effective `v_lease`, advances the SQL contract to 0.1.2 in immutable migration `0003`, and adds exact manifest/parity/fresh-chain/upgrade tests on PG16/PG18. Protocol major remains v1. S2-04 remains stopped until this is accepted or another contract-valid source of the effective duration is chosen.
+
+*(ADR-012 already resolves round-3 CQ-01/CQ-02 as contract 0.1.1: explicit null → `TQ422`; stored diagnostics truncate to UTF-8 byte caps without blocking settlement.)*
 
 ## Round-3 finding dispositions
 
