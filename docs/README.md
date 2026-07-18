@@ -4,7 +4,7 @@ Canonical home for the taskq protocol and library design. Host apps (Diverse, QD
 
 ## Reading order
 
-0. **[ADRs](./adr/README.md)** — the accepted decision records (ADR-001..010, 2026-07-18). Where any doc below disagrees with an ADR, the ADR wins. Provenance: the [design review](./design-review/README.md) (7 docs, assessed and folded in same day).
+0. **[ADRs](./adr/README.md)** — the accepted decision records (ADR-001..011, 2026-07-18). Then the **[Build Plan](./Task%20Queue%20Build%20Plan.md)** for what happens next. Where any doc below disagrees with an ADR, the ADR wins. Provenance: the [design review](./design-review/README.md) (7 docs, assessed and folded in same day).
 1. **[Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md)** — CANONICAL wire contract (adopts review draft 03 with amendments; ADR-005 satisfied)
 2. **[0.1 Function Manifest](./Task%20Queue%200.1%20Function%20Manifest.md)** — CANONICAL 0.1 function set: identities, grants, SQLSTATEs, executable bodies (R2-08 closed)
 3. **[Task Queue — Unified Design Spec](./Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md)** — SQL-first protocol, state machine, functions, ops runbook

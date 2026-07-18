@@ -12,11 +12,12 @@ Start here:
 
 | Doc | What it is |
 |---|---|
-| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..010) — override conflicting passages elsewhere** |
+| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..011) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
+| [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |
 | [`docs/Task Queue Transport Protocol v1.md`](docs/Task%20Queue%20Transport%20Protocol%20v1.md) | **Canonical wire contract** (ADR-005 satisfied) |
 | [`docs/Task Queue 0.1 Function Manifest.md`](docs/Task%20Queue%200.1%20Function%20Manifest.md) | **Canonical 0.1 SQL surface** — migration 0001 derives from this |
-| [`docs/Task Queue — Unified Design Spec.md`](docs/Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md) | Canonical protocol (SQL-first), v1.5 |
+| [`docs/Task Queue — Unified Design Spec.md`](docs/Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md) | Destination design (SQL-first), v1.6 |
 | [`docs/Task Queue Library Extraction Design Brief.md`](docs/Task%20Queue%20Library%20Extraction%20Design%20Brief.md) | Package boundaries + optional outlabs-auth |
 | [`docs/Task Queue Authorization & Queue Permissions.md`](docs/Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md) | Per-queue permissions + outlabs-auth adapter + provisioning DX |
 | [`docs/Task Queue Test & Benchmark Harness.md`](docs/Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Own test suites, CI matrix, benchmark scenarios + regression gates |
