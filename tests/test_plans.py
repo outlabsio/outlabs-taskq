@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import asyncpg
@@ -18,6 +20,123 @@ import pytest
 pytestmark = pytest.mark.taskq_sql
 
 _MILLION = 1_000_000
+
+
+@dataclass(frozen=True, slots=True)
+class PlanBinding:
+    functions: tuple[str, ...]
+    body_fragments: tuple[str, ...]
+
+
+_PLAN_QUERIES = {
+    "claim": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.status = 'queued'
+           AND j.scheduled_at <= now() AND j.cancel_requested_at IS NULL
+         ORDER BY j.priority, j.scheduled_at, j.id
+         LIMIT 1 FOR UPDATE OF j SKIP LOCKED
+    """,
+    "dedup": """
+        INSERT INTO taskq.jobs (
+            id, queue, job_type, status, priority, payload, idempotency_key,
+            scheduled_at, lease_seconds, max_attempts, backoff_mode,
+            backoff_base_seconds, backoff_cap_seconds
+        ) VALUES (
+            taskq.uuid7(), 'plan_a', 'test.plan', 'queued', 100, '{}'::jsonb,
+            'plan-key-500000', now(), 300, 5, 'fixed', 30, 300
+        )
+        ON CONFLICT (queue, idempotency_key)
+            WHERE idempotency_key IS NOT NULL AND status IN ('blocked','queued','running')
+        DO NOTHING
+    """,
+    "reap": """
+        SELECT id FROM taskq.jobs
+         WHERE status = 'running' AND lease_expires_at <= now() + interval '1 day'
+         ORDER BY lease_expires_at
+         LIMIT 100
+    """,
+    "ready_stats": """
+        SELECT count(*) FROM taskq.jobs
+         WHERE queue = 'plan_a' AND status = 'queued'
+           AND cancel_requested_at IS NULL AND scheduled_at <= now()
+    """,
+    "running_stats": """
+        SELECT count(*) FROM taskq.jobs
+         WHERE queue = 'plan_a' AND status = 'running'
+    """,
+    "finished_stats": """
+        SELECT count(*) FROM taskq.jobs
+         WHERE status IN ('succeeded','failed','cancelled')
+           AND finished_at <= now()
+    """,
+}
+
+_PLAN_BINDINGS = {
+    "claim": PlanBinding(
+        functions=("taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",),
+        body_fragments=(
+            "from taskq.jobs j where j.queue = p_queue and j.status = 'queued'",
+            "and j.scheduled_at <= now() and j.cancel_requested_at is null",
+            "order by j.priority, j.scheduled_at, j.id limit 1 for update of j skip locked",
+        ),
+    ),
+    "dedup": PlanBinding(
+        functions=(
+            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+            "taskq.enqueue_many(text,jsonb)",
+        ),
+        body_fragments=(
+            "on conflict (queue, idempotency_key)",
+            "where idempotency_key is not null and status in ('blocked','queued','running')",
+            "do nothing",
+        ),
+    ),
+    "reap": PlanBinding(
+        functions=("taskq.reap_expired(integer)",),
+        body_fragments=(
+            "from taskq.jobs where status = 'running' and lease_expires_at <= now()",
+            "order by lease_expires_at limit greatest(coalesce(p_limit, 0), 0)",
+        ),
+    ),
+    "ready_stats": PlanBinding(
+        functions=("taskq.refresh_stats_snapshot()",),
+        body_fragments=(
+            "from taskq.jobs j where j.queue=q.name and j.status='queued'",
+            "and j.cancel_requested_at is null and j.scheduled_at <= now()",
+        ),
+    ),
+    "running_stats": PlanBinding(
+        functions=("taskq.refresh_stats_snapshot()",),
+        body_fragments=("from taskq.jobs j where j.queue=q.name and j.status='running'",),
+    ),
+    "finished_stats": PlanBinding(
+        functions=("taskq.janitor()",),
+        body_fragments=(
+            "where j.queue = q.name and j.status in ('succeeded','cancelled')",
+            "and j.finished_at < now() - make_interval(hours => q.retention_hours)",
+        ),
+    ),
+}
+
+
+def _normalize_sql(value: str) -> str:
+    return re.sub(r"\s+", " ", value.lower()).strip()
+
+
+async def _assert_hot_path_bindings(pg: asyncpg.Connection, names: set[str] | None = None) -> None:
+    selected = names or set(_PLAN_BINDINGS)
+    assert selected <= set(_PLAN_QUERIES) == set(_PLAN_BINDINGS)
+    for name in sorted(selected):
+        binding = _PLAN_BINDINGS[name]
+        for identity in binding.functions:
+            definition = await pg.fetchval(
+                "SELECT pg_catalog.pg_get_functiondef($1::regprocedure::oid)", identity
+            )
+            normalized = _normalize_sql(definition)
+            for fragment in binding.body_fragments:
+                assert _normalize_sql(fragment) in normalized, (
+                    f"plan binding {name!r} drifted from {identity}: missing {fragment!r}"
+                )
 
 
 def _walk_plan(node: dict[str, Any]) -> Iterator[dict[str, Any]]:
@@ -122,37 +241,20 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     if os.environ.get("TASKQ_PLAN_CHECKS") != "1":
         pytest.skip("set TASKQ_PLAN_CHECKS=1 to seed 1M rows and run structural EXPLAIN checks")
 
+    await _assert_hot_path_bindings(pg)
     await _seed_million(pg)
     await pg.execute("SET jit = off")
 
     claim = await _explain(
         pg,
-        """
-        SELECT j.id FROM taskq.jobs j
-         WHERE j.queue = 'plan_a' AND j.status = 'queued'
-           AND j.scheduled_at <= now() AND j.cancel_requested_at IS NULL
-         ORDER BY j.priority, j.scheduled_at, j.id
-         LIMIT 1 FOR UPDATE OF j SKIP LOCKED
-        """,
+        _PLAN_QUERIES["claim"],
     )
     _assert_index_family(claim, "jobs_claim_idx")
     assert claim["Actual Rows"] <= 1
 
     dedup = await _explain(
         pg,
-        """
-        INSERT INTO taskq.jobs (
-            id, queue, job_type, status, priority, payload, idempotency_key,
-            scheduled_at, lease_seconds, max_attempts, backoff_mode,
-            backoff_base_seconds, backoff_cap_seconds
-        ) VALUES (
-            taskq.uuid7(), 'plan_a', 'test.plan', 'queued', 100, '{}'::jsonb,
-            'plan-key-500000', now(), 300, 5, 'fixed', 30, 300
-        )
-        ON CONFLICT (queue, idempotency_key)
-            WHERE idempotency_key IS NOT NULL AND status IN ('blocked','queued','running')
-        DO NOTHING
-        """,
+        _PLAN_QUERIES["dedup"],
     )
     arbiter_indexes = {
         index for node in _walk_plan(dedup) for index in node.get("Conflict Arbiter Indexes", ())
@@ -161,45 +263,55 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
 
     reap = await _explain(
         pg,
-        """
-        SELECT id FROM taskq.jobs
-         WHERE status = 'running' AND lease_expires_at <= now() + interval '1 day'
-         ORDER BY lease_expires_at
-         LIMIT 100
-        """,
+        _PLAN_QUERIES["reap"],
     )
     _assert_index_family(reap, "jobs_running_idx")
     assert reap["Actual Rows"] <= 100
 
     ready_stats = await _explain(
         pg,
-        """
-        SELECT count(*) FROM taskq.jobs
-         WHERE queue = 'plan_a' AND status = 'queued'
-           AND cancel_requested_at IS NULL AND scheduled_at <= now()
-        """,
+        _PLAN_QUERIES["ready_stats"],
     )
     _assert_index_family(ready_stats, "jobs_claim_idx")
 
     running_stats = await _explain(
         pg,
-        """
-        SELECT count(*) FROM taskq.jobs
-         WHERE queue = 'plan_a' AND status = 'running'
-        """,
+        _PLAN_QUERIES["running_stats"],
     )
     _assert_index_family(running_stats, "jobs_running_idx")
 
     finished_stats = await _explain(
         pg,
-        """
-        SELECT count(*) FROM taskq.jobs
-         WHERE status IN ('succeeded','failed','cancelled')
-           AND finished_at <= now()
-        """,
+        _PLAN_QUERIES["finished_stats"],
     )
     _assert_index_family(finished_stats, "jobs_finished_idx")
 
     # Execute the exact owner helper too; EXPLAIN cannot expose SQL nested in
     # PL/pgSQL, so the representative subqueries above provide plan evidence.
     await pg.fetchval("SELECT taskq.refresh_stats_snapshot()")
+
+
+async def test_plan_binding_detects_rollback_only_function_drift(
+    pg: asyncpg.Connection,
+) -> None:
+    await _assert_hot_path_bindings(pg)
+    transaction = pg.transaction()
+    await transaction.start()
+    try:
+        await pg.execute(
+            """
+            CREATE OR REPLACE FUNCTION taskq.reap_expired(p_limit int DEFAULT 100)
+            RETURNS int LANGUAGE plpgsql SECURITY DEFINER
+            SET search_path = pg_catalog, taskq, pg_temp AS $function$
+            BEGIN
+                PERFORM count(*) FROM taskq.jobs;
+                RETURN 0;
+            END
+            $function$
+            """
+        )
+        with pytest.raises(AssertionError, match="plan binding 'reap' drifted"):
+            await _assert_hot_path_bindings(pg, {"reap"})
+    finally:
+        await transaction.rollback()
+    await _assert_hot_path_bindings(pg, {"reap"})

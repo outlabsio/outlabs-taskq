@@ -26,17 +26,17 @@
 | | |
 |---|---|
 | Stage | **1 — round-3 remediation in progress**; ADR-012 resolved Contract questions; Stage 2A closed |
-| Suite | 125/125 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
+| Suite | 126/126 regular + opt-in 1M plan gate green vs PG 18.3; final PG16 remediation rerun in progress |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Round 3 verdict **BLOCKED**: 4 HIGH, 2 MEDIUM, 1 LOW, 2 Contract questions |
 
 ## Now — Round-3 remediation
 
-- [ ] **R3-F07 · Plan-query drift detection** — close R3-07 by binding representative structural plans to actual function definitions or captured nested plans.
+- [ ] **R3-F08 · Cross-version exact-catalog normalization** — make the exact constraint manifest compare the same contract surface on PG16 and PG18, then rerun the complete remediation suite on both versions.
 
 ## Next — Round-3 remediation
 
-*(none — R3-F07 is the final remediation item)*
+*(none — R3-F08 is the final remediation audit item)*
 
 ## Later — Stage 2 kickoff (closed until round-3 remediation passes PG16 + PG18)
 
@@ -57,6 +57,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **R3-F07 · Plan-query drift detection** — every representative million-row structural query is now bound to normalized fragments from the actual owning function definition; a rollback-only full-scan mutation proves the regular guard fails on function drift and recovers after rollback (126/126 plus the opt-in gate on PG18).
 - [x] **R3-F06 · Benchmark reset and conservation** — every B1–B4 scenario now creates/migrates/fingerprints/drops its own fresh database; B4 stops and joins producers before a bounded worker drain, then records and asserts accepted = terminal + active with zero active/running jobs or attempts (all four toy smokes green, no databases leaked).
 - [x] **R3-F05 · Built-artifact CI gate** — CI builds wheel + sdist, installs each core and HTTP extra into clean environments outside the checkout, proves optional-import isolation and installed-package provenance, exercises both entry points, asserts the packaged 0001+0002/40-function manifest, and performs a fresh database CLI migrate + exact verify; the identical four-environment smoke is green locally.
 - [x] **R3-F04 · Manifest-complete T2/T8 coverage** — closed ledgers cover all 30 public functions, registered errors, replay declarations, and exact grants; direct vectors fill bulk/runner/observer/operator/housekeeper gaps, assert safe views and shadow resistance, add concurrent install + CLI gates, reuse failure/sync/upgrade/corruption T8 evidence, and extend T4 with heartbeat and worker-cancel replay transitions (125/125 on PG18).
