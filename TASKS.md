@@ -26,13 +26,12 @@
 | | |
 |---|---|
 | Stage | **1 — secure SQL kernel** (opening slice landed) |
-| Suite | 54/54 green vs live PG 18.3 |
+| Suite | 54/54 green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
 | Next review | Round 3 after Stage-1 exit gate (migration 0001 + harness vs manifest) |
 
 ## Now — Stage 1 exit gate
 
-- [ ] **S1-05 · PG16 lane.** Run the full suite against a PostgreSQL 16 container (uuid7 SQL fallback path). Fix version-specific breaks; document any PG16 caveat in the manifest errata. Acceptance: same 100% pass on 16 and 18.
 - [ ] **S1-06 · 1M-row plan checks.** Seed 1M jobs (mixed statuses) in a scratch DB; `EXPLAIN (ANALYZE, BUFFERS)` on claim, dedup insert, reap select, stats snapshot — assert index families per Harness doc (structural asserts, not cost numbers). Store the queries as `tests/test_plans.py` (`taskq_sql`-marked, opt-in via env `TASKQ_PLAN_CHECKS=1`).
 - [ ] **S1-07 · B1–B4 benchmark smoke.** `bench/` runner skeleton + workloads B1 (single enqueue), B2 (bulk), B3 (claim+no-op settle empty/deep), B4 (mixed sustained) at toy scale, JSON result artifact per Harness doc §5 method rules. No baselines yet — the harness must run, record, and print.
 - [ ] **S1-08 · CI wiring.** GitHub Actions per Harness doc §4: lint, import-isolation (core installs without extras), T1, sql-contract on PG16+PG18 service containers, races job. Branch protection note in README.
@@ -59,3 +58,4 @@
 - [x] **S1-02 · T3-R randomized stress** — seed-replayable, env-scalable producer/worker/operator load mixes all 0.1 settle verbs, then drains and asserts durable duplicate-claim, attempt-token, conservation, terminal-state, and no-wedge invariants (30s default run green with seed `424242`).
 - [x] **S1-03 · T4 stateful model** — Hypothesis drives enqueue/claim/complete/fail/release/snooze/cancel/lease-rewind+tick/redrive through capability roles; every step reconciles budget, fence, attempt-ledger, terminal-shape, dedup, and conservation invariants (20×40 default green with seed `24680`).
 - [x] **S1-04 · verify corruption matrix** — T2 now corrupts and restores each hardening axis; `verify()` precisely names missing pinned paths, PUBLIC EXECUTE, wrong ownership, ledger checksum drift, and a missing capability role, then proves the restored catalog green.
+- [x] **S1-05 · PG16 lane** — the identical 54-test suite passes on PostgreSQL 16.14 and 18.3, including the uuid7 fallback, races, stress, model, and verifier corruption matrix; no PG16 manifest caveat was required.
