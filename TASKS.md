@@ -25,24 +25,24 @@
 
 | | |
 |---|---|
-| Stage | **Round-4 remediation complete** — R4-01..08 are closed; S2-05 is ready but deliberately not started |
+| Stage | **S2-05 specification frozen** — implementation opens at the notification/poll kernel; no S2-05 runtime or Stage-3 code exists yet |
 | Suite | 299/299 regular on PG18.3 and PG16.14; the million-row plan gate remains opt-in |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | No further full round required; next natural external boundary is the Stage-3 round-5 review |
 
-## Now — round-4 remediation (stop before S2-05)
+## Now — S2-05 implementation
 
-*(none — the required remediation is green; this slice stops before S2-05)*
+- [ ] **S2-05A · Notification and authoritative poll kernel** — dedicated reconnecting listener, generation-safe nudges, monotonic poll correctness, fair queue sweep, no local prefetch.
+- [ ] **S2-05B · Capacity-safe claim, presence, and shutdown** — shielded claim-to-submit admission, advisory presence/remote drain, and unified lifecycle over `WorkerSupervisor`.
+- [ ] **S2-05C · pydantic-settings, worker CLI, and observability** — secret-safe config/interlocks, explicit registry import, signals/process-exit, structured diagnostics, core packaging.
+- [ ] **S2-05-AUDIT · Races, resources, artifacts, PG16/PG18, B8/B13** — make every specification acceptance row permanent.
 
 
-## Next — gated after Stage 2B review
+## Next — after S2-05
 
-- [ ] S2-05 NOTIFY listener + poll loop (feature 06); `taskq worker` CLI
 - [ ] S2-06 `taskq.testing` fixtures + inline transport (feature 10)
 
 ## Later
-
-- [ ] **S3-PREP-04 guidance (deferred to S2-05)** — worker CLI configuration must use `pydantic-settings`, not hand-rolled environment parsing; do not implement configuration before S2-05 opens.
 
 *(subsequent stages remain sequenced by the Build Plan)*
 
@@ -60,6 +60,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-05-SPEC · Claim loop and worker CLI contracts frozen** — the Tier-3 Stage-2C specification fixes notification-as-hint plus authoritative monotonic polling, reconnect catch-up, fair capacity-bounded claim admission, advisory presence/remote shutdown, `taskq worker` lifecycle, `pydantic-settings` precedence/interlocks, fence-safe observability, deterministic fault/race machinery, packaging boundaries, and the S2-05A/B/C/audit matrix; no runtime or Stage-3 code was added.
 - [x] **R4-AUDIT · Round-4 remediation completion evidence** — the identical 299-test suite passes with one pre-existing opt-in plan skip on PostgreSQL 18.3 and an isolated PostgreSQL 16.14 lane; Ruff and diff hygiene are clean, R4-01..08 are closed, no contract question was opened, and the worker surface stops before S2-05.
 - [x] **R4-F04 · Replay oracle and error normalization (R4-07/R4-08)** — the scripted ledger now retains every semantic settlement argument behind fence-safe representations and replay tests assert exact equality; validation/capability failures in no-handler release and invalid-follow-up escape now return fatal runtime reports, pinned for both typed error classes.
 - [x] **R4-F03 · Process-exit honesty and dispatch arity (R4-04/R4-05/R4-06)** — lease loss now marks a still-live sync handler as `abandoned_sync`, exposes immediate process-exit necessity, and preserves that history in the terminal report; dispatch consumes registry-frozen positional arity, while regressions cover sync/async keyword-only dispatch, competing capacity waiters, post-deadline heartbeat, fatal auto-drain, and external `run_job` cancellation.

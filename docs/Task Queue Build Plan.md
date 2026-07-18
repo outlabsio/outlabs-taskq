@@ -4,7 +4,7 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; the [round-4 response](./design-review-4/RESPONSE.md) blocks S2-05 on a narrow worker-kernel remediation while leaving the SQL safety core and upgrade path intact.
+Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the round-3 and [round-4](./design-review-4/RESPONSE.md) implementation reviews are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; S2-05 is specified and open for implementation without a further review gate.
 
 ## Stage 1 — secure SQL kernel (COMPLETE)
 
@@ -55,6 +55,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 **Round-4 verdict blocked:** the immutable [response](./design-review-4/RESPONSE.md) verified the database safety and contract-0.1.2 upgrade core, then executed counterexamples for heartbeat loss during settlement and incorrect external-task cancellation. R4-01..08 must land as a worker-local remediation with permanent race/oracle evidence on PostgreSQL 16 and 18; S2-05 remains closed and no further full review round is required for that gate.
 
 **Round-4 remediation green:** R4-01..08 now keep heartbeats live through settlement, convert external cancellation to shielded shutdown release plus re-raise, expose abandoned-sync process-exit requirements, dispatch from registry-frozen arity, prove replay argument identity, and normalize special-path transport failures. The identical **299/299** suite passes on PostgreSQL 18.3 and 16.14 with one pre-existing opt-in plan skip; S2-05 may open in the next slice but was not started here.
+
+**S2-05 specification frozen:** the [Stage 2C Claim Loop and Worker CLI Specification](./Task%20Queue%20Stage%202C%20Claim%20Loop%20and%20Worker%20CLI%20Specification.md) fixes notification-as-hint plus authoritative polling, reconnect catch-up, fair capacity-safe claim admission, advisory presence and remote drain, `taskq worker` lifecycle, `pydantic-settings` configuration, structured diagnostics, deterministic races, packaging isolation, and the PG16/PG18 acceptance matrix. Implementation opens at S2-05A; no runtime or Stage-3 surface landed with the specification.
 
 ## Stage 3 — FastAPI + outlabs-auth
 

@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1, 2A, and 2B complete** — SQL kernel (contract 0.1.2), typed tasks/registry, the complete async SQL transport, caller-transactional `TaskQ` enqueue, and the worker supervisor (execution primitives, heartbeat supervision, settlement replay, bounded lifecycle) are implemented; S2-05 (NOTIFY loop + worker CLI) is next after the round-4 review. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1, 2A, and 2B complete** — SQL kernel (contract 0.1.2), typed tasks/registry, the complete async SQL transport, caller-transactional `TaskQ` enqueue, and the remediated worker supervisor are implemented; the S2-05 notification/poll/presence/worker-CLI specification is frozen and implementation opens at S2-05A. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -46,7 +46,7 @@ src/taskq/
   client.py      # TaskQ facade: transactional typed enqueue
   transport.py   # TaskqTransport protocol
   worker.py      # supervisor: heartbeat, settle replay, bounded lifecycle
-  cli.py         # migrate / verify (worker CLI lands with S2-05)
+  cli.py         # migrate / verify (worker CLI specified for S2-05)
   http/          # optional FastAPI facade (Stage 3, not started)
 ```
 
