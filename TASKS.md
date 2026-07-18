@@ -26,7 +26,7 @@
 | | |
 |---|---|
 | Stage | **2A completion audit complete; Stage 2B open** — typed enqueue foundation is permanently gated and cross-version green |
-| Suite | 216/216 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
+| Suite | 217/217 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Stage 2A acceptance matrix independently re-audited green; S2-04 worker contracts govern the next slice |
 
@@ -53,6 +53,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-AUDIT-03 · Function-specific outcome enforcement** — every scalar and composite transport result is checked against its command's own protocol-owned outcome set; rollback-only wrong-command outcomes become `TQ500` even when the value is valid for a different command (217/217 on PG18 and PG16, plus the plan gate on both).
 - [x] **S2-AUDIT-02 · Permanent acceptance evidence** — transport-level 20-way dedup proves one `created`/19 `existed`, captured logs remain fence-free, SQL construction/commands leave no background tasks or checked-out connections, transaction vectors conserve domain/job/event rows, and CI now runs the full suite on PG16/PG18 plus explicit core/HTTP/outlabs isolation on Python 3.12/3.13 and on every Python-3.12 wheel/sdist; all local mirrors pass (216/216 + plan gate on both PG versions, 73 Python-3.13 unit tests).
 - [x] **S2-AUDIT-01 · Protocol single-source correction** — `taskq.protocol` now owns the closed 30-command names, SQL identities, capability roles, outcomes, TQ errors/retryability, and replay rules; typed settle/job/operator enums reject invented values, while independent parity proves exact agreement with the Tier-0-derived machine manifest (214/214 on PG18).
 - [x] **S2-03 · Typed facade and transactional enqueue** — `TaskQ` compiles registered canonical tasks and retry stamps exactly once, keeps raw enqueue explicitly opt-in, and executes single/bulk enqueue on the caller's exact `AsyncSession`/`AsyncConnection` without owning its lifecycle; commit, rollback, autobegin, savepoint, cancellation/error ownership, non-SQL rejection, and no-background-work contracts pass on PG16/PG18, while clean wheel/sdist core installs import the complete Stage 2A surface (212/212 each).

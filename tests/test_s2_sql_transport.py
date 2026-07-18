@@ -386,3 +386,25 @@ async def test_bulk_malformed_rows_are_atomic_tq500(
     with pytest.raises(TaskqInternalError):
         await transport.enqueue_many("queue", items)
     await engine.dispose()
+
+
+async def test_function_specific_outcome_drift_is_tq500(
+    sqlalchemy_dsn: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    engine = create_async_engine(sqlalchemy_dsn)
+    transport = SqlTaskqTransport(engine)
+
+    async def wrong_settle_row(*args: object, **kwargs: object) -> dict[str, object]:
+        return {"result": "dead", "job_status": "failed", "scheduled_at": None}
+
+    monkeypatch.setattr(transport, "_one", wrong_settle_row)
+    with pytest.raises(TaskqInternalError):
+        await transport.complete(uuid4(), uuid4(), "worker")
+
+    async def wrong_operator_outcome(*args: object, **kwargs: object) -> str:
+        return "resumed"
+
+    monkeypatch.setattr(transport, "_operator_scalar", wrong_operator_outcome)
+    with pytest.raises(TaskqInternalError):
+        await transport.pause_queue("queue", "actor")
+    await engine.dispose()

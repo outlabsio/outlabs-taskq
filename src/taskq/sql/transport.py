@@ -20,6 +20,7 @@ from taskq.protocol import (
     COMMAND_SPECS,
     CancelResult,
     ClaimResult,
+    CommandName,
     CommandOkOutcome,
     ConfigChangeOutcome,
     ContractMeta,
@@ -107,6 +108,13 @@ class SqlTaskqTransport:
             raise
         except Exception as exc:
             raise taskq_error_from_exception(exc) from exc
+
+    @staticmethod
+    def _validated_outcome(command: CommandName, value: Any) -> str:
+        outcome = str(value)
+        if outcome not in COMMAND_SPECS[command].outcomes:
+            raise TaskqInternalError()
+        return outcome
 
     @staticmethod
     async def _one(
@@ -303,10 +311,14 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
-    async def _settle(self, statement: str, params: Mapping[str, Any]) -> SettleResult:
+    async def _settle(
+        self, command: CommandName, statement: str, params: Mapping[str, Any]
+    ) -> SettleResult:
         async def operation(conn: AsyncConnection) -> SettleResult:
             row = await self._one(conn, statement, params)
-            return SettleResult.model_validate(row)
+            result = SettleResult.model_validate(row)
+            self._validated_outcome(command, result.result)
+            return result
 
         return await self._run(operation)
 
@@ -321,6 +333,7 @@ class SqlTaskqTransport:
         followups: Sequence[Mapping[str, Any]] | None = None,
     ) -> SettleResult:
         return await self._settle(
+            CommandName.COMPLETE,
             "SELECT * FROM taskq.complete_job(:job_id, :attempt_id, :worker_id, "
             "CAST(:result AS jsonb), CAST(:stats AS jsonb), CAST(:followups AS jsonb))",
             {
@@ -346,6 +359,7 @@ class SqlTaskqTransport:
         stats: Mapping[str, Any] | None = None,
     ) -> SettleResult:
         return await self._settle(
+            CommandName.FAIL,
             "SELECT * FROM taskq.fail_job(:job_id, :attempt_id, :worker_id, :error, "
             ":retryable, :retry_after_seconds, CAST(:progress AS jsonb), CAST(:stats AS jsonb))",
             {
@@ -371,6 +385,7 @@ class SqlTaskqTransport:
         progress: Mapping[str, Any] | None = None,
     ) -> SettleResult:
         return await self._settle(
+            CommandName.SNOOZE,
             "SELECT * FROM taskq.snooze_job(:job_id, :attempt_id, :worker_id, "
             ":delay_seconds, :reason, CAST(:progress AS jsonb))",
             {
@@ -394,6 +409,7 @@ class SqlTaskqTransport:
         progress: Mapping[str, Any] | None = None,
     ) -> SettleResult:
         return await self._settle(
+            CommandName.RELEASE,
             "SELECT * FROM taskq.release_job(:job_id, :attempt_id, :worker_id, :cause, "
             ":delay_seconds, CAST(:progress AS jsonb))",
             {
@@ -410,6 +426,7 @@ class SqlTaskqTransport:
         self, job_id: UUID, attempt_id: UUID, worker_id: str, reason: str
     ) -> SettleResult:
         return await self._settle(
+            CommandName.CANCEL_RUNNING,
             "SELECT * FROM taskq.cancel_running_job(:job_id, :attempt_id, :worker_id, :reason)",
             {
                 "job_id": job_id,
@@ -532,7 +549,9 @@ class SqlTaskqTransport:
                 "SELECT * FROM taskq.ensure_queue(:name, CAST(:profile AS jsonb), :actor)",
                 {"name": name, "profile": _json_param(profile or {}), "actor": actor},
             )
-            return EnsureQueueResult.model_validate({**row, "profile": _json(row["profile"])})
+            result = EnsureQueueResult.model_validate({**row, "profile": _json(row["profile"])})
+            self._validated_outcome(CommandName.ENSURE_QUEUE, result.result)
+            return result
 
         return await self._run(operation)
 
@@ -546,16 +565,22 @@ class SqlTaskqTransport:
         self, name: str, actor: str, reason: str | None = None
     ) -> QueueControlOutcome:
         return QueueControlOutcome(
-            await self._operator_scalar(
-                "taskq.pause_queue(:name, :actor, :reason)",
-                {"name": name, "actor": actor, "reason": reason},
+            self._validated_outcome(
+                CommandName.PAUSE_QUEUE,
+                await self._operator_scalar(
+                    "taskq.pause_queue(:name, :actor, :reason)",
+                    {"name": name, "actor": actor, "reason": reason},
+                ),
             )
         )
 
     async def resume_queue(self, name: str, actor: str) -> QueueControlOutcome:
         return QueueControlOutcome(
-            await self._operator_scalar(
-                "taskq.resume_queue(:name, :actor)", {"name": name, "actor": actor}
+            self._validated_outcome(
+                CommandName.RESUME_QUEUE,
+                await self._operator_scalar(
+                    "taskq.resume_queue(:name, :actor)", {"name": name, "actor": actor}
+                ),
             )
         )
 
@@ -563,9 +588,12 @@ class SqlTaskqTransport:
         self, key: str, max_running: int, actor: str
     ) -> ConfigChangeOutcome:
         return ConfigChangeOutcome(
-            await self._operator_scalar(
-                "taskq.set_concurrency_limit(:key, :max_running, :actor)",
-                {"key": key, "max_running": max_running, "actor": actor},
+            self._validated_outcome(
+                CommandName.SET_CONCURRENCY_LIMIT,
+                await self._operator_scalar(
+                    "taskq.set_concurrency_limit(:key, :max_running, :actor)",
+                    {"key": key, "max_running": max_running, "actor": actor},
+                ),
             )
         )
 
@@ -591,16 +619,22 @@ class SqlTaskqTransport:
 
     async def run_now(self, job_id: UUID, actor: str) -> CommandOkOutcome:
         return CommandOkOutcome(
-            await self._operator_scalar(
-                "taskq.run_now(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+            self._validated_outcome(
+                CommandName.RUN_NOW,
+                await self._operator_scalar(
+                    "taskq.run_now(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+                ),
             )
         )
 
     async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> CommandOkOutcome:
         return CommandOkOutcome(
-            await self._operator_scalar(
-                "taskq.reprioritize(:job_id, :priority, :actor)",
-                {"job_id": job_id, "priority": priority, "actor": actor},
+            self._validated_outcome(
+                CommandName.REPRIORITIZE,
+                await self._operator_scalar(
+                    "taskq.reprioritize(:job_id, :priority, :actor)",
+                    {"job_id": job_id, "priority": priority, "actor": actor},
+                ),
             )
         )
 
@@ -611,7 +645,9 @@ class SqlTaskqTransport:
                 "SELECT * FROM taskq.cancel_job(:job_id, :actor, :reason)",
                 {"job_id": job_id, "actor": actor, "reason": reason},
             )
-            return CancelResult.model_validate(row)
+            result = CancelResult.model_validate(row)
+            self._validated_outcome(CommandName.CANCEL, result.result)
+            return result
 
         return await self._run(operation)
 
@@ -636,8 +672,11 @@ class SqlTaskqTransport:
 
     async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome:
         return ExpireJobOutcome(
-            await self._operator_scalar(
-                "taskq.expire_job(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+            self._validated_outcome(
+                CommandName.EXPIRE_JOB,
+                await self._operator_scalar(
+                    "taskq.expire_job(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+                ),
             )
         )
 
