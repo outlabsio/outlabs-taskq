@@ -32,7 +32,6 @@
 
 ## Now
 
-- [ ] S2-06B direct `work`, inline execution, real/fake `require_enqueued`, and bounded drain
 - [ ] S2-06-AUDIT race/resource/artifact evidence on PostgreSQL 16 and 18; stop at the Stage-3 gate
 
 
@@ -58,6 +57,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-06B · Consumer work, assertion, inline, and drain helpers** — added shared-supervisor synthetic and caller-transaction PostgreSQL `work`, fixed-text safe `require_enqueued`, immediate inline execution with record-only/opt-in bounded followups and cancellation-safe restoration, and sequential real/fake drains that reject unbounded or runaway work; SQL runner adapters now accept an optional borrowed connection without changing transport ownership.
 - [x] **S2-06A · Fake client and replacement boundary** — added a core-isolated, fence-free fake with typed single/bulk enqueue, active-key dedup, FIFO due claim, heartbeat, replay-aware settlement intents, safe nested matchers, loud unsupported-command/closed behavior, and exact non-owning `TaskQ.replace_client` restoration across normal, exceptional, nested, and cancellation exits.
 - [x] **S2-06-SPEC · Consumer testing contracts frozen** — the Tier-3 Stage-2D specification fixes the test-runner-neutral fake client, exact replacement ownership, fence-free enqueue matchers, shared handler normalization, inline/followup bounds, caller-owned PostgreSQL work/drain transactions, packaging isolation, and the S2-06A/B/audit acceptance matrix; no runtime or Stage-3 code was added.
 - [x] **S2-05-AUDIT · Stage 2C permanent completion evidence** — repeated notification/poll, reconnect/close, fatal-admission, cancellation, and resource races join the existing ten-family matrix; live SQL proves poll-only, notification reconnect/wake, fair queues, remote drain, and CLI signal/process-exit paths; R4-09..12 are closed, B8/B13 run as honest fresh-database report-only scenarios, and wheel/sdist × core/HTTP/OutLabs plus Python 3.13 gates pass. The identical suite is 350/350 on PG18.3 and PG16.14 with one opt-in skip, the PG18 million-row gate is 2/2, and Ruff/format are clean; Stage 3 remains untouched.

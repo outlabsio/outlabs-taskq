@@ -246,6 +246,7 @@ class SqlTaskqTransport:
         lease_seconds: int | None = None,
         affinity_key: str | None = None,
         job_id: UUID | None = None,
+        connection: AsyncConnection | None = None,
     ) -> ClaimResult:
         async def operation(conn: AsyncConnection) -> ClaimResult:
             row = await self._one(
@@ -289,7 +290,7 @@ class SqlTaskqTransport:
             jobs = tuple(decoded_jobs)
             return CLAIM_BATCH_ADAPTER.validate_python({"state": row["state"], "jobs": jobs})
 
-        return await self._run(operation)
+        return await self._run(operation, connection=connection)
 
     async def heartbeat(
         self,
@@ -300,6 +301,7 @@ class SqlTaskqTransport:
         lease_seconds: int | None = None,
         progress: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
     ) -> HeartbeatResult:
         async def operation(conn: AsyncConnection) -> HeartbeatResult:
             row = await self._one(
@@ -317,10 +319,15 @@ class SqlTaskqTransport:
             )
             return HeartbeatResult.model_validate(row)
 
-        return await self._run(operation)
+        return await self._run(operation, connection=connection)
 
     async def _settle(
-        self, command: CommandName, statement: str, params: Mapping[str, Any]
+        self,
+        command: CommandName,
+        statement: str,
+        params: Mapping[str, Any],
+        *,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         async def operation(conn: AsyncConnection) -> SettleResult:
             row = await self._one(conn, statement, params)
@@ -328,7 +335,7 @@ class SqlTaskqTransport:
             self._validated_outcome(command, result.result)
             return result
 
-        return await self._run(operation)
+        return await self._run(operation, connection=connection)
 
     async def complete(
         self,
@@ -339,6 +346,7 @@ class SqlTaskqTransport:
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
         followups: Sequence[Mapping[str, Any]] | None = None,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
             CommandName.COMPLETE,
@@ -352,6 +360,7 @@ class SqlTaskqTransport:
                 "stats": _json_param(stats),
                 "followups": _json_param(followups),
             },
+            connection=connection,
         )
 
     async def fail(
@@ -365,6 +374,7 @@ class SqlTaskqTransport:
         retry_after_seconds: int | None = None,
         progress: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
             CommandName.FAIL,
@@ -380,6 +390,7 @@ class SqlTaskqTransport:
                 "progress": _json_param(progress),
                 "stats": _json_param(stats),
             },
+            connection=connection,
         )
 
     async def snooze(
@@ -391,6 +402,7 @@ class SqlTaskqTransport:
         *,
         reason: str | None = None,
         progress: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
             CommandName.SNOOZE,
@@ -404,6 +416,7 @@ class SqlTaskqTransport:
                 "reason": reason,
                 "progress": _json_param(progress),
             },
+            connection=connection,
         )
 
     async def release(
@@ -415,6 +428,7 @@ class SqlTaskqTransport:
         *,
         delay_seconds: int = 0,
         progress: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
             CommandName.RELEASE,
@@ -428,10 +442,17 @@ class SqlTaskqTransport:
                 "delay_seconds": delay_seconds,
                 "progress": _json_param(progress),
             },
+            connection=connection,
         )
 
     async def cancel_running(
-        self, job_id: UUID, attempt_id: UUID, worker_id: str, reason: str
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        reason: str,
+        *,
+        connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
             CommandName.CANCEL_RUNNING,
@@ -442,6 +463,7 @@ class SqlTaskqTransport:
                 "worker_id": worker_id,
                 "reason": reason,
             },
+            connection=connection,
         )
 
     async def worker_heartbeat(

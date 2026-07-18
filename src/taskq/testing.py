@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -10,8 +11,11 @@ from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
-from taskq.errors import TaskqConfigError
+from taskq.client import TaskQ
+from taskq.errors import TaskqConfigError, TaskqInternalError
 from taskq.execution import Cancel, Complete, HandlerResult, NonRetryable, Retry, Snooze
 from taskq.protocol import (
     ClaimedJob,
@@ -29,9 +33,13 @@ from taskq.protocol import (
     SettleDeadResult,
     SettleLostResult,
     SettleOkResult,
+    SettleOutcome,
     SettleResult,
     SettleRetryScheduledResult,
 )
+from taskq.registry import Task, TaskRegistry
+from taskq.sql.transport import SqlTaskqTransport
+from taskq.worker import JobRunReport, WorkerOptions, WorkerSupervisor
 
 
 class _TestingModel(BaseModel):
@@ -592,6 +600,464 @@ class FakeTaskQClient:
         return unsupported
 
 
+async def _connection(
+    supplied: AsyncConnection | AsyncSession,
+) -> AsyncConnection:
+    if isinstance(supplied, AsyncSession):
+        return await supplied.connection()
+    if isinstance(supplied, AsyncConnection):
+        return supplied
+    raise TaskqConfigError("expected an AsyncConnection or AsyncSession")
+
+
+class _BoundSqlTransport:
+    """Runner subset that binds every command to one caller-owned connection."""
+
+    def __init__(self, transport: SqlTaskqTransport, connection: AsyncConnection) -> None:
+        self.transport = transport
+        self.connection = connection
+        self._jobs: dict[UUID, ClaimedJob] = {}
+        self._settlements: list[RecordedSettlement] = []
+
+    @property
+    def settlements(self) -> tuple[RecordedSettlement, ...]:
+        return tuple(self._settlements)
+
+    async def claim(self, *args: Any, **kwargs: Any) -> ClaimResult:
+        result = await self.transport.claim(*args, **kwargs, connection=self.connection)
+        self._jobs.update({job.job_id: job for job in result.jobs})
+        return result
+
+    async def heartbeat(self, *args: Any, **kwargs: Any) -> HeartbeatResult:
+        return await self.transport.heartbeat(*args, **kwargs, connection=self.connection)
+
+    def _record(
+        self,
+        job_id: UUID,
+        *,
+        command: Literal["complete", "fail", "snooze", "release", "cancel_running"],
+        intent: HandlerResult | None,
+        result: SettleResult,
+        cause: str | None = None,
+    ) -> None:
+        if result.result not in {
+            SettleOutcome.OK,
+            SettleOutcome.RETRY_SCHEDULED,
+            SettleOutcome.DEAD,
+        }:
+            return
+        claim = self._jobs[job_id]
+        self._settlements.append(
+            RecordedSettlement(
+                job_id=job_id,
+                queue=claim.queue,
+                job_type=claim.job_type,
+                command=command,
+                intent=intent,
+                outcome=result.result.value,
+                cause=cause,
+            )
+        )
+
+    async def complete(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        *,
+        result: Mapping[str, Any] | None = None,
+        stats: Mapping[str, Any] | None = None,
+        followups: Sequence[Mapping[str, Any]] | None = None,
+    ) -> SettleResult:
+        settled = await self.transport.complete(
+            job_id,
+            attempt_id,
+            worker_id,
+            result=result,
+            stats=stats,
+            followups=followups,
+            connection=self.connection,
+        )
+        self._record(
+            job_id,
+            command="complete",
+            intent=Complete(result=dict(result or {}), followups=tuple(followups or ())),
+            result=settled,
+        )
+        return settled
+
+    async def fail(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        error: str,
+        *,
+        retryable: bool = True,
+        retry_after_seconds: int | None = None,
+        progress: Mapping[str, Any] | None = None,
+        stats: Mapping[str, Any] | None = None,
+    ) -> SettleResult:
+        settled = await self.transport.fail(
+            job_id,
+            attempt_id,
+            worker_id,
+            error,
+            retryable=retryable,
+            retry_after_seconds=retry_after_seconds,
+            progress=progress,
+            stats=stats,
+            connection=self.connection,
+        )
+        intent: HandlerResult = (
+            Retry(
+                after_seconds=retry_after_seconds,
+                error=error,
+                progress=dict(progress or {}) or None,
+            )
+            if retryable
+            else NonRetryable(error=error, progress=dict(progress or {}) or None)
+        )
+        self._record(job_id, command="fail", intent=intent, result=settled)
+        return settled
+
+    async def snooze(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        delay_seconds: int,
+        *,
+        reason: str | None = None,
+        progress: Mapping[str, Any] | None = None,
+    ) -> SettleResult:
+        settled = await self.transport.snooze(
+            job_id,
+            attempt_id,
+            worker_id,
+            delay_seconds,
+            reason=reason,
+            progress=progress,
+            connection=self.connection,
+        )
+        self._record(
+            job_id,
+            command="snooze",
+            intent=Snooze(
+                delay_seconds=delay_seconds,
+                reason=reason,
+                progress=dict(progress or {}) or None,
+            ),
+            result=settled,
+        )
+        return settled
+
+    async def release(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        cause: Literal["released", "worker_shutdown", "no_handler"],
+        *,
+        delay_seconds: int = 0,
+        progress: Mapping[str, Any] | None = None,
+    ) -> SettleResult:
+        settled = await self.transport.release(
+            job_id,
+            attempt_id,
+            worker_id,
+            cause,
+            delay_seconds=delay_seconds,
+            progress=progress,
+            connection=self.connection,
+        )
+        self._record(job_id, command="release", intent=None, result=settled, cause=cause)
+        return settled
+
+    async def cancel_running(
+        self, job_id: UUID, attempt_id: UUID, worker_id: str, reason: str
+    ) -> SettleResult:
+        settled = await self.transport.cancel_running(
+            job_id,
+            attempt_id,
+            worker_id,
+            reason,
+            connection=self.connection,
+        )
+        self._record(
+            job_id,
+            command="cancel_running",
+            intent=Cancel(reason=reason),
+            result=settled,
+        )
+        return settled
+
+    async def aclose(self) -> None:
+        return None
+
+
+async def _run_claim(
+    transport: Any,
+    registry: TaskRegistry,
+    claim: ClaimedJob,
+    *,
+    worker_id: str,
+) -> JobRunReport:
+    supervisor = WorkerSupervisor(
+        transport,
+        registry,
+        worker_id,
+        options=WorkerOptions(soft_stop_timeout=0),
+    )
+    try:
+        return await supervisor.run_job(claim)
+    finally:
+        await supervisor.aclose()
+
+
+async def work(
+    connection: AsyncConnection | AsyncSession | None = None,
+    *,
+    task: Task[Any, Any],
+    payload: BaseModel | Mapping[str, object],
+    progress: Mapping[str, Any] | None = None,
+    unique_mode: Literal["normal", "isolated"] = "normal",
+) -> HandlerResult:
+    """Execute one registered-style task through the production worker path."""
+    if task.handler is None:
+        raise TaskqConfigError("work requires a task with a handler")
+    if unique_mode not in {"normal", "isolated"}:
+        raise TaskqConfigError("unique_mode must be normal or isolated")
+    registry = TaskRegistry((task,))
+    worker_id = f"taskq-testing-{uuid4()}"
+    idempotency_key = str(uuid4()) if unique_mode == "isolated" else None
+    if connection is None:
+        transport: Any = FakeTaskQClient(queues=(task.queue,))
+        facade = TaskQ(transport, registry=registry)
+        enqueued = await facade.enqueue(task, payload, idempotency_key=idempotency_key)
+        claimed = await transport.claim(task.queue, worker_id, job_id=enqueued.job_id)
+        if claimed.state is not ClaimState.CLAIMED:
+            raise AssertionError(f"work could not claim synthetic job: {claimed.state.value}")
+        claim = claimed.jobs[0].model_copy(update={"progress": dict(progress or {}) or None})
+        report = await _run_claim(transport, registry, claim, worker_id=worker_id)
+        records = transport.settlements
+    else:
+        sql_connection = await _connection(connection)
+        base = SqlTaskqTransport(sql_connection.engine)
+        facade = TaskQ(base, registry=registry)
+        enqueued = await facade.enqueue(
+            task,
+            payload,
+            idempotency_key=idempotency_key,
+            connection=sql_connection,
+        )
+        transport = _BoundSqlTransport(base, sql_connection)
+        claimed = await transport.claim(task.queue, worker_id, batch=1, job_id=enqueued.job_id)
+        if claimed.state is not ClaimState.CLAIMED:
+            raise AssertionError(f"work could not claim PostgreSQL job: {claimed.state.value}")
+        claim = claimed.jobs[0].model_copy(update={"progress": dict(progress or {}) or None})
+        report = await _run_claim(transport, registry, claim, worker_id=worker_id)
+        records = transport.settlements
+    if report.fatal:
+        raise TaskqInternalError(details={"settlement_command": report.settlement_command})
+    if not records or records[-1].intent is None:
+        raise AssertionError("work did not produce a handler settlement intent")
+    return records[-1].intent
+
+
+class _InlineFakeTaskQClient(FakeTaskQClient):
+    def __init__(self, registry: TaskRegistry, *, follow: bool, max_jobs: int) -> None:
+        super().__init__(queues=tuple(task.queue for task in registry))
+        self.registry = registry
+        self.follow = follow
+        self.max_jobs = max_jobs
+        self.executed = 0
+
+    async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
+        result = await super().enqueue(command)
+        if not result.created:
+            return result
+        if self.executed >= self.max_jobs:
+            raise AssertionError("inline execution exceeded max_jobs; possible runaway followup")
+        task = self.registry.resolve(command.job_type)
+        if task is None or task.handler is None:
+            raise TaskqConfigError(f"inline task has no registered handler: {command.job_type!r}")
+        self.executed += 1
+        worker_id = f"taskq-inline-{uuid4()}"
+        claimed = await self.claim(command.queue, worker_id, job_id=result.job_id)
+        if claimed.state is not ClaimState.CLAIMED:
+            raise AssertionError(f"inline job was not claimable: {claimed.state.value}")
+        before = len(self.settlements)
+        report = await _run_claim(self, self.registry, claimed.jobs[0], worker_id=worker_id)
+        if report.fatal:
+            raise TaskqInternalError(details={"settlement_command": report.settlement_command})
+        record = self.settlements[before]
+        if self.follow and isinstance(record.intent, Complete):
+            for followup in record.intent.followups:
+                allowed = {"job_type", "payload", "idempotency_key"}
+                if set(followup) - allowed:
+                    raise TaskqConfigError("inline followup contains unsupported fields")
+                job_type = followup.get("job_type")
+                if not isinstance(job_type, str):
+                    raise TaskqConfigError("inline followup requires job_type")
+                follow_task = self.registry.resolve(job_type)
+                if follow_task is None:
+                    raise TaskqConfigError(f"inline followup task is not registered: {job_type!r}")
+                await TaskQ(self, registry=self.registry).enqueue(
+                    follow_task,
+                    followup.get("payload", {}),
+                    idempotency_key=followup.get("idempotency_key"),
+                )
+        return result
+
+
+def _max_jobs(value: int | None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 10_000:
+        raise TaskqConfigError("max_jobs must be an integer from 1 through 10000")
+    return value
+
+
+@asynccontextmanager
+async def inline_mode(
+    tq: TaskQ,
+    *,
+    follow: bool = False,
+    max_jobs: int = 100,
+) -> AsyncIterator[InlineRecorder]:
+    """Temporarily execute newly created enqueues through registered handlers."""
+    limit = _max_jobs(max_jobs)
+    client = _InlineFakeTaskQClient(tq.registry, follow=follow, max_jobs=limit)
+    with tq.replace_client(client):
+        yield InlineRecorder(client)
+
+
+async def require_enqueued(
+    source: TaskQ | FakeTaskQClient | AsyncConnection | AsyncSession,
+    *,
+    job_type: str,
+    where: Mapping[str, object] | None = None,
+    unique_skipped: bool | None = None,
+    enqueue_result: EnqueueResult | None = None,
+) -> EnqueuedJob:
+    """Require exactly one safe enqueue in a fake ledger or current SQL transaction."""
+    if unique_skipped is not None and unique_skipped is not False:
+        raise TaskqConfigError("unique_skipped only accepts False as an assertion")
+    if unique_skipped is False and (enqueue_result is None or not enqueue_result.created):
+        raise AssertionError("expected enqueue result status created")
+    fake = source.transport if isinstance(source, TaskQ) else source
+    if isinstance(fake, FakeTaskQClient):
+        candidates = tuple(
+            EnqueuedJob(
+                job_id=record.job_id,
+                queue=record.queue,
+                job_type=record.job_type,
+                payload=record.payload,
+                headers=record.headers,
+                idempotency_key=record.idempotency_key,
+                status=fake._jobs[record.job_id].status,
+                scheduled_at=fake._jobs[record.job_id].command.scheduled_at,
+            )
+            for record in fake.enqueues
+            if record.status == "created" and record.job_type == job_type
+        )
+    else:
+        if isinstance(source, TaskQ):
+            raise TaskqConfigError("SQL require_enqueued needs the caller's connection or session")
+        connection = await _connection(source)
+        result = await connection.execute(
+            text(
+                "SELECT id AS job_id, queue, job_type, payload, COALESCE(headers, '{}'::jsonb) "
+                "AS headers, idempotency_key, status, scheduled_at "
+                "FROM taskq.jobs WHERE job_type = :job_type ORDER BY id"
+            ),
+            {"job_type": job_type},
+        )
+        candidates = tuple(EnqueuedJob.model_validate(row) for row in result.mappings())
+    matches = tuple(candidate for candidate in candidates if _matches(candidate, where))
+    if len(matches) != 1:
+        raise AssertionError(
+            f"expected exactly one enqueue for {job_type!r}, found {len(matches)}"
+        )
+    return matches[0]
+
+
+def _count_settlement(counts: dict[str, int], record: RecordedSettlement) -> None:
+    if record.command == "complete":
+        counts["completed"] += 1
+    elif record.command == "snooze":
+        counts["snoozed"] += 1
+    elif record.command == "cancel_running":
+        counts["cancelled"] += 1
+    elif record.command == "release":
+        counts["released"] += 1
+    elif record.outcome == "retry_scheduled":
+        counts["retried"] += 1
+    else:
+        counts["failed"] += 1
+
+
+async def drain(
+    tq: TaskQ,
+    *,
+    queue: str,
+    max_jobs: int = 100,
+    connection: AsyncConnection | AsyncSession | None = None,
+) -> DrainReport:
+    """Claim and supervise sequentially until empty, paused, or loudly capped."""
+    limit = _max_jobs(max_jobs)
+    if connection is not None:
+        if not isinstance(tq.transport, SqlTaskqTransport):
+            raise TaskqConfigError("connection requires SqlTaskqTransport")
+        sql_connection = await _connection(connection)
+        transport: Any = _BoundSqlTransport(tq.transport, sql_connection)
+    else:
+        transport = tq.transport
+    worker_id = f"taskq-drain-{uuid4()}"
+    counts = {
+        "claimed": 0,
+        "completed": 0,
+        "retried": 0,
+        "snoozed": 0,
+        "cancelled": 0,
+        "released": 0,
+        "failed": 0,
+    }
+    supervisor = WorkerSupervisor(
+        transport,
+        tq.registry,
+        worker_id,
+        options=WorkerOptions(soft_stop_timeout=0),
+    )
+    try:
+        while counts["claimed"] < limit:
+            claimed = await transport.claim(queue, worker_id, batch=1)
+            if claimed.state in {ClaimState.EMPTY, ClaimState.PAUSED}:
+                return DrainReport(**counts, capped=False)
+            if claimed.state is not ClaimState.CLAIMED:
+                raise TaskqInternalError(details={"claim_state": claimed.state.value})
+            before = len(transport.settlements) if hasattr(transport, "settlements") else 0
+            report = await supervisor.run_job(claimed.jobs[0])
+            counts["claimed"] += 1
+            if report.fatal:
+                raise TaskqInternalError(details={"settlement_command": report.settlement_command})
+            records = transport.settlements if hasattr(transport, "settlements") else ()
+            if len(records) != before + 1:
+                raise TaskqInternalError(details={"testing_ledger": "missing settlement"})
+            _count_settlement(counts, records[-1])
+        overflow = await transport.claim(queue, worker_id, batch=1)
+        if overflow.state is ClaimState.CLAIMED:
+            claim = overflow.jobs[0]
+            await transport.release(
+                claim.job_id, claim.attempt_id, worker_id, "released", delay_seconds=0
+            )
+            raise AssertionError("drain exceeded max_jobs; possible runaway work")
+        if overflow.state not in {ClaimState.EMPTY, ClaimState.PAUSED}:
+            raise TaskqInternalError(details={"claim_state": overflow.state.value})
+        return DrainReport(**counts, capped=False)
+    finally:
+        await supervisor.aclose()
+
+
 __all__ = [
     "DrainReport",
     "EnqueuedJob",
@@ -599,4 +1065,8 @@ __all__ = [
     "InlineRecorder",
     "RecordedEnqueue",
     "RecordedSettlement",
+    "drain",
+    "inline_mode",
+    "require_enqueued",
+    "work",
 ]
