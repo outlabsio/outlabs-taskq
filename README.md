@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1, 2A, and 2B complete** — SQL kernel (contract 0.1.2), typed tasks/registry, the complete async SQL transport, caller-transactional `TaskQ` enqueue, and the remediated worker supervisor are implemented; the S2-05 notification/poll/presence/worker-CLI specification is frozen and implementation opens at S2-05A. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1 through 2C complete** — the SQL kernel, typed registry/client/transport, supervised execution, notification-aware authoritative poller, presence/drain lifecycle, and `taskq worker` CLI are implemented and green on PostgreSQL 16/18. S2-06 consumer test helpers are next; Stage 3 integrations remain untouched. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -28,7 +28,7 @@ Start here:
 | [`docs/Task Queue Gap Analysis.md`](docs/Task%20Queue%20Gap%20Analysis.md) | Cross-repo defect inventory |
 | [`docs/Task Queue Staging Cutover Runbook.md`](docs/Task%20Queue%20Staging%20Cutover%20Runbook.md) | Diverse/QDarte cutover ops |
 
-## Install (once implemented)
+## Install
 
 ```bash
 pip install outlabs-taskq           # core: SQL client + worker
@@ -45,8 +45,9 @@ src/taskq/
   registry.py    # typed Task[In, Out] registry
   client.py      # TaskQ facade: transactional typed enqueue
   transport.py   # TaskqTransport protocol
-  worker.py      # supervisor: heartbeat, settle replay, bounded lifecycle
-  cli.py         # migrate / verify (worker CLI specified for S2-05)
+  worker.py      # supervisor + fair poll/presence/shutdown service
+  settings.py    # secret-safe worker environment/CLI configuration
+  cli.py         # migrate / verify / worker
   http/          # optional FastAPI facade (Stage 3, not started)
 ```
 
@@ -58,7 +59,7 @@ src/taskq/
 
 ## Development gates
 
-Protect `main` with pull requests, require branches to be current, and require every Stage-1+2A CI check: `lint`; both `import-isolation` and `unit` Python lanes (including core/HTTP/outlabs boundaries); `built-artifacts`; both PostgreSQL `sql-contract` full-suite lanes; `races`; `migrations`; and `bench-smoke`. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
+Protect `main` with pull requests, require branches to be current, and require every Stage-1+2C CI check: `lint`; both `import-isolation` and `unit` Python lanes (including core/HTTP/outlabs boundaries); `built-artifacts`; both PostgreSQL `sql-contract` full-suite lanes; `races`; `migrations`; and `bench-smoke`. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
 
 ## License
 

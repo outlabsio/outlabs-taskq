@@ -4,6 +4,8 @@ on:
   pull_request:
   push:
     branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -53,10 +55,18 @@ jobs:
           import taskq.execution
           import taskq.protocol
           import taskq.registry
+          import taskq.settings
           import taskq.sql
           import taskq.sql.transport
           import taskq.transport
           import taskq.worker
+
+          assert "usage: taskq worker" in __import__("subprocess").run(
+              ["taskq", "worker", "--help"],
+              check=True,
+              capture_output=True,
+              text=True,
+          ).stdout
 
           assert importlib.util.find_spec("fastapi") is None
           assert importlib.util.find_spec("outlabs_auth") is None
@@ -184,6 +194,9 @@ jobs:
           tests/test_s2_worker_settlement.py
           tests/test_s2_worker_lifecycle.py
           tests/test_s2_worker_races.py
+          tests/test_s2_worker_service_poll.py
+          tests/test_s2_worker_service_lifecycle.py
+          tests/test_s2_worker_cli.py
           -q
 
   sql-contract:
@@ -250,6 +263,7 @@ jobs:
           tests/test_t3_stress.py
           tests/test_t4_model.py
           tests/test_s2_worker_races.py
+          tests/test_s2_worker_service_audit.py
           -q
 
   migrations:
@@ -305,3 +319,32 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev
       - run: uv run pytest tests/test_bench_smoke.py -q
+
+  million-row-plans:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+      TASKQ_PLAN_CHECKS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev
+      - run: uv run pytest tests/test_plans.py -q

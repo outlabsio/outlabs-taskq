@@ -1,4 +1,4 @@
-"""B1–B4 benchmark runner (Harness §5).
+"""Implemented B1–B4/B8/B13 benchmark scenarios (Harness §5).
 
 This is report-only until a dedicated runner is calibrated and an envelope is
 accepted. Toy runs prove the harness; they are never release baselines.
@@ -18,7 +18,7 @@ import statistics
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,11 +27,23 @@ from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 import asyncpg
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import create_async_engine
 
+from taskq import Task, TaskRegistry, WorkerOptions, WorkerService, WorkerServiceOptions
 from taskq.sql import migrate
+from taskq.sql.notifications import PostgresNotificationSource
+from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("B1", "B2", "B3", "B4")
+SCENARIOS = ("B1", "B2", "B3", "B4", "B8", "B13")
+
+
+class _BenchInput(BaseModel):
+    value: int
+
+
+class _BenchOutput(BaseModel):
+    value: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -578,6 +590,184 @@ async def _b4(
     return results
 
 
+async def _wait_for(predicate: Callable[[], bool], *, timeout: float = 10.0) -> None:
+    deadline = asyncio.get_running_loop().time() + timeout
+    while not predicate():
+        if asyncio.get_running_loop().time() >= deadline:
+            raise TimeoutError("benchmark worker condition timed out")
+        await asyncio.sleep(0)
+
+
+async def _enqueue_worker_job(producer: asyncpg.Connection, queue: str, key: str) -> None:
+    row = await producer.fetchrow(
+        "SELECT * FROM taskq.enqueue($1, 'bench.noop', $2::jsonb, p_idempotency_key => $3)",
+        queue,
+        json.dumps({"value": 1}),
+        key,
+    )
+    assert row is not None
+
+
+async def _runner_transport(dsn: str) -> tuple[SqlTaskqTransport, Any]:
+    engine = create_async_engine(
+        _sqlalchemy_dsn(dsn),
+        connect_args={"server_settings": {"role": "taskq_runner"}},
+    )
+    return SqlTaskqTransport(engine), engine
+
+
+async def _b8(
+    dsn: str,
+    producer: asyncpg.Connection,
+    queue: str,
+    scale: Scale,
+    repetitions: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    del scale
+    runs: list[dict[str, Any]] = []
+    for listen in (True, False):
+        transport, engine = await _runner_transport(dsn)
+        notifications = PostgresNotificationSource(dsn) if listen else None
+        started = [asyncio.Event()]
+
+        async def handler(payload: _BenchInput) -> _BenchOutput:
+            started[0].set()
+            return _BenchOutput(value=payload.value)
+
+        service = WorkerService(
+            transport,
+            TaskRegistry(
+                [
+                    Task(
+                        name="bench.noop",
+                        queue=queue,
+                        input_model=_BenchInput,
+                        output_model=_BenchOutput,
+                        handler=handler,
+                    )
+                ]
+            ),
+            f"bench-b8-{'notify' if listen else 'poll'}",
+            options=WorkerServiceOptions(queues=(queue,), listen=listen, poll_interval=0.1),
+            notifications=notifications,
+        )
+        try:
+            await service.start()
+            await _wait_for(lambda: service.snapshot().claim_sweeps >= 1)
+            for repetition in range(repetitions):
+                started[0] = asyncio.Event()
+                before_sweeps = service.snapshot().claim_sweeps
+                began = time.perf_counter()
+                await _enqueue_worker_job(
+                    producer,
+                    queue,
+                    f"b8-{seed}-{int(listen)}-{repetition}",
+                )
+                await asyncio.wait_for(started[0].wait(), timeout=5)
+                duration = time.perf_counter() - began
+                await _wait_for(lambda: service.snapshot().active_slots == 0)
+                await _wait_for(lambda: service.snapshot().claim_sweeps > before_sweeps)
+                runs.append(
+                    {
+                        "mode": "notify" if listen else "poll_only",
+                        "accepted": 1,
+                        "settled": 1,
+                        "duration_seconds": duration,
+                        "throughput_rows_per_second": 1 / duration,
+                        "wake_latency": _latency_summary([duration]),
+                    }
+                )
+        finally:
+            await service.aclose()
+            await transport.aclose()
+            await engine.dispose()
+    return runs
+
+
+async def _b13(
+    dsn: str,
+    admin: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    scale: Scale,
+    repetitions: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    runs: list[dict[str, Any]] = []
+    job_count = max(1, min(10, scale.warmup))
+    for repetition in range(repetitions):
+        queue = f"bench_b13_{repetition}"
+        await _ensure_queue(operator, queue)
+        for index in range(job_count):
+            await _enqueue_worker_job(producer, queue, f"b13-{seed}-{repetition}-{index}")
+        release = asyncio.Event()
+
+        async def handler(payload: _BenchInput) -> _BenchOutput:
+            await release.wait()
+            return _BenchOutput(value=payload.value)
+
+        transport, engine = await _runner_transport(dsn)
+        service = WorkerService(
+            transport,
+            TaskRegistry(
+                [
+                    Task(
+                        name="bench.noop",
+                        queue=queue,
+                        input_model=_BenchInput,
+                        output_model=_BenchOutput,
+                        handler=handler,
+                    )
+                ]
+            ),
+            f"bench-b13-{repetition}",
+            options=WorkerServiceOptions(
+                queues=(queue,), batch=job_count, listen=False, poll_interval=0.1
+            ),
+            supervisor_options=WorkerOptions(concurrency=job_count),
+        )
+        try:
+            await service.start()
+            await _wait_for(lambda: service.snapshot().active_slots == job_count)
+            began = time.perf_counter()
+            release.set()
+            await service.stop()
+            duration = time.perf_counter() - began
+            terminal = await admin.fetchval(
+                "SELECT count(*) FROM taskq.jobs WHERE queue=$1 AND status='succeeded'",
+                queue,
+            )
+            released = await admin.fetchval(
+                "SELECT count(*) FROM taskq.job_events e JOIN taskq.jobs j ON j.id=e.job_id "
+                "WHERE j.queue=$1 AND e.event_type='released'",
+                queue,
+            )
+            expired = await admin.fetchval(
+                "SELECT count(*) FROM taskq.job_events e JOIN taskq.jobs j ON j.id=e.job_id "
+                "WHERE j.queue=$1 AND e.event_type='expired'",
+                queue,
+            )
+            assert terminal == job_count and released == 0 and expired == 0
+            runs.append(
+                {
+                    "accepted": job_count,
+                    "settled": terminal,
+                    "released_claims": released,
+                    "expired_claims": expired,
+                    "conservation_equal": terminal + released + expired == job_count,
+                    "duration_seconds": duration,
+                    "throughput_rows_per_second": terminal / duration,
+                    "drain_latency": _latency_summary([duration]),
+                }
+            )
+        finally:
+            await service.aclose()
+            await transport.aclose()
+            await engine.dispose()
+    return runs
+
+
 async def _run_scenario_in_database(
     scenario: str,
     *,
@@ -612,9 +802,16 @@ async def _run_scenario_in_database(
             runs = await _b2(producer, queue, scale, repetitions, seed)
         elif scenario == "B3":
             runs = await _b3(producer, runner, operator, scale, repetitions, seed)
-        else:
+        elif scenario == "B4":
             runs = await _b4(dsn, admin, queue, scale, repetitions, seed)
-        explain_queue = "bench_b3_0" if scenario == "B3" else queue
+        elif scenario == "B8":
+            runs = await _b8(dsn, producer, queue, scale, repetitions, seed)
+        else:
+            runs = await _b13(dsn, admin, producer, operator, scale, repetitions, seed)
+        explain_queue = {
+            "B3": "bench_b3_0",
+            "B13": "bench_b13_0",
+        }.get(scenario, queue)
         explain = await _representative_claim_plan(admin, explain_queue)
         after = await _database_snapshot(admin)
         wal_bytes = await admin.fetchval(
@@ -675,6 +872,16 @@ async def _run_scenario_in_database(
             "representative_explain": explain,
             "client_event_loop_delay": loop_delay,
         }
+        if scenario == "B8":
+            result["summary"]["notify_p50_ms"] = statistics.median(
+                run["wake_latency"]["p50_ms"] for run in runs if run["mode"] == "notify"
+            )
+            result["summary"]["poll_only_p50_ms"] = statistics.median(
+                run["wake_latency"]["p50_ms"] for run in runs if run["mode"] == "poll_only"
+            )
+        elif scenario == "B13":
+            result["summary"]["released_claims"] = sum(run["released_claims"] for run in runs)
+            result["summary"]["expired_claims"] = sum(run["expired_claims"] for run in runs)
     finally:
         await runner.close()
         await producer.close()

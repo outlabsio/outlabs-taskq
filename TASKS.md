@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S2-05 specification frozen** — implementation opens at the notification/poll kernel; no S2-05 runtime or Stage-3 code exists yet |
-| Suite | 299/299 regular on PG18.3 and PG16.14; the million-row plan gate remains opt-in |
+| Stage | **Stage 2C complete** — the DB-direct worker service and CLI are green; no Stage-3 code exists yet |
+| Suite | 350/350 regular on PG18.3 and PG16.14; the 2/2 million-row plan gate is scheduled in CI |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | No further full round required; next natural external boundary is the Stage-3 round-5 review |
 
-## Now — S2-05 implementation
+## Now
 
-- [ ] **S2-05-AUDIT · Races, resources, artifacts, PG16/PG18, B8/B13** — make every specification acceptance row permanent.
+*(Stage 2C is complete; the next queued task remains under **Next**.)*
 
 
 ## Next — after S2-05
@@ -49,7 +49,7 @@
 
 ## Round-4 finding dispositions
 
-The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 are remediated and green on PostgreSQL 16 and 18, so the review gate permits S2-05 to open in the next slice. R4-09..12 remain non-blocking follow-ups.
+The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 were the worker-kernel remediation gate; the Stage-2C audit closes R4-09..12 with the pre-0.1.2 decode pin, SQL claim bounds, cancelled-stop-waiter ledger, and scheduled million-row plan lane.
 
 ## Round-3 finding dispositions
 
@@ -57,6 +57,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-05-AUDIT · Stage 2C permanent completion evidence** — repeated notification/poll, reconnect/close, fatal-admission, cancellation, and resource races join the existing ten-family matrix; live SQL proves poll-only, notification reconnect/wake, fair queues, remote drain, and CLI signal/process-exit paths; R4-09..12 are closed, B8/B13 run as honest fresh-database report-only scenarios, and wheel/sdist × core/HTTP/OutLabs plus Python 3.13 gates pass. The identical suite is 350/350 on PG18.3 and PG16.14 with one opt-in skip, the PG18 million-row gate is 2/2, and Ruff/format are clean; Stage 3 remains untouched.
 - [x] **S2-05C · pydantic-settings, worker CLI, and observability** — added core `pydantic-settings`, frozen secret-safe environment/CLI precedence and deployment interlocks, explicit instance/factory registry loading before database construction, bounded SQL/listener ownership, unique worker ids, temporary soft/hard signal handling with unsafe-sync process exit, stable structured events, and fence-free monotonic snapshots; 330/330 pass on PG18 with one opt-in skip and Ruff clean.
 - [x] **S2-05B · Capacity-safe claim, presence, and shutdown** — advisory presence now completes before first claim, reports bounded safe metadata, drives degraded/recovered readiness and sticky remote drain; claim-to-submit admission survives graceful/hard stop ordering, fatal reports auto-stop the service, and external `run()` cancellation performs shielded cleanup then re-raises.
 - [x] **S2-05A · Notification and authoritative poll kernel** — added a dedicated reconnectable PostgreSQL notification source plus a core worker service with generation-safe coalesced nudges, mandatory monotonic polling, fair queue rotation, capacity-bounded immediate submission, poll-only degradation, and listener catch-up/reconnect; deterministic option, wake, fairness, and reconnect vectors keep notification payloads non-authoritative.

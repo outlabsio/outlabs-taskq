@@ -164,9 +164,7 @@ async def test_lost_response_retries_identical_verb_and_runs_handler_once(
     supervisor = _supervisor(transport, clock, selected_handler)
     running = asyncio.create_task(supervisor.run_job(_claim("math.work" if handler else "missing")))
     expected_sleepers = 2 if handler is not None else 1
-    await _spin_until(
-        lambda: len(transport.calls) == 1 and clock.sleeping >= expected_sleepers
-    )
+    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= expected_sleepers)
     clock.advance(0.25)
     report = await running
     assert report.state is JobRunState.SETTLED
@@ -261,8 +259,7 @@ async def test_heartbeat_remains_live_through_settlement_retry() -> None:
     )
     running = asyncio.create_task(supervisor.run_job(_claim()))
     await _spin_until(
-        lambda: [call.command for call in transport.calls] == ["complete"]
-        and clock.sleeping >= 2
+        lambda: [call.command for call in transport.calls] == ["complete"] and clock.sleeping >= 2
     )
     clock.advance(5)
     await _spin_until(lambda: len(transport.calls) == 2)
@@ -306,8 +303,7 @@ async def test_heartbeat_loss_during_settlement_suppresses_next_retry() -> None:
     )
     running = asyncio.create_task(supervisor.run_job(_claim()))
     await _spin_until(
-        lambda: [call.command for call in transport.calls] == ["complete"]
-        and clock.sleeping >= 2
+        lambda: [call.command for call in transport.calls] == ["complete"] and clock.sleeping >= 2
     )
     clock.advance(5)
     report = await running

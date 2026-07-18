@@ -63,6 +63,7 @@ def main() -> None:
     import taskq.execution
     import taskq.protocol
     import taskq.registry
+    import taskq.settings
     import taskq.sql.transport
     import taskq.transport
     import taskq.worker
@@ -125,6 +126,9 @@ def main() -> None:
     taskq_cli = bin_dir / "taskq"
     bench_cli = bin_dir / "taskq-bench"
     assert "usage: taskq" in _run([str(taskq_cli), "--help"], cwd=Path.cwd()).stdout
+    assert (
+        "usage: taskq worker" in _run([str(taskq_cli), "worker", "--help"], cwd=Path.cwd()).stdout
+    )
     assert "usage: taskq-bench" in _run([str(bench_cli), "--help"], cwd=Path.cwd()).stdout
 
     database = f"taskq_artifact_{uuid4().hex}"

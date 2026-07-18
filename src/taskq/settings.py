@@ -39,10 +39,7 @@ class WorkerSettings(BaseSettings):
             raise ValueError("sync_workers cannot exceed concurrency")
         if self.batch > self.concurrency:
             raise ValueError("batch cannot exceed concurrency")
-        if (
-            self.expected_environment is not None
-            and self.expected_environment != self.environment
-        ):
+        if self.expected_environment is not None and self.expected_environment != self.environment:
             raise ValueError("declared environment does not match expected_environment")
         if self.environment == "production" and not self.allow_production:
             raise ValueError("production requires allow_production=True")

@@ -141,14 +141,10 @@ def _load_registry(reference: str) -> TaskRegistry:
 
 
 def _validate_subscriptions(registry: TaskRegistry, queues: tuple[str, ...]) -> None:
-    queues_with_handlers = {
-        task.queue for task in registry if task.handler is not None
-    }
+    queues_with_handlers = {task.queue for task in registry if task.handler is not None}
     missing = tuple(queue for queue in queues if queue not in queues_with_handlers)
     if missing:
-        raise TaskqConfigError(
-            "every subscribed queue must have at least one registered handler"
-        )
+        raise TaskqConfigError("every subscribed queue must have at least one registered handler")
 
 
 def _default_worker_id() -> str:

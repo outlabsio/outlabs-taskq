@@ -4,7 +4,7 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the round-3 and [round-4](./design-review-4/RESPONSE.md) implementation reviews are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; S2-05 is specified and open for implementation without a further review gate.
+Design is complete and has passed four review rounds. The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1 and Stage 2C have reached their internal exit gates, including every finding from the round-3 and [round-4](./design-review-4/RESPONSE.md) implementation reviews. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; S2-06 is the remaining Stage-2 consumer-testing surface before Stage 3.
 
 ## Stage 1 — secure SQL kernel (COMPLETE)
 
@@ -57,6 +57,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 **Round-4 remediation green:** R4-01..08 now keep heartbeats live through settlement, convert external cancellation to shielded shutdown release plus re-raise, expose abandoned-sync process-exit requirements, dispatch from registry-frozen arity, prove replay argument identity, and normalize special-path transport failures. The identical **299/299** suite passes on PostgreSQL 18.3 and 16.14 with one pre-existing opt-in plan skip; S2-05 may open in the next slice but was not started here.
 
 **S2-05 specification frozen:** the [Stage 2C Claim Loop and Worker CLI Specification](./Task%20Queue%20Stage%202C%20Claim%20Loop%20and%20Worker%20CLI%20Specification.md) fixes notification-as-hint plus authoritative polling, reconnect catch-up, fair capacity-safe claim admission, advisory presence and remote drain, `taskq worker` lifecycle, `pydantic-settings` configuration, structured diagnostics, deterministic races, packaging isolation, and the PG16/PG18 acceptance matrix. Implementation opens at S2-05A; no runtime or Stage-3 surface landed with the specification.
+
+**Stage 2C complete:** S2-05A–C add the dedicated reconnectable listener, authoritative fair poll loop, shielded claim admission, advisory presence/remote drain, unified shutdown, frozen secret-safe settings, explicit registry loader, bounded worker CLI, structured diagnostics, and unsafe-sync process-exit boundary. The audit closes the round-4 residue, runs real SQL and subprocess lifecycle probes, makes B8/B13 executable report-only scenarios, schedules the million-row plan gate, and keeps every source/artifact import lane isolated. The identical **350/350** suite passes PostgreSQL 16.14 and 18.3 with one opt-in skip; the 2/2 PG18 plan gate, Python-3.13 unit lane, and wheel/sdist × core/HTTP/OutLabs matrix are green. Stage 3 remains untouched; S2-06 is next.
 
 ## Stage 3 — FastAPI + outlabs-auth
 

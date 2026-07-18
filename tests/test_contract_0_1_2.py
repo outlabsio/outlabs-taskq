@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 import json
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import asyncpg
 import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.sql import verify
+from taskq.errors import TaskqInternalError
+from taskq.sql import Migration, _migrate_impl, discover_migrations, verify
+from taskq.sql.transport import SqlTaskqTransport
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -29,6 +33,12 @@ EXPECTED_CLAIMED_JOB_SHAPE = (
     ("step_key", "text"),
     ("lease_seconds", "integer"),
 )
+
+
+def _database_dsn(dsn: str, database: str, *, sqlalchemy: bool = False) -> str:
+    parts = urlsplit(dsn)
+    scheme = "postgresql+asyncpg" if sqlalchemy else parts.scheme.split("+", 1)[0]
+    return urlunsplit((scheme, parts.netloc, f"/{database}", parts.query, parts.fragment))
 
 
 async def test_claimed_job_append_only_catalog_and_verify(
@@ -112,3 +122,53 @@ async def test_claim_returns_exact_effective_lease_duration(
     assert durable["stored_lease"] == stored
     assert durable["attempt_lease"] == expected
     assert expected - 5 <= float(durable["remaining"]) <= expected
+
+
+async def test_pre_0_1_2_catalog_fails_claim_decode_loudly(taskq_dsn: str) -> None:
+    database = f"taskq_pre_012_{uuid4().hex}"
+    admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+    await admin.execute(f'CREATE DATABASE "{database}"')
+    engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
+    try:
+        migrations = discover_migrations()
+        first_two: list[Migration] = migrations[:2]
+        async with engine.connect() as connection:
+            applied = await connection.run_sync(
+                lambda sync_connection: _migrate_impl(sync_connection, first_two)
+            )
+            assert applied == ["0001_initial", "0002_contract_0_1_1"]
+            await connection.commit()
+        raw = await asyncpg.connect(_database_dsn(taskq_dsn, database))
+        try:
+            await raw.fetchrow("SELECT * FROM taskq.ensure_queue('pre_012', '{}'::jsonb, 'audit')")
+            await raw.fetchrow("SELECT * FROM taskq.enqueue('pre_012', 'audit.echo', '{}'::jsonb)")
+        finally:
+            await raw.close()
+        transport = SqlTaskqTransport(engine)
+        with pytest.raises(TaskqInternalError):
+            await transport.claim("pre_012", "audit-worker")
+    finally:
+        await engine.dispose()
+        await admin.execute(f'DROP DATABASE "{database}"')
+        await admin.close()
+
+
+@pytest.mark.parametrize(
+    ("argument", "value"),
+    [("p_batch", 0), ("p_batch", 51), ("p_lease_seconds", 14), ("p_lease_seconds", 86401)],
+)
+async def test_claim_sql_bounds_raise_tq422(
+    operator: asyncpg.Connection,
+    runner: asyncpg.Connection,
+    argument: str,
+    value: int,
+) -> None:
+    await operator.fetchrow(
+        "SELECT * FROM taskq.ensure_queue('claim_bounds', '{}'::jsonb, 'audit')"
+    )
+    with pytest.raises(asyncpg.PostgresError) as exc_info:
+        await runner.fetchrow(
+            f"SELECT * FROM taskq.claim_jobs('claim_bounds', 'audit-worker', {argument} => $1)",
+            value,
+        )
+    assert exc_info.value.sqlstate == "TQ422"

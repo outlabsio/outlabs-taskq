@@ -298,9 +298,7 @@ async def test_live_sync_thread_keeps_heartbeating_after_deadline() -> None:
 
     clock = ManualClock()
     transport = ScriptedTransport()
-    supervisor = _supervisor(
-        handler, clock=clock, transport=transport, sync_workers=1, timeout=2
-    )
+    supervisor = _supervisor(handler, clock=clock, transport=transport, sync_workers=1, timeout=2)
     supervisor.start()
     running = supervisor.submit(_claim())
     assert await asyncio.to_thread(started.wait, 1)
@@ -430,3 +428,29 @@ async def test_job_and_lifecycle_tasks_are_joined_after_stop() -> None:
         and task.get_name().startswith("taskq-")
     }
     assert leaked == set()
+
+
+async def test_cancelled_stop_waiter_is_rejoined_by_aclose() -> None:
+    release = asyncio.Event()
+
+    async def handler(payload: Input) -> Output:
+        await release.wait()
+        return Output(doubled=payload.value * 2)
+
+    before = {task for task in asyncio.all_tasks() if task is not asyncio.current_task()}
+    supervisor = _supervisor(handler, clock=ManualClock())
+    supervisor.start()
+    running = supervisor.submit(_claim())
+    await asyncio.sleep(0)
+    stop_waiter = asyncio.create_task(supervisor.stop())
+    await _spin_until(lambda: not supervisor.accepting)
+    stop_waiter.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await stop_waiter
+    assert supervisor._stop_task is not None and not supervisor._stop_task.done()
+    release.set()
+    await running
+    await supervisor.aclose()
+    await asyncio.sleep(0)
+    after = {task for task in asyncio.all_tasks() if task is not asyncio.current_task()}
+    assert after == before

@@ -353,9 +353,7 @@ class WorkerService:
             if stop_signal is None:
                 await self._stopped.wait()
                 return
-            signal_wait = asyncio.create_task(
-                stop_signal.wait(), name="taskq-worker-stop-signal"
-            )
+            signal_wait = asyncio.create_task(stop_signal.wait(), name="taskq-worker-stop-signal")
             stopped_wait = asyncio.create_task(
                 self._stopped.wait(), name="taskq-worker-stopped-wait"
             )
@@ -378,9 +376,7 @@ class WorkerService:
             return
         self._cancel_stop_requested = self._cancel_stop_requested or cancel
         if self._stop_task is None:
-            self._stop_task = asyncio.create_task(
-                self._stop(), name="taskq-worker-service-stop"
-            )
+            self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-service-stop")
         elif cancel and self._admission_closed:
             await self.supervisor.stop(cancel=True)
         await asyncio.shield(self._stop_task)
@@ -432,9 +428,7 @@ class WorkerService:
                 self._listener_attempted.set()
             finally:
                 if self._listener_connected:
-                    logger.warning(
-                        "listener.disconnected", extra={"worker_id": self.worker_id}
-                    )
+                    logger.warning("listener.disconnected", extra={"worker_id": self.worker_id})
                 self._listener_connected = False
                 self._refresh_running_state()
             if self._stop_requested.is_set():
@@ -503,9 +497,7 @@ class WorkerService:
 
     def _ensure_stop_task(self) -> None:
         if self._stop_task is None:
-            self._stop_task = asyncio.create_task(
-                self._stop(), name="taskq-worker-service-stop"
-            )
+            self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-service-stop")
 
     def _observe_job(self, completed: asyncio.Task[JobRunReport]) -> None:
         if completed.cancelled():
@@ -559,9 +551,7 @@ class WorkerService:
         if not was_healthy:
             logger.info("presence.recovered", extra={"worker_id": self.worker_id})
         if shutdown_requested:
-            logger.info(
-                "presence.shutdown_requested", extra={"worker_id": self.worker_id}
-            )
+            logger.info("presence.shutdown_requested", extra={"worker_id": self.worker_id})
         self._refresh_running_state()
         return shutdown_requested
 
@@ -619,9 +609,7 @@ class WorkerService:
         deadline = asyncio.create_task(
             self.clock.sleep(self.options.poll_interval), name="taskq-worker-poll-deadline"
         )
-        stopping = asyncio.create_task(
-            self._stop_requested.wait(), name="taskq-worker-poll-stop"
-        )
+        stopping = asyncio.create_task(self._stop_requested.wait(), name="taskq-worker-poll-stop")
         await asyncio.wait((notified, deadline, stopping), return_when=asyncio.FIRST_COMPLETED)
         notified.cancel()
         deadline.cancel()
@@ -799,9 +787,7 @@ class WorkerSupervisor:
         )
         self._active[key] = running
         running.add_done_callback(
-            lambda completed: self._recover_prestart_cancellation(
-                completed, claim=claim, key=key
-            )
+            lambda completed: self._recover_prestart_cancellation(completed, claim=claim, key=key)
         )
         self._refresh_capacity_event()
         return running
@@ -1040,11 +1026,7 @@ class WorkerSupervisor:
         self, task: Task[Any, Any], context: JobContext, payload: BaseModel
     ) -> asyncio.Future[Any]:
         assert task.handler is not None
-        arguments = (
-            (context, payload)
-            if task.handler_positional_arity == 2
-            else (payload,)
-        )
+        arguments = (context, payload) if task.handler_positional_arity == 2 else (payload,)
         if task.handler_is_async:
             value = task.handler(*arguments)
             if not isinstance(value, Awaitable):
@@ -1343,9 +1325,7 @@ class WorkerSupervisor:
             await self.clock.sleep(delay)
             return False
         sleeping = asyncio.create_task(self.clock.sleep(delay), name="taskq-settle-backoff")
-        lost = asyncio.create_task(
-            control.ownership_lost.wait(), name="taskq-settle-ownership"
-        )
+        lost = asyncio.create_task(control.ownership_lost.wait(), name="taskq-settle-ownership")
         done, _ = await asyncio.wait((sleeping, lost), return_when=asyncio.FIRST_COMPLETED)
         sleeping.cancel()
         lost.cancel()
@@ -1379,9 +1359,7 @@ class WorkerSupervisor:
         return JobRunReport(
             job_id=job_id,
             state=(
-                JobRunState.ABANDONED_SYNC
-                if control.abandoned_sync
-                else JobRunState.OWNERSHIP_LOST
+                JobRunState.ABANDONED_SYNC if control.abandoned_sync else JobRunState.OWNERSHIP_LOST
             ),
             outcome=JobRunOutcome.OWNERSHIP_LOST,
             cancellation_reason=reason,

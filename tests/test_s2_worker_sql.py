@@ -20,10 +20,13 @@ from taskq import (
     TaskRegistry,
     TaskqUnavailableError,
     WorkerOptions,
+    WorkerService,
+    WorkerServiceOptions,
     WorkerSupervisor,
 )
 from taskq.protocol import ClaimState, EnqueueCommand, JobStatus, SettleResult
 from taskq.sql.transport import SqlTaskqTransport
+from taskq.sql.notifications import PostgresNotificationSource
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -223,3 +226,137 @@ async def test_worker_sql_resources_and_task_ledger_return_to_baseline(
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     after = {task for task in asyncio.all_tasks() if task is not asyncio.current_task()}
     assert after == before
+
+
+async def test_real_service_poll_only_claims_and_settles(
+    worker_transports: dict[str, SqlTaskqTransport],
+) -> None:
+    completed = asyncio.Event()
+
+    async def handler(payload: Input) -> Output:
+        completed.set()
+        return Output(doubled=payload.value * 2)
+
+    job_type = "service.poll"
+    await worker_transports["operator"].ensure_queue("service_poll", actor="audit")
+    await worker_transports["producer"].enqueue(
+        EnqueueCommand(queue="service_poll", job_type=job_type, payload={"value": 2})
+    )
+    service = WorkerService(
+        worker_transports["runner"],
+        TaskRegistry([_task(job_type, handler)]),
+        "service-poll",
+        options=WorkerServiceOptions(queues=("service_poll",), listen=False, poll_interval=0.1),
+    )
+    await service.start()
+    await asyncio.wait_for(completed.wait(), timeout=5)
+    await service.aclose()
+    assert service.snapshot().claimed_jobs == service.snapshot().submitted_jobs == 1
+    assert service.snapshot().active_slots == 0
+
+
+async def test_real_notification_wake_and_listener_reconnect(
+    pg: Any,
+    taskq_dsn: str,
+    worker_transports: dict[str, SqlTaskqTransport],
+) -> None:
+    completed = asyncio.Event()
+
+    async def handler(payload: Input) -> Output:
+        completed.set()
+        return Output(doubled=payload.value * 2)
+
+    job_type = "service.notify"
+    queue = "service_notify"
+    await worker_transports["operator"].ensure_queue(queue, actor="audit")
+    notifications = PostgresNotificationSource(taskq_dsn)
+    service = WorkerService(
+        worker_transports["runner"],
+        TaskRegistry([_task(job_type, handler)]),
+        "service-notify",
+        options=WorkerServiceOptions(queues=(queue,), poll_interval=30, listener_backoff_base=0.01),
+        notifications=notifications,
+    )
+    await service.start()
+    connection = notifications._connection
+    assert connection is not None
+    assert await pg.fetchval("SELECT pg_terminate_backend($1)", connection.get_server_pid())
+    for _ in range(200):
+        if service.snapshot().listener_reconnects == 1:
+            break
+        await asyncio.sleep(0.01)
+    assert service.snapshot().listener_reconnects == 1
+    await worker_transports["producer"].enqueue(
+        EnqueueCommand(queue=queue, job_type=job_type, payload={"value": 2})
+    )
+    await asyncio.wait_for(completed.wait(), timeout=5)
+    await service.aclose()
+    assert notifications._connection is None
+
+
+async def test_real_remote_shutdown_prevents_first_claim(
+    worker_transports: dict[str, SqlTaskqTransport],
+) -> None:
+    worker_id = "service-drained"
+    queue = "service_drained"
+    await worker_transports["operator"].ensure_queue(queue, actor="audit")
+    await worker_transports["producer"].enqueue(
+        EnqueueCommand(queue=queue, job_type="service.drained", payload={"value": 2})
+    )
+    await worker_transports["runner"].worker_heartbeat(worker_id, [queue])
+    assert (
+        await worker_transports["operator"].request_worker_shutdown(
+            worker_id=worker_id, queue=None, actor="audit"
+        )
+        == 1
+    )
+    service = WorkerService(
+        worker_transports["runner"],
+        TaskRegistry([_task("service.drained", _complete)]),
+        worker_id,
+        options=WorkerServiceOptions(queues=(queue,), listen=False),
+    )
+    await service.start()
+    await asyncio.wait_for(service._stopped.wait(), timeout=5)
+    assert service.snapshot().claim_sweeps == 0
+
+
+async def test_real_hot_queues_each_receive_capacity(
+    worker_transports: dict[str, SqlTaskqTransport],
+) -> None:
+    seen: set[str] = set()
+    both = asyncio.Event()
+
+    async def handler(context: JobContext, payload: Input) -> Output:
+        seen.add(context.queue)
+        if len(seen) == 2:
+            both.set()
+        return Output(doubled=payload.value * 2)
+
+    tasks: list[Task[Input, Output]] = []
+    for queue in ("service_fair_a", "service_fair_b"):
+        await worker_transports["operator"].ensure_queue(queue, actor="audit")
+        job_type = f"{queue}.work"
+        tasks.append(
+            Task(
+                name=job_type,
+                queue=queue,
+                input_model=Input,
+                output_model=Output,
+                handler=handler,
+            )
+        )
+        await worker_transports["producer"].enqueue(
+            EnqueueCommand(queue=queue, job_type=job_type, payload={"value": 2})
+        )
+    service = WorkerService(
+        worker_transports["runner"],
+        TaskRegistry(tasks),
+        "service-fair",
+        options=WorkerServiceOptions(queues=("service_fair_a", "service_fair_b"), listen=False),
+        supervisor_options=WorkerOptions(concurrency=2),
+    )
+    await service.start()
+    await asyncio.wait_for(both.wait(), timeout=5)
+    await service.aclose()
+    assert seen == {"service_fair_a", "service_fair_b"}

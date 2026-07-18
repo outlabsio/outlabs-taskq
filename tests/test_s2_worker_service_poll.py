@@ -186,9 +186,7 @@ async def test_hot_queue_rotates_before_claiming_again() -> None:
     )
     await service.start()
     await _spin_until(lambda: [call.command for call in transport.calls].count("claim") == 2)
-    claim_queues = [
-        call.arguments["queue"] for call in transport.calls if call.command == "claim"
-    ]
+    claim_queues = [call.arguments["queue"] for call in transport.calls if call.command == "claim"]
     assert claim_queues == ["alpha", "beta"]
     release.set()
     await service.aclose()
@@ -209,9 +207,7 @@ async def test_listener_disconnect_degrades_then_reconnects_with_catchup() -> No
     assert service.ready
     assert notifications.channels == ("taskq_alpha",)
     notifications.disconnect()
-    await _spin_until(
-        lambda: service.state is WorkerServiceState.DEGRADED and clock.sleeping >= 2
-    )
+    await _spin_until(lambda: service.state is WorkerServiceState.DEGRADED and clock.sleeping >= 2)
     clock.advance(0.25)
     await _spin_until(lambda: notifications.connect_count == 2)
     assert service.ready
