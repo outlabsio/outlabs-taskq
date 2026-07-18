@@ -5,7 +5,7 @@ from __future__ import annotations
 import inspect
 import re
 from collections.abc import Callable, Iterable, Iterator, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field as dataclass_field
 from types import NoneType, UnionType
 from typing import Any, Generic, TypeAlias, TypeVar, Union, get_args, get_origin, get_type_hints
 
@@ -73,7 +73,7 @@ def _validate_wire_name(value: str, *, field: str) -> None:
 
 def _validate_handler(
     handler: Handler, input_model: type[BaseModel], output_model: type[BaseModel]
-) -> None:
+) -> int:
     try:
         hints = get_type_hints(handler)
     except Exception as exc:
@@ -104,6 +104,7 @@ def _validate_handler(
         result_types = {result_hint}
     if None in result_types or not result_types or not result_types <= allowed:
         raise TaskqConfigError("handler return annotation must use the task output or result types")
+    return len(parameters)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +118,7 @@ class Task(Generic[InT, OutT]):
     priority: int | None = None
     lease_seconds: int | None = None
     handler: Handler | None = None
+    handler_positional_arity: int = dataclass_field(init=False, repr=False)
 
     def __post_init__(self) -> None:
         _validate_wire_name(self.name, field="name")
@@ -140,8 +142,12 @@ class Task(Generic[InT, OutT]):
             raise TaskqConfigError("priority must be between 0 and 1000")
         if self.lease_seconds is not None and not 15 <= self.lease_seconds <= 86400:
             raise TaskqConfigError("lease_seconds must be between 15 and 86400")
-        if self.handler is not None:
+        arity = (
             _validate_handler(self.handler, self.input_model, self.output_model)
+            if self.handler is not None
+            else 0
+        )
+        object.__setattr__(self, "handler_positional_arity", arity)
 
     def validate_payload(self, value: InT | Mapping[str, object]) -> dict[str, Any]:
         payload = self.input_model.model_validate(value).model_dump(mode="json")

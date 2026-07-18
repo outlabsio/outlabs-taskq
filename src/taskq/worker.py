@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
@@ -128,6 +127,7 @@ class _RunControl:
         self.operator_grace: asyncio.Task[None] | None = None
         self.shutdown_deadline = False
         self.external_cancelled = False
+        self.abandoned_sync = False
 
 
 def _safe_handler_error(exc: BaseException) -> str:
@@ -187,8 +187,11 @@ class WorkerSupervisor:
 
     @property
     def requires_process_exit(self) -> bool:
-        return self._deadline_reached and any(
-            control.is_sync and control.handler is not None and not control.handler.done()
+        return any(
+            control.is_sync
+            and control.handler is not None
+            and not control.handler.done()
+            and (self._deadline_reached or control.ownership_lost.is_set())
             for control in self._controls.values()
         )
 
@@ -375,20 +378,7 @@ class WorkerSupervisor:
             heartbeat.cancel()
             await asyncio.gather(heartbeat, return_exceptions=True)
             reason = control.cancellation.reason or CancellationReason.LEASE_LOST
-            if control.runtime_failed:
-                return JobRunReport(
-                    job_id=claim.job_id,
-                    state=JobRunState.RUNTIME_FAILED,
-                    outcome=JobRunOutcome.RUNTIME_ERROR,
-                    cancellation_reason=reason,
-                    fatal=True,
-                )
-            return JobRunReport(
-                job_id=claim.job_id,
-                state=JobRunState.OWNERSHIP_LOST,
-                outcome=JobRunOutcome.OWNERSHIP_LOST,
-                cancellation_reason=reason,
-            )
+            return self._ownership_lost_report(claim.job_id, control)
 
         if control.external_cancelled:
             try:
@@ -502,7 +492,7 @@ class WorkerSupervisor:
         assert task.handler is not None
         arguments = (
             (context, payload)
-            if len(inspect.signature(task.handler).parameters) == 2
+            if task.handler_positional_arity == 2
             else (payload,)
         )
         if task.handler_is_async:
@@ -553,6 +543,8 @@ class WorkerSupervisor:
     def _lose_ownership(self, control: _RunControl) -> None:
         control.cancellation.cancel(CancellationReason.LEASE_LOST)
         control.ownership_lost.set()
+        if control.is_sync and control.handler is not None and not control.handler.done():
+            control.abandoned_sync = True
         if not control.is_sync and control.handler is not None:
             control.handler.cancel()
 
@@ -825,13 +817,19 @@ class WorkerSupervisor:
                 state=JobRunState.RUNTIME_FAILED,
                 outcome=JobRunOutcome.RUNTIME_ERROR,
                 cancellation_reason=reason,
+                requires_process_exit=control.abandoned_sync,
                 fatal=True,
             )
         return JobRunReport(
             job_id=job_id,
-            state=JobRunState.OWNERSHIP_LOST,
+            state=(
+                JobRunState.ABANDONED_SYNC
+                if control.abandoned_sync
+                else JobRunState.OWNERSHIP_LOST
+            ),
             outcome=JobRunOutcome.OWNERSHIP_LOST,
             cancellation_reason=reason,
+            requires_process_exit=control.abandoned_sync,
         )
 
     @staticmethod

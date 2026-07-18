@@ -281,10 +281,13 @@ async def test_sync_handler_observes_lease_loss_and_is_never_settled() -> None:
     await _spin_until(lambda: clock.sleeping == 1)
     clock.advance(5)
     await _spin_until(lambda: len(transport.calls) == 1)
+    assert supervisor.requires_process_exit
     release.set()
     report = await running
     assert observed.is_set()
-    assert report.state is JobRunState.OWNERSHIP_LOST
+    assert report.state is JobRunState.ABANDONED_SYNC
+    assert report.requires_process_exit
+    assert not supervisor.requires_process_exit
     assert [call.command for call in transport.calls] == ["heartbeat"]
     await supervisor.aclose()
 
