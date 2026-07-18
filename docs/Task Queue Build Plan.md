@@ -66,6 +66,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **S2-06B implementation:** `work` reuses the production supervisor for synthetic and caller-transaction SQL execution; `require_enqueued` provides fixed-text safe fake/SQL assertions; inline mode executes typed handlers immediately with opt-in bounded followups; and sequential fake/SQL drains fail loudly on runaway work. Borrowed runner calls retain the caller's exact SQLAlchemy transaction and ownership. The Stage-2D audit is next; Stage 3 remains closed.
 
+**Stage 2D and Stage 2 complete:** S2-06-AUDIT repeats cancellation/followup/cap cleanup, collects the consumer suite in both Python lanes, exercises installed testing helpers across wheel/sdist × core/HTTP/OutLabs, and proves the slice contains no integration or SQL-contract change. The identical full suite is **366/366** on PostgreSQL 16.14 and 18.3 with one opt-in skip; the PG18 million-row plan gate is **2/2**, and the clean Python-3.13 no-database lane is **219/219**. Stage 3 remains untouched and opens only through its specification plus round-5 gate.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.

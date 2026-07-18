@@ -65,6 +65,7 @@ def main() -> None:
     import taskq.registry
     import taskq.settings
     import taskq.sql.transport
+    import taskq.testing
     import taskq.transport
     import taskq.worker
     from taskq import (
@@ -78,12 +79,14 @@ def main() -> None:
     )
     from taskq.sql import discover_migrations
     from taskq.sql.manifest import FUNCTIONS
+    from taskq.testing import FakeTaskQClient, require_enqueued
 
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
+    assert "pytest" not in sys.modules
     if args.mode == "core":
         assert importlib.util.find_spec("fastapi") is None
         assert importlib.util.find_spec("outlabs_auth") is None
@@ -103,6 +106,17 @@ def main() -> None:
     assert CancellationToken is not None
     assert JobContext is not None
     assert WorkerOptions().concurrency == 1
+
+    async def smoke_testing() -> None:
+        fake = FakeTaskQClient()
+        facade = TaskQ(fake, validate_job_types=False)
+        result = await facade.enqueue_raw(
+            queue="artifact", job_type="artifact.testing", payload={"ok": True}
+        )
+        job = await require_enqueued(fake, job_type="artifact.testing")
+        assert job.job_id == result.job_id
+
+    asyncio.run(smoke_testing())
 
     supervisor = WorkerSupervisor(object(), TaskRegistry(), "artifact-smoke")  # type: ignore[arg-type]
     assert supervisor.available_slots == 0

@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1 through 2C complete** — the SQL kernel, typed registry/client/transport, supervised execution, notification-aware authoritative poller, presence/drain lifecycle, and `taskq worker` CLI are implemented and green on PostgreSQL 16/18. S2-06 consumer test helpers are next; Stage 3 integrations remain untouched. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1 through 2D complete** — the SQL kernel, typed registry/client/transport, supervised execution, notification-aware authoritative poller, presence/drain lifecycle, `taskq worker` CLI, and consumer testing helpers are implemented and green on PostgreSQL 16/18. Stage 3 integrations remain untouched. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -47,9 +47,37 @@ src/taskq/
   transport.py   # TaskqTransport protocol
   worker.py      # supervisor + fair poll/presence/shutdown service
   settings.py    # secret-safe worker environment/CLI configuration
+  testing.py     # fake client, enqueue assertions, direct work, inline and drain helpers
   cli.py         # migrate / verify / worker
   http/          # optional FastAPI facade (Stage 3, not started)
 ```
+
+## Consumer testing
+
+Fast unit tests can replace one facade without starting a worker or database:
+
+```python
+from taskq.testing import FakeTaskQClient
+
+with tq.replace_client(FakeTaskQClient()) as fake:
+    await application_call()
+    fake.assert_enqueued("mail.send", where={"payload.recipient": "me@example.test"})
+```
+
+Inline mode executes registered handlers immediately; bounded drain tests queued behavior without sleeps:
+
+```python
+from taskq.testing import drain, inline_mode
+
+async with inline_mode(tq) as recorder:
+    await application_call()
+    assert recorder.settled("mail.send")[0].is_complete
+
+report = await drain(tq, queue="mail", max_jobs=100)
+assert report.completed == 1
+```
+
+These are consumer-test conveniences, not production modes. The fake intentionally does not model PostgreSQL fencing, privileges, budgets, or transaction isolation. Use a scratch PostgreSQL transaction with `work`, `require_enqueued`, or `drain(..., connection=connection)` when those contracts matter; every helper preserves caller transaction ownership and makes runaway caps fail loudly.
 
 ## Consumers
 
@@ -59,7 +87,7 @@ src/taskq/
 
 ## Development gates
 
-Protect `main` with pull requests, require branches to be current, and require every Stage-1+2C CI check: `lint`; both `import-isolation` and `unit` Python lanes (including core/HTTP/outlabs boundaries); `built-artifacts`; both PostgreSQL `sql-contract` full-suite lanes; `races`; `migrations`; and `bench-smoke`. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
+Protect `main` with pull requests, require branches to be current, and require every Stage-1+2D CI check: `lint`; both `import-isolation` and `unit` Python lanes (including testing and core/HTTP/outlabs boundaries); `built-artifacts`; both PostgreSQL `sql-contract` full-suite lanes; `races`; `migrations`; and `bench-smoke`. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process. Later-stage `crash` and `facade` jobs become required when their board tasks land.
 
 ## License
 

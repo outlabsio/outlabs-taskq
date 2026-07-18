@@ -119,9 +119,7 @@ async def test_require_enqueued_fake_matches_one_created_record() -> None:
             fake,
             job_type="tests.complete",
             unique_skipped=False,
-            enqueue_result=await tq.enqueue(
-                COMPLETE_TASK, {"value": 7}, idempotency_key="one"
-            ),
+            enqueue_result=await tq.enqueue(COMPLETE_TASK, {"value": 7}, idempotency_key="one"),
         )
 
 
@@ -136,9 +134,7 @@ async def test_inline_executes_created_once_and_restores_transport() -> None:
         second = await tq.enqueue(COMPLETE_TASK, {"value": 3}, idempotency_key="same")
         assert first.created and second.created
         assert recorder.settled("tests.complete")[0].is_complete
-        assert recorder.settled("tests.complete")[0].intent == Complete(
-            result={"doubled": 6}
-        )
+        assert recorder.settled("tests.complete")[0].intent == Complete(result={"doubled": 6})
         assert len(recorder.settled("tests.complete")) == 2
     assert tq.transport is original
 
@@ -158,9 +154,7 @@ async def test_inline_followups_are_recorded_or_boundedly_executed() -> None:
         output_model=Output,
         handler=parent,
     )
-    tq = TaskQ(
-        FakeTaskQClient(), registry=TaskRegistry((parent_task, COMPLETE_TASK))
-    )
+    tq = TaskQ(FakeTaskQClient(), registry=TaskRegistry((parent_task, COMPLETE_TASK)))
     async with inline_mode(tq, follow=False) as recorded:
         await tq.enqueue(parent_task, {"value": 1})
         assert len(recorded.settled("tests.parent")) == 1

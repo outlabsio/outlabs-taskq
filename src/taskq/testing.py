@@ -151,10 +151,10 @@ def _value_at(record: RecordedEnqueue | EnqueuedJob, path: str) -> Any:
     return getattr(record, parts[0])
 
 
-def _matches(
-    record: RecordedEnqueue | EnqueuedJob, where: Mapping[str, object] | None
-) -> bool:
-    return where is None or all(_value_at(record, path) == expected for path, expected in where.items())
+def _matches(record: RecordedEnqueue | EnqueuedJob, where: Mapping[str, object] | None) -> bool:
+    return where is None or all(
+        _value_at(record, path) == expected for path, expected in where.items()
+    )
 
 
 class FakeTaskQClient:
@@ -458,7 +458,9 @@ class FakeTaskQClient:
         if retry:
             scheduled = datetime.now(UTC) + timedelta(seconds=retry_after_seconds or 0)
             intent: HandlerResult = Retry(
-                after_seconds=retry_after_seconds, error=error, progress=dict(progress or {}) or None
+                after_seconds=retry_after_seconds,
+                error=error,
+                progress=dict(progress or {}) or None,
             )
             self._finish(
                 job,
@@ -468,9 +470,7 @@ class FakeTaskQClient:
                 outcome="retry_scheduled",
                 scheduled_at=scheduled,
             )
-            return SettleRetryScheduledResult(
-                job_status=JobStatus.QUEUED, scheduled_at=scheduled
-            )
+            return SettleRetryScheduledResult(job_status=JobStatus.QUEUED, scheduled_at=scheduled)
         intent = NonRetryable(error=error, progress=dict(progress or {}) or None)
         self._finish(
             job,
@@ -975,9 +975,7 @@ async def require_enqueued(
         candidates = tuple(EnqueuedJob.model_validate(row) for row in result.mappings())
     matches = tuple(candidate for candidate in candidates if _matches(candidate, where))
     if len(matches) != 1:
-        raise AssertionError(
-            f"expected exactly one enqueue for {job_type!r}, found {len(matches)}"
-        )
+        raise AssertionError(f"expected exactly one enqueue for {job_type!r}, found {len(matches)}")
     return matches[0]
 
 

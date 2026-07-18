@@ -110,9 +110,7 @@ async def test_fake_records_every_runner_settlement_intent() -> None:
     replay = await fake.complete(
         complete.job_id, complete.attempt_id, "worker", result={"ok": True}
     )
-    conflict = await fake.cancel_running(
-        complete.job_id, complete.attempt_id, "worker", "late"
-    )
+    conflict = await fake.cancel_running(complete.job_id, complete.attempt_id, "worker", "late")
     assert replay.result is SettleOutcome.ALREADY_SETTLED
     assert conflict.result is SettleOutcome.SETTLE_CONFLICT
 

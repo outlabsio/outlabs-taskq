@@ -58,6 +58,7 @@ jobs:
           import taskq.settings
           import taskq.sql
           import taskq.sql.transport
+          import taskq.testing
           import taskq.transport
           import taskq.worker
 
@@ -72,6 +73,7 @@ jobs:
           assert importlib.util.find_spec("outlabs_auth") is None
           assert "fastapi" not in sys.modules
           assert "outlabs_auth" not in sys.modules
+          assert "pytest" not in sys.modules
           PY
       - name: HTTP extra still excludes outlabs-auth
         run: |
@@ -197,6 +199,9 @@ jobs:
           tests/test_s2_worker_service_poll.py
           tests/test_s2_worker_service_lifecycle.py
           tests/test_s2_worker_cli.py
+          tests/test_s2_testing_fake.py
+          tests/test_s2_testing_helpers.py
+          tests/test_s2_testing_audit.py
           -q
 
   sql-contract:

@@ -25,19 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2D in progress** — the consumer testing contract is frozen; no Stage-3 code exists yet |
-| Suite | 350/350 regular on PG18.3 and PG16.14; the 2/2 million-row plan gate is scheduled in CI |
+| Stage | **Stage 2 complete** — consumer testing helpers are green; Stage 3 remains gated and untouched |
+| Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | No further full round required; next natural external boundary is the Stage-3 round-5 review |
+| Next review | Stage-3 round-5 contract/design boundary before integration implementation |
 
 ## Now
 
-- [ ] S2-06-AUDIT race/resource/artifact evidence on PostgreSQL 16 and 18; stop at the Stage-3 gate
+*(Stage 2 is complete; stop at the Stage-3 gate.)*
 
 
 ## Next — after S2-06
 
-*(Stage 3 remains closed until the S2-06 audit and Stage-3 gate.)*
+- [ ] S3-00 freeze the FastAPI + OutLabs authorization integration specification and assemble the round-5 review gate; do not implement integrations before acceptance
 
 ## Later
 
@@ -57,6 +57,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-06-AUDIT · Stage 2D permanent completion evidence** — repeated cancellation, followup, drain-cap, and task-ledger probes return transports and asyncio resources to baseline; CI collects the consumer suite on Python 3.12/3.13 and imports testing without pytest; wheel/sdist × core/HTTP/OutLabs artifact smokes exercise the installed fake/assertion surface. The identical full suite is 366/366 with one opt-in skip on PostgreSQL 18.3 and 16.14, the PG18 million-row gate is 2/2, the clean Python-3.13 no-DB lane is 219/219, Ruff/format are clean, and the exact slice changes no SQL migration, Tier-0/Tier-4, HTTP, OutLabs, listener, CLI, or Stage-3 source.
 - [x] **S2-06B · Consumer work, assertion, inline, and drain helpers** — added shared-supervisor synthetic and caller-transaction PostgreSQL `work`, fixed-text safe `require_enqueued`, immediate inline execution with record-only/opt-in bounded followups and cancellation-safe restoration, and sequential real/fake drains that reject unbounded or runaway work; SQL runner adapters now accept an optional borrowed connection without changing transport ownership.
 - [x] **S2-06A · Fake client and replacement boundary** — added a core-isolated, fence-free fake with typed single/bulk enqueue, active-key dedup, FIFO due claim, heartbeat, replay-aware settlement intents, safe nested matchers, loud unsupported-command/closed behavior, and exact non-owning `TaskQ.replace_client` restoration across normal, exceptional, nested, and cancellation exits.
 - [x] **S2-06-SPEC · Consumer testing contracts frozen** — the Tier-3 Stage-2D specification fixes the test-runner-neutral fake client, exact replacement ownership, fence-free enqueue matchers, shared handler normalization, inline/followup bounds, caller-owned PostgreSQL work/drain transactions, packaging isolation, and the S2-06A/B/audit acceptance matrix; no runtime or Stage-3 code was added.
