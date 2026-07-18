@@ -16,5 +16,6 @@
 | [008](./ADR-008-fastapi-lifespan-process-model.md) | FastAPI lifespan composition and process model | D-10 |
 | [009](./ADR-009-first-release-scope.md) | First-release scope and deferred policies | D-08, D-12 |
 | [010](./ADR-010-db-roles-security-definer-maintenance.md) | Database roles, SECURITY DEFINER hardening, maintenance split | D-02, D-03 |
+| [011](./ADR-011-housekeeper-role-credentials.md) | Housekeeper role, deployment credentials, version-aware maintenance (amends 010) | R2-04, R2-05 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.
