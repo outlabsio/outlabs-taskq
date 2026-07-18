@@ -26,6 +26,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Stage 2A implementation:** S2-01 provides immutable generic tasks, collision-safe canonical/alias registration, closed enqueue and TQ values, fence-redacted claim models, and SQLSTATE-only public error normalization. S2-02 adds the complete 30-function async SQL transport, typed adapters, least-capability role probes, and owned transaction rollback/cancellation; the **201/201** suite passes PostgreSQL 16.14 and 18.3. S2-03 transactional enqueue is the final Stage 2A item.
 
+**Stage 2A complete:** S2-03 adds the `TaskQ` typed facade, canonical task/retry compilation, explicit raw escape hatch, and exact caller-owned `AsyncSession`/`AsyncConnection` single and bulk enqueue. Commit, rollback, autobegin, savepoint, cancellation/error ownership, no-background-work, and clean wheel/sdist core-import gates are green. The full **212/212** suite passes PostgreSQL 16.14 and 18.3; Stage 2B opens at S2-04.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.

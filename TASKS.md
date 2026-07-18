@@ -25,24 +25,23 @@
 
 | | |
 |---|---|
-| Stage | **2A open** — Stage 1 and all round-3 remediation complete on PG16 + PG18 |
-| Suite | 201/201 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
+| Stage | **2A complete; Stage 2B open** — typed enqueue and the full SQL transport are green on PG16 + PG18 |
+| Suite | 212/212 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
-| Next review | Round-3 findings fully remediated; Stage 2A acceptance matrix governs S2-01..03 |
+| Next review | Stage 2A acceptance matrix complete; S2-04 worker contracts govern the next slice |
 
-## Now — Stage 2A typed enqueue
-
-- [ ] S2-03 SQLAlchemy `AsyncSession` transactional enqueue (`session=`)
-
-## Next — Stage 2A typed enqueue
-
-*(none — S2-03 is the final Stage 2A item)*
-
-## Later — Stage 2 worker runtime
+## Now — Stage 2B worker runtime
 
 - [ ] S2-04 worker supervisor: heartbeat-per-job, verb-aware settle retries, R2-11 cancellation contracts, soft stop (feature 11)
+
+## Next — Stage 2B worker runtime
+
 - [ ] S2-05 NOTIFY listener + poll loop (feature 06); `taskq worker` CLI
 - [ ] S2-06 `taskq.testing` fixtures + inline transport (feature 10)
+
+## Later
+
+*(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
 
@@ -54,6 +53,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-03 · Typed facade and transactional enqueue** — `TaskQ` compiles registered canonical tasks and retry stamps exactly once, keeps raw enqueue explicitly opt-in, and executes single/bulk enqueue on the caller's exact `AsyncSession`/`AsyncConnection` without owning its lifecycle; commit, rollback, autobegin, savepoint, cancellation/error ownership, non-SQL rejection, and no-background-work contracts pass on PG16/PG18, while clean wheel/sdist core installs import the complete Stage 2A surface (212/212 each).
 - [x] **S2-02 · Complete async SQL transport** — runtime-checkable `TaskqTransport` and lazy `SqlTaskqTransport` cover all 30 manifest-public functions with fixed bound calls, typed/fence-safe adapters, no table DML or implicit retries, owned/borrowed engine semantics, SQLSTATE-only failures, malformed-bulk invariants, and transaction rollback/cancellation; every method passes through its least-capability role with cross-role denials on PG16 and PG18 (201/201 each).
 - [x] **S2-01 · Typed task registry and protocol values** — immutable generic Pydantic task metadata validates canonical names, queues, aliases, stamped retry policy, handler annotations, and JSON payloads; collision-atomic deterministic registration preserves rename dispatch; the closed enqueue/TQ models, fence-redacted claim projection, SQLSTATE-only typed errors, safe public exports, and 62 unit/property vectors bring the PG18 suite to 188/188.
 - [x] **R3-F08 · Cross-version exact-catalog normalization** — the exact constraint axis now excludes PostgreSQL 18's version-specific `NOT NULL` projection while table shapes continue to close nullability; the identical 126-test suite and opt-in million-row plan gate pass on PostgreSQL 16.14 and 18.3.

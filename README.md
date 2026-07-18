@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..012](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.1 function manifest canonical). **Stage 1 complete; Stage 2A in progress** — typed tasks, registry, and the complete async SQL transport are implemented; transactional enqueue is next. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..012](docs/adr/README.md) accepted; three review rounds processed; protocol v1 + 0.1.1 function manifest canonical). **Stage 1 and Stage 2A complete** — typed tasks, registry, the complete async SQL transport, and caller-transactional `TaskQ` enqueue are implemented; the worker runtime is next. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
