@@ -103,7 +103,7 @@ def main(argv: list[str] | None = None) -> None:
 
     p_verify = subparsers.add_parser(
         "verify",
-        help="read-only drift check: ledger checksums, function hardening, roles",
+        help="read-only exact-manifest drift check: catalog, grants, roles, seeds, checksums",
     )
     p_verify.add_argument("dsn", help=_DSN_HELP)
 

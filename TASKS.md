@@ -26,17 +26,16 @@
 | | |
 |---|---|
 | Stage | **1 — round-3 remediation in progress**; ADR-012 resolved Contract questions; Stage 2A closed |
-| Suite | 113/113 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
+| Suite | 125/125 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Round 3 verdict **BLOCKED**: 4 HIGH, 2 MEDIUM, 1 LOW, 2 Contract questions |
 
 ## Now — Round-3 remediation
 
-- [ ] **R3-F04 · Manifest-complete T2/T8 coverage** — close R3-04 with collection completeness, all public-function behavior/error/grant vectors, shadow probes, installer concurrency/failure/CLI/sync/compatibility cases, and broader T4 operations where already contracted.
+- [ ] **R3-F05 · Built-artifact CI gate** — close R3-05 by installing wheel and sdist outside the source tree, checking import isolation, entry points, packaged migration discovery, migrate, and verify.
 
 ## Next — Round-3 remediation
 
-- [ ] **R3-F05 · Built-artifact CI gate** — close R3-05 by installing wheel and sdist outside the source tree, checking import isolation, entry points, packaged migration discovery, migrate, and verify.
 - [ ] **R3-F06 · Benchmark reset and conservation** — close R3-06 with the normative fresh-database method and producer-stop→worker-drain B4 accounting.
 - [ ] **R3-F07 · Plan-query drift detection** — close R3-07 by binding representative structural plans to actual function definitions or captured nested plans.
 
@@ -59,6 +58,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **R3-F04 · Manifest-complete T2/T8 coverage** — closed ledgers cover all 30 public functions, registered errors, replay declarations, and exact grants; direct vectors fill bulk/runner/observer/operator/housekeeper gaps, assert safe views and shadow resistance, add concurrent install + CLI gates, reuse failure/sync/upgrade/corruption T8 evidence, and extend T4 with heartbeat and worker-cancel replay transitions (125/125 on PG18).
 - [x] **R3-F03 · Reserved-role validation** — migration preflight now rejects colliding reserved names with LOGIN, SUPERUSER, CREATEROLE, CREATEDB, REPLICATION, BYPASSRLS, or inherited membership before target-database DDL; seven fresh-database probes prove atomic refusal and lock cleanup, while the exact verifier enforces the installed role manifest (113/113 on PG18).
 - [x] **R3-F02 · Migration lock failure recovery** — caller-owned migrations now use a transaction advisory lock while runner-owned multi-transaction applies retain an explicitly released session lock; async/sync-adapter × caller/runner failure probes leave zero locks and prove immediate second-connection recovery (106/106 on PG18).
 - [x] **R3-F01 · Exact machine-readable manifest + verifier** — the independent 0.1.1 catalog projection closes the 40-function surface and exact role/relation/type/index/constraint/view/ACL/seed axes; read-only verification rejects 36 rollback-only corruptions, including all five R3-01 counterexamples, then proves restoration green (102/102 on PG18).

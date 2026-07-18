@@ -217,6 +217,61 @@ def _parse_functions() -> dict[str, FunctionSpec]:
 
 
 FUNCTIONS = _parse_functions()
+PUBLIC_FUNCTIONS = frozenset(identity for identity, spec in FUNCTIONS.items() if spec.grants)
+
+# Closed registered-error projection from the canonical function manifest and
+# Protocol v1. Empty sets are meaningful: those functions have no public TQ
+# exception outcome. R3-F04's executable vectors assert this map is complete.
+PUBLIC_ERRORS = {
+    "taskq.cancel_job(uuid,text,text)": frozenset({"TQ001"}),
+    "taskq.cancel_running_job(uuid,uuid,text,text)": frozenset(),
+    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)": frozenset({"TQ422"}),
+    "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)": frozenset({"TQ422", "TQ501"}),
+    "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ422", "TQ429", "TQ500"}),
+    "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)": frozenset(
+        {"TQ001", "TQ422", "TQ429", "TQ500", "TQ501"}
+    ),
+    "taskq.ensure_queue(text,jsonb,text)": frozenset({"TQ422"}),
+    "taskq.expire_job(uuid,text)": frozenset({"TQ001"}),
+    "taskq.expire_worker_leases(text,text)": frozenset(),
+    "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)": frozenset({"TQ422"}),
+    "taskq.get_authorization_projection(uuid)": frozenset(),
+    "taskq.get_contract_meta()": frozenset(),
+    "taskq.get_job(uuid,boolean,boolean,boolean,boolean)": frozenset(),
+    "taskq.get_queue_stats(text)": frozenset(),
+    "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)": frozenset({"TQ422"}),
+    "taskq.janitor()": frozenset(),
+    "taskq.metrics()": frozenset(),
+    "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
+    "taskq.purge_queued(text,integer,text,text)": frozenset({"TQ001", "TQ422"}),
+    "taskq.redrive_failed(text,integer,text)": frozenset({"TQ422"}),
+    "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
+    "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
+    "taskq.reprioritize(uuid,smallint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
+    "taskq.request_worker_shutdown(text,text,text)": frozenset(),
+    "taskq.resume_queue(text,text)": frozenset({"TQ001"}),
+    "taskq.run_now(uuid,text)": frozenset({"TQ001", "TQ409"}),
+    "taskq.set_concurrency_limit(text,integer,text)": frozenset({"TQ422"}),
+    "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)": frozenset({"TQ422"}),
+    "taskq.tick(integer)": frozenset({"TQ422"}),
+    "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)": frozenset({"TQ422"}),
+}
+
+REPLAY_RULES = {
+    identity: (
+        "verb-aware attempt replay"
+        if identity
+        in {
+            "taskq.cancel_running_job(uuid,uuid,text,text)",
+            "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
+            "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)",
+            "taskq.release_job(uuid,uuid,text,text,integer,jsonb)",
+            "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)",
+        }
+        else "state-derived idempotency or documented repeat"
+    )
+    for identity in PUBLIC_FUNCTIONS
+}
 
 # Mutable values are deliberately not frozen; only required seed identities and
 # the immutable contract/capability values are verified.

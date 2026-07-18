@@ -147,6 +147,60 @@ class TaskqStateMachine(RuleBasedStateMachine):
         model.worker_id = worker_id
 
     @rule(job_id=jobs)
+    def heartbeat(self, job_id: UUID) -> None:
+        model = self.model[job_id]
+        if model.status != "running":
+            return
+        row = self._run(
+            self.runner.fetchrow(
+                "SELECT * FROM taskq.heartbeat($1, $2, $3, p_progress => '{\"model\":true}'::jsonb)",
+                job_id,
+                model.attempt_id,
+                model.worker_id,
+            )
+        )
+        assert row["ok"] is True
+        assert row["cancel_requested"] is model.cancel_pending
+
+    @rule(job_id=jobs)
+    def cancel_running(self, job_id: UUID) -> None:
+        model = self.model[job_id]
+        if model.status != "running":
+            return
+        row = self._run(
+            self.runner.fetchrow(
+                "SELECT * FROM taskq.cancel_running_job($1, $2, $3, 'model worker cancel')",
+                job_id,
+                model.attempt_id,
+                model.worker_id,
+            )
+        )
+        assert row["result"] == "ok" and row["job_status"] == "cancelled"
+        replay = self._run(
+            self.runner.fetchrow(
+                "SELECT * FROM taskq.cancel_running_job($1, $2, $3, 'model replay')",
+                job_id,
+                model.attempt_id,
+                model.worker_id,
+            )
+        )
+        assert replay["result"] == "already_settled"
+        conflict = self._run(
+            self.runner.fetchrow(
+                "SELECT * FROM taskq.complete_job($1, $2, $3)",
+                job_id,
+                model.attempt_id,
+                model.worker_id,
+            )
+        )
+        assert conflict["result"] == "settle_conflict"
+        model.status = "cancelled"
+        model.attempt_id = None
+        model.worker_id = None
+        model.cancel_pending = False
+        model.due = False
+
+    @rule(job_id=jobs)
     def complete(self, job_id: UUID) -> None:
         model = self.model[job_id]
         if model.status != "running":
