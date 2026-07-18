@@ -25,12 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Round-4 remediation active** — the response blocks S2-05 on R4-01..08; worker surface otherwise frozen |
-| Suite | 285/285 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
+| Stage | **Round-4 remediation complete** — R4-01..08 are closed; S2-05 is ready but deliberately not started |
+| Suite | 299/299 regular on PG18.3 and PG16.14; the million-row plan gate remains opt-in |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | No further full round required after R4-01..08 pass on PG16/PG18; stop before S2-05 |
+| Next review | No further full round required; next natural external boundary is the Stage-3 round-5 review |
 
 ## Now — round-4 remediation (stop before S2-05)
+
+*(none — the required remediation is green; this slice stops before S2-05)*
 
 
 ## Next — gated after Stage 2B review
@@ -50,7 +52,7 @@
 
 ## Round-4 finding dispositions
 
-The response verdict is **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 form the required remediation slice, R4-09..12 may follow, and S2-05 remains closed until the required slice is green on PostgreSQL 16 and 18.
+The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 are remediated and green on PostgreSQL 16 and 18, so the review gate permits S2-05 to open in the next slice. R4-09..12 remain non-blocking follow-ups.
 
 ## Round-3 finding dispositions
 
@@ -58,6 +60,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **R4-AUDIT · Round-4 remediation completion evidence** — the identical 299-test suite passes with one pre-existing opt-in plan skip on PostgreSQL 18.3 and an isolated PostgreSQL 16.14 lane; Ruff and diff hygiene are clean, R4-01..08 are closed, no contract question was opened, and the worker surface stops before S2-05.
 - [x] **R4-F04 · Replay oracle and error normalization (R4-07/R4-08)** — the scripted ledger now retains every semantic settlement argument behind fence-safe representations and replay tests assert exact equality; validation/capability failures in no-handler release and invalid-follow-up escape now return fatal runtime reports, pinned for both typed error classes.
 - [x] **R4-F03 · Process-exit honesty and dispatch arity (R4-04/R4-05/R4-06)** — lease loss now marks a still-live sync handler as `abandoned_sync`, exposes immediate process-exit necessity, and preserves that history in the terminal report; dispatch consumes registry-frozen positional arity, while regressions cover sync/async keyword-only dispatch, competing capacity waiters, post-deadline heartbeat, fatal auto-drain, and external `run_job` cancellation.
 - [x] **R4-F02 · External cancellation (R4-02/R4-06)** — cancelling a submitted job now initiates soft stop, completes shutdown release inside a shielded critical section, and re-raises `CancelledError`; a cancellation callback recovers the before-first-step window, with deterministic mid-handler and immediate-cancel regressions.

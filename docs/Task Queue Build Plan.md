@@ -54,6 +54,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Round-4 verdict blocked:** the immutable [response](./design-review-4/RESPONSE.md) verified the database safety and contract-0.1.2 upgrade core, then executed counterexamples for heartbeat loss during settlement and incorrect external-task cancellation. R4-01..08 must land as a worker-local remediation with permanent race/oracle evidence on PostgreSQL 16 and 18; S2-05 remains closed and no further full review round is required for that gate.
 
+**Round-4 remediation green:** R4-01..08 now keep heartbeats live through settlement, convert external cancellation to shielded shutdown release plus re-raise, expose abandoned-sync process-exit requirements, dispatch from registry-frozen arity, prove replay argument identity, and normalize special-path transport failures. The identical **299/299** suite passes on PostgreSQL 18.3 and 16.14 with one pre-existing opt-in plan skip; S2-05 may open in the next slice but was not started here.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
