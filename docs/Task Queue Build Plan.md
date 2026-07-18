@@ -42,6 +42,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **S2-04A implementation:** core now exports the frozen handler intents, thread-safe cancellation token, and fence-free checkpoint context; registration accepts the specified sync/async payload and context forms. Private manual-clock and scripted lost-response utilities establish the deterministic harness without pre-empting `taskq.testing`. The full **233/233** suite passes PostgreSQL 18.3; S2-04B is next.
 
+**S2-04B implementation:** `WorkerSupervisor.run_job` dispatches registered async/sync handlers under one exact-duration monotonic heartbeat, batches checkpoints, recovers from one or two transient heartbeat failures, suppresses every settlement on typed/three-strike ownership loss, enforces operator-cancel grace, and releases unknown types without budget burn. All heartbeat/grace/handler tasks are joined; **243/243** pass PostgreSQL 18.3. S2-04C is next.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.

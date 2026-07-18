@@ -33,6 +33,17 @@ from taskq.execution import (
 from taskq.protocol import ClaimedJob, EnqueueResult, EnqueueStatus, TqCode
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.transport import TaskqTransport
+from taskq.worker import (
+    JobRunOutcome,
+    JobRunReport,
+    JobRunState,
+    RealWorkerClock,
+    WorkerCapacityError,
+    WorkerClock,
+    WorkerInvariantError,
+    WorkerOptions,
+    WorkerSupervisor,
+)
 
 __all__ = [
     "ClaimedJob",
@@ -44,10 +55,14 @@ __all__ = [
     "EnqueueStatus",
     "HandlerResult",
     "JobContext",
+    "JobRunOutcome",
+    "JobRunReport",
+    "JobRunState",
     "NonRetryable",
     "Retry",
     "RetryStrategy",
     "RetryValue",
+    "RealWorkerClock",
     "Snooze",
     "Task",
     "TaskQ",
@@ -66,5 +81,10 @@ __all__ = [
     "TaskqVersionError",
     "TqCode",
     "UnknownTaskError",
+    "WorkerCapacityError",
+    "WorkerClock",
+    "WorkerInvariantError",
+    "WorkerOptions",
+    "WorkerSupervisor",
     "__version__",
 ]
