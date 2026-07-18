@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from enum import StrEnum
-from typing import Any, Protocol
+from typing import Any, Protocol, Sequence
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -30,7 +31,14 @@ from taskq.execution import (
     Snooze,
     TaskCancelled,
 )
-from taskq.protocol import COMMAND_SPECS, ClaimedJob, CommandName, SettleOutcome, SettleResult
+from taskq.protocol import (
+    COMMAND_SPECS,
+    ClaimedJob,
+    ClaimState,
+    CommandName,
+    SettleOutcome,
+    SettleResult,
+)
 from taskq.registry import Task, TaskRegistry
 from taskq.transport import TaskqTransport
 
@@ -114,6 +122,348 @@ class WorkerCapacityError(RuntimeError):
 
 class WorkerInvariantError(RuntimeError):
     pass
+
+
+class NotificationSource(Protocol):
+    async def connect(self, channels: Sequence[str], nudge: Callable[[], None]) -> None: ...
+
+    async def wait_disconnected(self) -> None: ...
+
+    async def aclose(self) -> None: ...
+
+
+class WorkerServiceOptions(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    queues: tuple[str, ...]
+    batch: int = Field(default=1, ge=1, le=50)
+    poll_interval: float = Field(default=5.0, ge=0.1, le=3600)
+    listen: bool = True
+    presence_interval: float = Field(default=60.0, ge=5, le=3600)
+    listener_backoff_base: float = Field(default=0.25, gt=0)
+    listener_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
+
+    @model_validator(mode="after")
+    def _valid_service_options(self) -> WorkerServiceOptions:
+        if not 1 <= len(self.queues) <= 100:
+            raise ValueError("queues must contain 1..100 entries")
+        if len(set(self.queues)) != len(self.queues):
+            raise ValueError("queues must be distinct")
+        if any(re.fullmatch(r"[a-z0-9_]{1,57}", queue) is None for queue in self.queues):
+            raise ValueError("queues must match [a-z0-9_]{1,57}")
+        if self.listener_backoff_cap < self.listener_backoff_base:
+            raise ValueError("listener_backoff_cap must cover listener_backoff_base")
+        return self
+
+
+class WorkerServiceState(StrEnum):
+    CONSTRUCTED = "constructed"
+    STARTING = "starting"
+    RUNNING = "running"
+    DEGRADED = "degraded"
+    STOPPING = "stopping"
+    STOPPED = "stopped"
+    FAILED = "failed"
+
+
+class WorkerServiceSnapshot(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    state: WorkerServiceState
+    ready: bool
+    queues: tuple[str, ...]
+    listener_requested: bool
+    listener_connected: bool
+    available_slots: int
+    active_slots: int
+    claim_sweeps: int
+    claimed_jobs: int
+    notification_nudges: int
+    listener_reconnects: int
+
+
+class _NotificationGeneration:
+    def __init__(self) -> None:
+        self.generation = 0
+        self.nudges = 0
+        self._event = asyncio.Event()
+
+    def nudge(self) -> None:
+        self.generation += 1
+        self.nudges += 1
+        self._event.set()
+
+    async def wait_for_change(self, generation: int) -> None:
+        while self.generation == generation:
+            self._event.clear()
+            if self.generation != generation:
+                return
+            await self._event.wait()
+
+
+class WorkerService:
+    """DB-direct queue poller composing the fenced per-job supervisor."""
+
+    def __init__(
+        self,
+        transport: TaskqTransport,
+        registry: TaskRegistry,
+        worker_id: str,
+        *,
+        options: WorkerServiceOptions,
+        supervisor_options: WorkerOptions | None = None,
+        notifications: NotificationSource | None = None,
+        clock: WorkerClock | None = None,
+    ) -> None:
+        if options.listen and notifications is None:
+            raise TaskqConfigError("listen=True requires a notification source")
+        if options.batch > (supervisor_options or WorkerOptions()).concurrency:
+            raise TaskqConfigError("batch cannot exceed worker concurrency")
+        self.transport = transport
+        self.registry = registry
+        self.worker_id = worker_id
+        self.options = options
+        self.clock = clock or RealWorkerClock()
+        self.notifications = notifications
+        self.supervisor = WorkerSupervisor(
+            transport,
+            registry,
+            worker_id,
+            options=supervisor_options,
+            clock=self.clock,
+        )
+        self._state = WorkerServiceState.CONSTRUCTED
+        self._stop_requested = asyncio.Event()
+        self._stopped = asyncio.Event()
+        self._listener_attempted = asyncio.Event()
+        self._listener_connected = False
+        self._nudge = _NotificationGeneration()
+        self._claim_task: asyncio.Task[None] | None = None
+        self._listener_task: asyncio.Task[None] | None = None
+        self._stop_task: asyncio.Task[None] | None = None
+        self._claim_sweeps = 0
+        self._claimed_jobs = 0
+        self._listener_reconnects = 0
+        self._fatal_error: BaseException | None = None
+        self._queue_index = 0
+
+    @property
+    def state(self) -> WorkerServiceState:
+        return self._state
+
+    @property
+    def ready(self) -> bool:
+        return self._state is WorkerServiceState.RUNNING
+
+    @property
+    def stopped(self) -> bool:
+        return self._stopped.is_set()
+
+    @property
+    def requires_process_exit(self) -> bool:
+        return self.supervisor.requires_process_exit
+
+    def snapshot(self) -> WorkerServiceSnapshot:
+        available = self.supervisor.available_slots
+        return WorkerServiceSnapshot(
+            state=self._state,
+            ready=self.ready,
+            queues=self.options.queues,
+            listener_requested=self.options.listen,
+            listener_connected=self._listener_connected,
+            available_slots=available,
+            active_slots=self.supervisor.options.concurrency - available,
+            claim_sweeps=self._claim_sweeps,
+            claimed_jobs=self._claimed_jobs,
+            notification_nudges=self._nudge.nudges,
+            listener_reconnects=self._listener_reconnects,
+        )
+
+    async def start(self) -> None:
+        if self._state is not WorkerServiceState.CONSTRUCTED:
+            raise TaskqConfigError("worker service can only be started once")
+        self._state = WorkerServiceState.STARTING
+        self.supervisor.start()
+        if self.options.listen:
+            self._listener_task = asyncio.create_task(
+                self._listener_loop(), name="taskq-worker-listener"
+            )
+            await self._listener_attempted.wait()
+        self._refresh_running_state()
+        self._claim_task = asyncio.create_task(self._claim_loop(), name="taskq-worker-claim")
+
+    async def run(self, *, stop_signal: asyncio.Event | None = None) -> None:
+        if self._state is WorkerServiceState.CONSTRUCTED:
+            await self.start()
+        if stop_signal is None:
+            await self._stopped.wait()
+            return
+        signal_wait = asyncio.create_task(stop_signal.wait(), name="taskq-worker-stop-signal")
+        stopped_wait = asyncio.create_task(self._stopped.wait(), name="taskq-worker-stopped-wait")
+        done, _ = await asyncio.wait(
+            (signal_wait, stopped_wait), return_when=asyncio.FIRST_COMPLETED
+        )
+        if signal_wait in done and not self.stopped:
+            await self.stop()
+        signal_wait.cancel()
+        stopped_wait.cancel()
+        await asyncio.gather(signal_wait, stopped_wait, return_exceptions=True)
+
+    async def stop(self, *, cancel: bool = False) -> None:
+        if self._state is WorkerServiceState.CONSTRUCTED:
+            self._state = WorkerServiceState.STOPPED
+            self._stopped.set()
+            return
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(
+                self._stop(cancel=cancel), name="taskq-worker-service-stop"
+            )
+        elif cancel:
+            await self.supervisor.stop(cancel=True)
+        await asyncio.shield(self._stop_task)
+
+    async def _stop(self, *, cancel: bool) -> None:
+        self._state = WorkerServiceState.STOPPING
+        self._stop_requested.set()
+        self._nudge.nudge()
+        if self._claim_task is not None:
+            await asyncio.gather(self._claim_task, return_exceptions=True)
+        await self.supervisor.stop(cancel=cancel)
+        if self.notifications is not None:
+            await self.notifications.aclose()
+        if self._listener_task is not None:
+            self._listener_task.cancel()
+            await asyncio.gather(self._listener_task, return_exceptions=True)
+        self._state = WorkerServiceState.STOPPED
+        self._stopped.set()
+
+    async def _listener_loop(self) -> None:
+        assert self.notifications is not None
+        channels = tuple(f"taskq_{queue}" for queue in self.options.queues)
+        backoff = self.options.listener_backoff_base
+        connected_once = False
+        while not self._stop_requested.is_set():
+            try:
+                await self.notifications.connect(channels, self._nudge.nudge)
+                self._listener_connected = True
+                if connected_once:
+                    self._listener_reconnects += 1
+                connected_once = True
+                backoff = self.options.listener_backoff_base
+                self._listener_attempted.set()
+                self._nudge.nudge()
+                self._refresh_running_state()
+                await self.notifications.wait_disconnected()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._listener_attempted.set()
+            finally:
+                self._listener_connected = False
+                self._refresh_running_state()
+            if self._stop_requested.is_set():
+                break
+            await self._sleep_or_stop(backoff)
+            backoff = min(backoff * 2, self.options.listener_backoff_cap)
+
+    async def _claim_loop(self) -> None:
+        try:
+            while not self._stop_requested.is_set():
+                if self.supervisor.available_slots == 0:
+                    if not await self._wait_for_capacity_or_stop():
+                        break
+                claimed_in_sweep = False
+                for _ in self.options.queues:
+                    if self._stop_requested.is_set() or self.supervisor.available_slots == 0:
+                        break
+                    queue = self.options.queues[self._queue_index]
+                    self._queue_index = (self._queue_index + 1) % len(self.options.queues)
+                    batch = min(self.options.batch, self.supervisor.available_slots)
+                    result = await self.transport.claim(queue, self.worker_id, batch=batch)
+                    self._claim_sweeps += 1
+                    if result.state is ClaimState.CLAIMED:
+                        if len(result.jobs) > batch:
+                            raise WorkerInvariantError("claim returned more jobs than requested")
+                        for claim in result.jobs:
+                            self.supervisor.submit(claim)
+                        self._claimed_jobs += len(result.jobs)
+                        claimed_in_sweep = True
+                    elif result.state in (ClaimState.UNKNOWN_QUEUE, ClaimState.UNAVAILABLE):
+                        raise WorkerInvariantError(
+                            f"unexpected claim state for subscribed queue: {result.state.value}"
+                        )
+                if claimed_in_sweep and self.supervisor.available_slots > 0:
+                    continue
+                await self._wait_for_poll_or_nudge()
+        except asyncio.CancelledError:
+            raise
+        except BaseException as exc:
+            self._fatal_error = exc
+            self._state = WorkerServiceState.FAILED
+            self._stop_requested.set()
+            self._nudge.nudge()
+            asyncio.get_running_loop().call_soon(self._ensure_stop_task)
+
+    def _ensure_stop_task(self) -> None:
+        if self._stop_task is None:
+            self._stop_task = asyncio.create_task(self._stop(cancel=False))
+
+    async def _wait_for_capacity_or_stop(self) -> bool:
+        capacity = asyncio.create_task(
+            self.supervisor.wait_for_capacity(), name="taskq-worker-capacity"
+        )
+        stopping = asyncio.create_task(
+            self._stop_requested.wait(), name="taskq-worker-capacity-stop"
+        )
+        done, _ = await asyncio.wait((capacity, stopping), return_when=asyncio.FIRST_COMPLETED)
+        capacity.cancel()
+        stopping.cancel()
+        await asyncio.gather(capacity, stopping, return_exceptions=True)
+        return capacity in done and not self._stop_requested.is_set()
+
+    async def _wait_for_poll_or_nudge(self) -> None:
+        generation = self._nudge.generation
+        notified = asyncio.create_task(
+            self._nudge.wait_for_change(generation), name="taskq-worker-nudge"
+        )
+        deadline = asyncio.create_task(
+            self.clock.sleep(self.options.poll_interval), name="taskq-worker-poll-deadline"
+        )
+        stopping = asyncio.create_task(
+            self._stop_requested.wait(), name="taskq-worker-poll-stop"
+        )
+        await asyncio.wait((notified, deadline, stopping), return_when=asyncio.FIRST_COMPLETED)
+        notified.cancel()
+        deadline.cancel()
+        stopping.cancel()
+        await asyncio.gather(notified, deadline, stopping, return_exceptions=True)
+
+    async def _sleep_or_stop(self, delay: float) -> None:
+        sleeping = asyncio.create_task(self.clock.sleep(delay), name="taskq-listener-backoff")
+        stopping = asyncio.create_task(
+            self._stop_requested.wait(), name="taskq-listener-backoff-stop"
+        )
+        await asyncio.wait((sleeping, stopping), return_when=asyncio.FIRST_COMPLETED)
+        sleeping.cancel()
+        stopping.cancel()
+        await asyncio.gather(sleeping, stopping, return_exceptions=True)
+
+    def _refresh_running_state(self) -> None:
+        if self._state in (
+            WorkerServiceState.CONSTRUCTED,
+            WorkerServiceState.STOPPING,
+            WorkerServiceState.STOPPED,
+            WorkerServiceState.FAILED,
+        ):
+            return
+        self._state = (
+            WorkerServiceState.DEGRADED
+            if self.options.listen and not self._listener_connected
+            else WorkerServiceState.RUNNING
+        )
+
+    async def aclose(self) -> None:
+        await self.stop(cancel=True)
 
 
 class _RunControl:
@@ -875,10 +1225,15 @@ __all__ = [
     "JobRunOutcome",
     "JobRunReport",
     "JobRunState",
+    "NotificationSource",
     "RealWorkerClock",
     "WorkerCapacityError",
     "WorkerClock",
     "WorkerInvariantError",
     "WorkerOptions",
+    "WorkerService",
+    "WorkerServiceOptions",
+    "WorkerServiceSnapshot",
+    "WorkerServiceState",
     "WorkerSupervisor",
 ]

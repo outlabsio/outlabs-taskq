@@ -12,6 +12,8 @@ from uuid import UUID
 
 from taskq.errors import TaskqUnavailableError
 from taskq.protocol import (
+    ClaimResult,
+    ClaimState,
     HeartbeatResult,
     JobStatus,
     SettleDeadResult,
@@ -126,6 +128,31 @@ class ScriptedTransport:
                 "stats": stats,
             },
             HeartbeatResult(ok=True, cancel_requested=False, lease_expires_at=None),
+        )
+
+    async def claim(
+        self,
+        queue: str,
+        worker_id: str,
+        *,
+        batch: int = 1,
+        job_types: Sequence[str] | None = None,
+        lease_seconds: int | None = None,
+        affinity_key: str | None = None,
+        job_id: UUID | None = None,
+    ) -> ClaimResult:
+        return await self._next(
+            "claim",
+            {
+                "queue": queue,
+                "worker_id": worker_id,
+                "batch": batch,
+                "job_types": job_types,
+                "lease_seconds": lease_seconds,
+                "affinity_key": affinity_key,
+                "job_id": job_id,
+            },
+            ClaimResult(state=ClaimState.EMPTY),
         )
 
     async def complete(
