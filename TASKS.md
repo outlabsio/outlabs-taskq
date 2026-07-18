@@ -26,13 +26,12 @@
 | | |
 |---|---|
 | Stage | **1 — secure SQL kernel** (opening slice landed) |
-| Suite | 42/42 green vs live PG 18.3 (`3e7d55d`) |
+| Suite | 48/48 green vs live PG 18.3 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
 | Next review | Round 3 after Stage-1 exit gate (migration 0001 + harness vs manifest) |
 
 ## Now — Stage 1 exit gate
 
-- [ ] **S1-01 · T3 choreographed races.** New `tests/test_t3_races.py` per Harness doc §2: two-session advisory-lock barriers + hold-open transactions. Cases: concurrent same-key enqueue (one `created`), double-claim impossibility (`uq_job_attempts_running`), fence `lost` after reap, verb-aware `settle_conflict` under race, concurrency-cap no-overshoot at `max_running=1` under 10 concurrent claims, paused-mid-claim. Acceptance: deterministic (loop 20× stable), runs in T2's DSN env.
 - [ ] **S1-02 · T3-R randomized stress.** K producers × M workers × mixed verbs for a bounded wall-clock (default 30s, env-scalable); invariants only: zero duplicate claims, conservation (every enqueued job exactly one terminal/active state after drain + final tick), no wedged rows. Seed logged for replay.
 - [ ] **S1-03 · T4 stateful model.** `tests/test_t4_model.py`: hypothesis stateful machine per Harness doc §3 — ops enqueue/claim/complete/fail/release/snooze/cancel/lease-rewind(tick)/redrive against real PG, model asserts §3.3 budget table + ≤1 running attempt + dedup + typed-results-only. Time travel via test-only owner function installed by conftest into the scratch DB only (never in migrations).
 - [ ] **S1-04 · verify corruption matrix.** Extend T2: each hardening axis deliberately broken then restored — drop pinned search_path, grant PUBLIC execute, wrong owner, ledger checksum tamper, missing role — `verify()` must name each precisely.
@@ -59,3 +58,4 @@
 
 - [x] **Design phase** — spec v1.6, ADR-001..011, two review rounds folded, Protocol v1 + Function Manifest canonical, docs constitution (`6cf6793`..`e1237c5`)
 - [x] **S1 opening slice** — migration `0001_initial.sql` (6 roles, 39 hardened functions, self-checking), ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI), T1 (26) + T2 (15) suites, 42/42 green vs PG 18.3, wheel packaging fixed, single-writer ledger + typed-cancel reconciliations in manifest errata §8 (`3e7d55d`)
+- [x] **S1-01 · T3 choreographed races** — six advisory-barrier/hold-open race cases run deterministically for 20 rounds each: same-key convergence, double-claim exclusion, post-reap fence loss, cross-verb settle conflict, ten-way cap admission, and the single permitted pause slip.
