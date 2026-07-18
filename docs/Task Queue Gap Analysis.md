@@ -1,5 +1,7 @@
 # Gap Analysis: diverse-data-api vs qdarteAPI Postgres Task Queues
 
+> **Tier 4 — HISTORICAL (immutable).** The 2026-07-06 problem statement taskq exists to solve. Never edited; superseded design detail lives in the contracts/ADRs.
+
 > **Provenance:** Produced 2026-07-06 by a cross-repo audit of the Postgres task queues in `diverse-data-api` (`scrape_jobs` queue domain) and `qdarteAPI` (`qdarte_ops.worker_jobs` platform). The input reports cited by code (DC, DCP, QC, QO, PA, gap_analysis) were working artifacts of that analysis session; all `file:line` citations refer to the two repos as of this date. Identical copies of this document live in both repos' `docs/` folders — treat them as one spec. Vault index note: `lifeOS/Projects/Business/QDarte/Postgres Task Queue Cross-Repo Audit & Unified Design.md`.
 
 Date: 2026-07-06. Inputs: `diverse_core.md`, `diverse_control.md`, `qdarte_core.md`, `qdarte_orchestration.md`, `prior_art.md` (same scratchpad directory). All file:line citations below are quoted from those reports; "DC" = diverse_core, "DCP" = diverse_control, "QC" = qdarte_core, "QO" = qdarte_orchestration, "PA" = prior_art.

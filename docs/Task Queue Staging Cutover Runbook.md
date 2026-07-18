@@ -1,5 +1,7 @@
 # Task Queue Staging Cutover Runbook
 
+> **Tier 4 — host-side ops (Diverse).** Dormant until Build Plan Stage 6; route paths here are the Diverse legacy compatibility prefix, adapters to Transport Protocol v1.
+
 Purpose: prove the first Diverse `taskq` lane in staging before any production
 cutover. Production remains default-off until qdarte completes a 24-hour
 production taskq observation gate and Diverse has a clean staging evidence

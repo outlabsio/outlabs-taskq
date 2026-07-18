@@ -6,8 +6,11 @@ Postgres-native task queue library. **Docs first** — implementation is pre-alp
 
 | Concern | Doc |
 |---|---|
-| **Accepted decisions (win on conflict)** | `docs/adr/` (ADR-001..010) |
-| Protocol / SQL contract | `docs/Task Queue — Unified Design Spec.md` (v1.5) |
+| **Tier map / authority chain (read first)** | `docs/README.md` |
+| **Locked contracts (Tier 0)** | `docs/Task Queue Transport Protocol v1.md`, `docs/Task Queue 0.1 Function Manifest.md` |
+| **Accepted decisions (Tier 1)** | `docs/adr/` (ADR-001..011) |
+| What to do next (Tier 2) | `docs/Task Queue Build Plan.md` |
+| Destination design (Tier 3) | `docs/Task Queue — Unified Design Spec.md` (v1.6) |
 | Package + auth boundaries | `docs/Task Queue Library Extraction Design Brief.md` |
 | Queue-scoped authorization + provisioning | `docs/Task Queue Authorization & Queue Permissions.md` |
 | Own tests / CI / benchmarks | `docs/Task Queue Test & Benchmark Harness.md` |
