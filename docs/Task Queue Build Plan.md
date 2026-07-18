@@ -4,12 +4,11 @@
 
 ## Where the project stands
 
-Design is complete and twice externally reviewed (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1 SQL surface (Function Manifest) are canonical. The repo history is clean (peer projects referenced generically; named provenance archived privately). No implementation exists beyond the package skeleton — deliberately: contracts froze before code.
+Design is complete and twice externally reviewed (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1 SQL surface (Function Manifest) are canonical. Stage 1's secure SQL kernel and its development harness are implemented, and every Stage-1 exit gate is green. The immutable [round-3 review request](./design-review-3/REQUEST.md) is ready for external review before implementation proceeds into the Python runtime.
 
-## Stage 1 — secure SQL kernel (IN PROGRESS — opening slice landed 2026-07-18)
+## Stage 1 — secure SQL kernel (EXIT GATE GREEN — ROUND-3 REVIEW REQUESTED 2026-07-18)
 
-**Landed:** migration `0001_initial.sql` (2.6k lines: 6 roles, 11 tables, 3 composites, 39 hardened functions, self-checking hardening block, 0.1-only seeding) + the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI) + T1 (26 unit) and T2 (15 contract) suites — **42/42 green against live PG 18.3**, including privilege probes, verb-aware replay/`settle_conflict`, budget-free cancel, `TQ501` gates, and claim states. Manifest §8 records the integration errata.
-**Remaining for the exit gate:** PG16 lane, T3 choreographed races + T3-R, T4 stateful model, `verify` corruption matrix breadth, 1M-row plan checks, B1–B4 smoke, CI wiring.
+**Landed:** migration `0001_initial.sql` (6 roles, 11 tables, 3 composites, 39 hardened functions, self-checking hardening block, 0.1-only seeding); the ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI); T1/T2 contracts, T3 deterministic and randomized concurrency, T4 stateful modeling, corruption probes, million-row structural plans, B1–B4 smoke benchmarks, and CI. The regular suite is **58/58 green against PostgreSQL 18.3**, the opt-in million-row plan gate is green, and the pre-plan/benchmark **54/54 suite is green against PostgreSQL 16.14**. Manifest §8 records the resolved integration errata; no Stage-1 contract questions remain open.
 
 Build, in one vertical slice against ephemeral PostgreSQL 18:
 
@@ -29,7 +28,7 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 ## Stage 4 — outlabsAPI dogfood (first host)
 
-One or two low-consequence lanes (tools, notifications) on the embedded runtime; durable run rows replace fire-and-forget; `GET job` result read backs the 202 flow (R2-18 gate). Prereq: outlabsAPI upgrades outlabs-auth to a supported a24+ range (R2-17) or starts on the static adapter. Exit: two normal deploy cycles + one forced failure recovered with zero manual table edits; rollback rehearsed; RabbitMQ retirement begins lane-by-lane.
+One or two low-consequence lanes (tools, notifications) on the embedded runtime; durable run rows replace fire-and-forget; `GET job` result read backs the 202 flow (R2-18 gate). Prereq: outlabsAPI upgrades outlabs-auth to a supported a24+ range (R2-17) or starts on the static adapter. Exit: two normal deploy cycles + one forced failure recovered with zero manual table edits; rollback rehearsed; legacy-broker retirement begins lane-by-lane.
 
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 

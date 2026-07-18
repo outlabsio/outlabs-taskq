@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **1 — secure SQL kernel** (opening slice landed) |
+| Stage | **1 — secure SQL kernel** (exit gates green; round-3 review requested) |
 | Suite | 58/58 regular + opt-in 1M plan gate green vs PG 18.3; 54/54 vs PG 16.14 |
 | Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
-| Next review | Round 3 after Stage-1 exit gate (migration 0001 + harness vs manifest) |
+| Next review | Round-3 request assembled for Andi: migration 0001 + runner + harness vs manifest |
 
 ## Now — Stage 1 exit gate
 
-- [ ] **S1-09 · Stage-1 exit review packet.** When S1-01..08 are green: update Build Plan stage status, assemble the round-3 review prompt (migration 0001 + runner + suites vs manifest), hand to Andi.
+*(No unchecked Stage-1 work remains. Await the round-3 response; do not fold findings into Tier-0 contracts without the docs-first process.)*
 
 ## Next — Stage 2 kickoff (do not start before S1-09)
 
@@ -59,3 +59,4 @@
 - [x] **S1-06 · 1M-row plan checks** — opt-in `tests/test_plans.py` seeds mixed states, stabilizes stats/visibility, runs `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON)`, and structurally asserts claim/dedup/reap/stats index families, bounded hot-path rows, and no full `jobs` scan (two consecutive PG18 runs green).
 - [x] **S1-07 · B1–B4 benchmark smoke** — packaged `taskq-bench` runs single enqueue, 1000-row bulk, empty/deep claim→settle, and mixed producer/worker load for ≥3 repetitions; toy tests and the CLI print/write JSON with method, machine/PG/settings, WAL/storage/tuple/lock/connection, latency/throughput, event-loop, and structural EXPLAIN evidence. No baseline was created.
 - [x] **S1-08 · CI wiring** — GitHub Actions now gates Ruff check/format, Python 3.12/3.13 core+HTTP import isolation and T1, PostgreSQL 16/18 SQL contracts, PG18 races/T4, migrations, and B1–B4 smoke; README records the required branch-protection checks.
+- [x] **S1-09 · Stage-1 exit review packet** — the Build Plan records every exit gate green and the immutable Tier-4 [round-3 request](docs/design-review-3/REQUEST.md) gives Andi a contract-first audit program for migration 0001, runner/verifier, SQL suites, plans, benchmarks, packaging, and CI.
