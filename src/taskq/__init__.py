@@ -45,6 +45,7 @@ from taskq.protocol import (
     TqCode,
 )
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
+from taskq.settings import WorkerSettings
 from taskq.transport import TaskqTransport
 from taskq.worker import (
     JobRunOutcome,
@@ -116,6 +117,7 @@ __all__ = [
     "WorkerServiceOptions",
     "WorkerServiceSnapshot",
     "WorkerServiceState",
+    "WorkerSettings",
     "WorkerSupervisor",
     "__version__",
 ]

@@ -708,6 +708,7 @@ dependencies = [
     { name = "asyncpg" },
     { name = "croniter" },
     { name = "pydantic" },
+    { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
 ]
 
@@ -738,6 +739,7 @@ requires-dist = [
     { name = "outlabs-auth", marker = "extra == 'outlabs'", specifier = ">=0.1.0a24,<0.2" },
     { name = "outlabs-taskq", extras = ["http"], marker = "extra == 'outlabs'" },
     { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pydantic-settings", specifier = ">=2.0.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6.0" },
