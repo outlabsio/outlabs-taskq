@@ -194,13 +194,22 @@ async def test_construction_enqueue_and_close_create_no_background_tasks() -> No
     assert transport.closed
 
 
-async def _counts(engine: Any) -> tuple[int, int]:
+async def _counts(engine: Any) -> tuple[int, int, int]:
     async with engine.connect() as conn:
         domain = int(await conn.scalar(text("SELECT count(*) FROM public.taskq_s2_domain")) or 0)
         jobs = int(
             await conn.scalar(text("SELECT count(*) FROM taskq.jobs WHERE queue='s2_client'")) or 0
         )
-    return domain, jobs
+        events = int(
+            await conn.scalar(
+                text(
+                    "SELECT count(*) FROM taskq.job_events e JOIN taskq.jobs j ON j.id=e.job_id "
+                    "WHERE j.queue='s2_client'"
+                )
+            )
+            or 0
+        )
+    return domain, jobs, events
 
 
 @pytest.mark.taskq_sql
@@ -218,20 +227,20 @@ async def test_session_commit_rollback_and_single_connection(
             async with session.begin():
                 await session.execute(text("INSERT INTO public.taskq_s2_domain(value) VALUES (1)"))
                 await app.enqueue(task, {"value": 1}, idempotency_key="commit", session=session)
-        assert await _counts(engine) == (1, 1)
+        assert await _counts(engine) == (1, 1, 1)
 
         async with AsyncSession(engine) as session:
             await session.begin()
             await session.execute(text("INSERT INTO public.taskq_s2_domain(value) VALUES (2)"))
             await app.enqueue(task, {"value": 2}, idempotency_key="rollback", session=session)
             await session.rollback()
-        assert await _counts(engine) == (1, 1)
+        assert await _counts(engine) == (1, 1, 1)
 
         async with AsyncSession(engine) as session:
             await app.enqueue(task, {"value": 3}, idempotency_key="autobegin", session=session)
             assert session.in_transaction()
             await session.rollback()
-        assert await _counts(engine) == (1, 1)
+        assert await _counts(engine) == (1, 1, 1)
 
         missing = Task(
             name="math.missing",
@@ -271,7 +280,7 @@ async def test_savepoint_connection_and_bulk_transaction_semantics(
                 await session.execute(text("INSERT INTO public.taskq_s2_domain(value) VALUES (11)"))
                 await app.enqueue(task, {"value": 11}, idempotency_key="savepoint", session=session)
                 await nested.rollback()
-        assert await _counts(engine) == (1, 0)
+        assert await _counts(engine) == (1, 0, 0)
 
         async with engine.connect() as connection:
             transaction = await connection.begin()
@@ -279,7 +288,7 @@ async def test_savepoint_connection_and_bulk_transaction_semantics(
                 task, {"value": 20}, idempotency_key="connection", connection=connection
             )
             await transaction.rollback()
-        assert await _counts(engine) == (1, 0)
+        assert await _counts(engine) == (1, 0, 0)
 
         async with AsyncSession(engine) as session:
             async with session.begin():
@@ -290,7 +299,7 @@ async def test_savepoint_connection_and_bulk_transaction_semantics(
                     session=session,
                 )
                 assert len(results) == 2
-        assert await _counts(engine) == (1, 2)
+        assert await _counts(engine) == (1, 2, 2)
     finally:
         await engine.dispose()
         await pg.execute("DROP TABLE IF EXISTS public.taskq_s2_domain")

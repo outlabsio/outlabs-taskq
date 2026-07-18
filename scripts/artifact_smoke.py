@@ -52,12 +52,19 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("core", "http"), required=True)
+    parser.add_argument("--mode", choices=("core", "http", "outlabs"), required=True)
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--admin-dsn")
     args = parser.parse_args()
 
     import taskq
+    import taskq.client
+    import taskq.errors
+    import taskq.protocol
+    import taskq.registry
+    import taskq.sql.transport
+    import taskq.transport
+    from taskq import TaskQ, TaskRegistry
     from taskq.sql import discover_migrations
     from taskq.sql.manifest import FUNCTIONS
 
@@ -66,12 +73,21 @@ def main() -> None:
     assert not package_file.is_relative_to(repo), (package_file, repo)
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
-    assert importlib.util.find_spec("outlabs_auth") is None
     if args.mode == "core":
         assert importlib.util.find_spec("fastapi") is None
+        assert importlib.util.find_spec("outlabs_auth") is None
+    elif args.mode == "http":
+        assert importlib.util.find_spec("fastapi") is not None
+        assert importlib.util.find_spec("outlabs_auth") is None
+        import fastapi  # noqa: F401
     else:
         assert importlib.util.find_spec("fastapi") is not None
+        assert importlib.util.find_spec("outlabs_auth") is not None
         import fastapi  # noqa: F401
+        import outlabs_auth  # noqa: F401
+
+    assert TaskQ is not None
+    assert TaskRegistry is not None
 
     assert [migration.id for migration in discover_migrations()] == [
         "0001_initial",
@@ -79,7 +95,7 @@ def main() -> None:
     ]
     assert len(FUNCTIONS) == 40
 
-    if args.mode == "http":
+    if args.mode != "core":
         return
     if not args.admin_dsn:
         parser.error("--admin-dsn is required in core mode")

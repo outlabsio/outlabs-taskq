@@ -48,7 +48,13 @@ jobs:
           import importlib.util
           import sys
           import taskq
+          import taskq.client
+          import taskq.errors
+          import taskq.protocol
+          import taskq.registry
           import taskq.sql
+          import taskq.sql.transport
+          import taskq.transport
 
           assert importlib.util.find_spec("fastapi") is None
           assert importlib.util.find_spec("outlabs_auth") is None
@@ -60,10 +66,34 @@ jobs:
           UV_PROJECT_ENVIRONMENT=.venv-http uv sync --no-dev --extra http
           UV_PROJECT_ENVIRONMENT=.venv-http uv run python - <<'PY'
           import importlib.util
-          import fastapi
+          import sys
           import taskq
+          import taskq.client
+          import taskq.protocol
+
+          assert "fastapi" not in sys.modules
+          assert "outlabs_auth" not in sys.modules
+          assert importlib.util.find_spec("fastapi") is not None
 
           assert importlib.util.find_spec("outlabs_auth") is None
+          import fastapi  # noqa: F401
+          PY
+      - name: Outlabs extra remains adapter-lazy
+        run: |
+          UV_PROJECT_ENVIRONMENT=.venv-outlabs uv sync --no-dev --extra outlabs
+          UV_PROJECT_ENVIRONMENT=.venv-outlabs uv run python - <<'PY'
+          import importlib.util
+          import sys
+          import taskq
+          import taskq.client
+          import taskq.protocol
+
+          assert "fastapi" not in sys.modules
+          assert "outlabs_auth" not in sys.modules
+          assert importlib.util.find_spec("fastapi") is not None
+          assert importlib.util.find_spec("outlabs_auth") is not None
+          import fastapi  # noqa: F401
+          import outlabs_auth  # noqa: F401
           PY
 
   built-artifacts:
@@ -100,6 +130,7 @@ jobs:
             smoke_root="$(mktemp -d)"
             core_env="$smoke_root/core"
             http_env="$smoke_root/http"
+            outlabs_env="$smoke_root/outlabs"
             uv venv "$core_env"
             uv pip install --python "$core_env/bin/python" "$GITHUB_WORKSPACE/$artifact"
             (
@@ -113,6 +144,13 @@ jobs:
               cd "$smoke_root"
               "$http_env/bin/python" "$GITHUB_WORKSPACE/scripts/artifact_smoke.py" \
                 --mode http --repo "$GITHUB_WORKSPACE"
+            )
+            uv venv "$outlabs_env"
+            uv pip install --python "$outlabs_env/bin/python" "$GITHUB_WORKSPACE/${artifact}[outlabs]"
+            (
+              cd "$smoke_root"
+              "$outlabs_env/bin/python" "$GITHUB_WORKSPACE/scripts/artifact_smoke.py" \
+                --mode outlabs --repo "$GITHUB_WORKSPACE"
             )
           done
 
@@ -129,7 +167,13 @@ jobs:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
       - run: uv sync --extra dev
-      - run: uv run pytest tests/test_t1_unit.py tests/test_version.py -q
+      - run: >-
+          uv run pytest
+          tests/test_t1_unit.py
+          tests/test_version.py
+          tests/test_s2_registry.py
+          tests/test_s2_client.py
+          -q
 
   sql-contract:
     runs-on: ubuntu-latest
@@ -160,7 +204,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --extra dev
-      - run: uv run pytest tests/test_t2_contract.py tests/test_version.py -q
+      - run: uv run pytest tests/ -q
 
   races:
     runs-on: ubuntu-latest

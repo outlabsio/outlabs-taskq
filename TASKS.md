@@ -25,18 +25,17 @@
 
 | | |
 |---|---|
-| Stage | **2A completion audit in progress; Stage 2B closed** — protocol authority fixed; permanent evidence gates remain |
-| Suite | 214/214 regular on PG 18.3; last complete PG16 run 212/212 pending audit rerun |
+| Stage | **2A completion audit complete; Stage 2B open** — typed enqueue foundation is permanently gated and cross-version green |
+| Suite | 216/216 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
-| Next review | Stage 2A acceptance audit; S2-04 remains closed until its evidence gaps are green |
+| Next review | Stage 2A acceptance matrix independently re-audited green; S2-04 worker contracts govern the next slice |
 
-## Now — Stage 2A completion audit
+## Now — Stage 2B worker runtime
 
-- [ ] **S2-AUDIT-02 · Permanent acceptance evidence** — close concurrent transport dedup, fence-log, SQL resource, import-extra/artifact, and PG16/PG18 CI coverage gaps; rerun every final gate.
+- [ ] S2-04 worker supervisor: heartbeat-per-job, verb-aware settle retries, R2-11 cancellation contracts, soft stop (feature 11)
 
 ## Next — Stage 2B worker runtime
 
-- [ ] S2-04 worker supervisor: heartbeat-per-job, verb-aware settle retries, R2-11 cancellation contracts, soft stop (feature 11)
 - [ ] S2-05 NOTIFY listener + poll loop (feature 06); `taskq worker` CLI
 - [ ] S2-06 `taskq.testing` fixtures + inline transport (feature 10)
 
@@ -54,6 +53,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-AUDIT-02 · Permanent acceptance evidence** — transport-level 20-way dedup proves one `created`/19 `existed`, captured logs remain fence-free, SQL construction/commands leave no background tasks or checked-out connections, transaction vectors conserve domain/job/event rows, and CI now runs the full suite on PG16/PG18 plus explicit core/HTTP/outlabs isolation on Python 3.12/3.13 and on every Python-3.12 wheel/sdist; all local mirrors pass (216/216 + plan gate on both PG versions, 73 Python-3.13 unit tests).
 - [x] **S2-AUDIT-01 · Protocol single-source correction** — `taskq.protocol` now owns the closed 30-command names, SQL identities, capability roles, outcomes, TQ errors/retryability, and replay rules; typed settle/job/operator enums reject invented values, while independent parity proves exact agreement with the Tier-0-derived machine manifest (214/214 on PG18).
 - [x] **S2-03 · Typed facade and transactional enqueue** — `TaskQ` compiles registered canonical tasks and retry stamps exactly once, keeps raw enqueue explicitly opt-in, and executes single/bulk enqueue on the caller's exact `AsyncSession`/`AsyncConnection` without owning its lifecycle; commit, rollback, autobegin, savepoint, cancellation/error ownership, non-SQL rejection, and no-background-work contracts pass on PG16/PG18, while clean wheel/sdist core installs import the complete Stage 2A surface (212/212 each).
 - [x] **S2-02 · Complete async SQL transport** — runtime-checkable `TaskqTransport` and lazy `SqlTaskqTransport` cover all 30 manifest-public functions with fixed bound calls, typed/fence-safe adapters, no table DML or implicit retries, owned/borrowed engine semantics, SQLSTATE-only failures, malformed-bulk invariants, and transaction rollback/cancellation; every method passes through its least-capability role with cross-role denials on PG16 and PG18 (201/201 each).

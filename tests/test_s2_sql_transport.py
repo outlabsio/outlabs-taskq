@@ -118,8 +118,25 @@ async def test_producer_transport_created_existed_bulk_and_typed_error(
         await transports["producer"].get_contract_meta()
 
 
-async def test_runner_transport_all_commands_and_fence_redaction(
+async def test_concurrent_transport_dedup_matches_protocol_outcomes(
     pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    await _queue(transports, "s2_dedup")
+    command = EnqueueCommand(
+        queue="s2_dedup",
+        job_type="tests.echo",
+        payload={"value": 1},
+        idempotency_key="same-key",
+    )
+    results = await asyncio.gather(*(transports["producer"].enqueue(command) for _ in range(20)))
+    assert [result.status for result in results].count(EnqueueStatus.CREATED) == 1
+    assert [result.status for result in results].count(EnqueueStatus.EXISTED) == 19
+    assert len({result.job_id for result in results}) == 1
+
+
+async def test_runner_transport_all_commands_and_fence_redaction(
+    pg: object, transports: dict[str, SqlTaskqTransport], caplog: pytest.LogCaptureFixture
 ) -> None:
     del pg
     queue = "s2_runner"
@@ -130,6 +147,7 @@ async def test_runner_transport_all_commands_and_fence_redaction(
 
     await _enqueue(transports, queue)
     job_id, attempt_id = await _claim(transports, queue, "worker")
+    assert str(attempt_id) not in caplog.text
     heartbeat = await transports["runner"].heartbeat(
         job_id, attempt_id, "worker", progress={"cursor": 1}, stats={"cpu": 2}
     )
@@ -156,6 +174,7 @@ async def test_runner_transport_all_commands_and_fence_redaction(
     job_id, attempt_id = await _claim(transports, queue, "worker")
     cancelled = await transports["runner"].cancel_running(job_id, attempt_id, "worker", "stop")
     assert cancelled.result == "ok" and cancelled.job_status == "cancelled"
+    assert str(attempt_id) not in caplog.text
 
 
 async def test_observer_and_housekeeper_transport(
@@ -253,6 +272,21 @@ async def test_owned_and_borrowed_engine_close_semantics(sqlalchemy_dsn: str) ->
     assert isinstance(owned, TaskqTransport)
     await owned.aclose()
     await owned.aclose()
+
+
+async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
+    sqlalchemy_dsn: str,
+) -> None:
+    before = asyncio.all_tasks()
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    pool = transport.engine.sync_engine.pool
+    assert pool.checkedout() == 0  # type: ignore[attr-defined]
+    assert asyncio.all_tasks() == before
+    assert (await transport.get_contract_meta()).contract_version == "0.1.1"
+    await asyncio.sleep(0)
+    assert pool.checkedout() == 0  # type: ignore[attr-defined]
+    assert asyncio.all_tasks() == before
+    await transport.aclose()
 
 
 async def test_every_capability_role_rejects_a_cross_capability_call(

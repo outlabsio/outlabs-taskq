@@ -30,6 +30,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Completion audit:** a trust-but-verify pass found protocol command metadata split between modules and several permanent-evidence gaps. S2-AUDIT-01 moves all 30 command identities, roles, closed outcomes, TQ error/retryability, and replay metadata into `taskq.protocol` and independently proves parity with the Tier-0-derived SQL manifest. Stage 2B is temporarily closed until S2-AUDIT-02 finishes the remaining evidence gates.
 
+**Completion audit green:** S2-AUDIT-02 adds transport-level concurrent dedup, captured fence-log and zero-resource-leak assertions, domain/job/event transaction conservation, full-suite PG16/PG18 CI lanes, and explicit core/HTTP/outlabs isolation for source on Python 3.12/3.13 plus every wheel/sdist on Python 3.12. The local mirror is **216/216 plus the million-row plan gate on PostgreSQL 16.14 and 18.3**, with the clean Python-3.13 unit lane also green. Stage 2A is now independently proven complete and Stage 2B reopens at S2-04.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
