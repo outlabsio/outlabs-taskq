@@ -25,14 +25,17 @@
 
 | | |
 |---|---|
-| Stage | **S3-PREP items 1–3 complete** — Python protocol boundaries are hardened; round 4 remains pending, S2-05 and CLI configuration stay closed |
+| Stage | **Round-4 remediation active** — the response blocks S2-05 on R4-01..08; worker surface otherwise frozen |
 | Suite | 285/285 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Hand off `docs/design-review-4/REQUEST.md`; adjudicate the response before opening S2-05 |
+| Next review | No further full round required after R4-01..08 pass on PG16/PG18; stop before S2-05 |
 
-## Now — gated pending round 4
+## Now — round-4 remediation (stop before S2-05)
 
-*(none — do not open S2-05 until the Stage 2B review is adjudicated)*
+- [ ] **R4-F01 · Settlement-liveness heartbeat (R4-01/R4-03)** — heartbeat until terminal settlement or ownership loss; pin interleaved retries and the `settling → ownership_lost` suppression arc.
+- [ ] **R4-F02 · External cancellation (R4-02/R4-06)** — convert unowned task cancellation to shielded shutdown release, then re-raise; pin pre-start, mid-handler, and cancellation races.
+- [ ] **R4-F03 · Process-exit honesty and dispatch arity (R4-04/R4-05/R4-06)** — expose lease-loss live-sync danger, dispatch from registry metadata, and close the named lifecycle race gaps.
+- [ ] **R4-F04 · Replay oracle and error normalization (R4-07/R4-08)** — retain exact settlement arguments and normalize special-path transport errors into fatal reports.
 
 ## Next — gated after Stage 2B review
 
@@ -49,12 +52,17 @@
 
 *(none open — ADR-013 resolves S2-CQ-01 as contract 0.1.2: append the effective lease duration to `claimed_job`; workers schedule from it monotonically and never subtract local wall time from the absolute expiry. ADR-012 resolves round-3 CQ-01/CQ-02.)*
 
+## Round-4 finding dispositions
+
+The response verdict is **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 form the required remediation slice, R4-09..12 may follow, and S2-05 remains closed until the required slice is green on PostgreSQL 16 and 18.
+
 ## Round-3 finding dispositions
 
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
 
+- [x] **S2-04-R4-RESPONSE · Round-4 response recorded** — registered the external response verbatim as immutable Tier 4; its executed counterexamples leave the SQL safety core intact but block S2-05 on settlement-heartbeat liveness, external-cancellation semantics, process-exit honesty, dispatch arity, and their regression oracles (285/285 baseline on PG18, Ruff clean).
 - [x] **S3-PREP-03 · Batch boundary adapters and measured delta** — module-level adapters now validate bulk-enqueue items in one `TaskQ` boundary call and decode each SQL claim batch as one state-checked projection. Fixed-seed toy B2/B3 runs used five repetitions and fresh databases before/after: B2 median throughput 33,029.69→33,216.71 rows/s (+0.57%), worst p99 30.35→30.95 ms (+2.00%); B3 median throughput 798.42→799.90 rows/s (+0.18%), worst p99 3.76→3.09 ms (-17.63%). B2/B3 call SQL directly and do not traverse these Pydantic adapters, so all deltas are recorded as harness/environment noise, not a performance win (285/285 on PG18).
 - [x] **S3-PREP-02 · Tagged protocol result unions** — split enqueue dispositions on `status` and all six fenced settlement dispositions on `result` into Pydantic discriminated unions with public concrete variants and module-level parsers; Tier-0 parity proves the tag sets equal the closed protocol outcomes, while eight frozen representative vectors prove byte-identical JSON with no wire-contract change, ADR, or version bump (283/283 on PG18).
 - [x] **S3-PREP-01 · Direction-aware extras policy** — documented the ADR-005 boundary rule in `taskq.protocol`: inbound enqueue command/bulk-item models now forbid unknown fields so typos fail locally, while outbound projections/results explicitly ignore additive fields for forward-compatible decoding; typo and unknown-result vectors bring PG18 to 281/281 without changing wire or SQL contracts.

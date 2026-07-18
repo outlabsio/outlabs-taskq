@@ -4,7 +4,7 @@
 
 ## Where the project stands
 
-Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; Stage 2B's worker execution kernel and PG16/PG18 evidence are complete, and S2-05 remains gated pending round 4.
+Design is complete and has passed two design reviews (round 1 → ADR-001..010; round 2 → ADR-011 + spec v1.6 with all 19 findings folded in). The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1's implementation reached its internal exit gates, and all findings from the [round-3 implementation review](./design-review-3/RESPONSE.md) are remediated. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; the [round-4 response](./design-review-4/RESPONSE.md) blocks S2-05 on a narrow worker-kernel remediation while leaving the SQL safety core and upgrade path intact.
 
 ## Stage 1 — secure SQL kernel (COMPLETE)
 
@@ -51,6 +51,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 **Stage 2B complete:** S2-04-AUDIT makes every worker acceptance row permanent with repeated barrier races, real-SQL budget/attempt/event conservation, committed-response replay, zero task/exception/thread/pool leakage, Python 3.12/3.13 import isolation, and worker-aware smoke checks for every wheel/sdist core/HTTP/OutLabs install. The exact full suite is **279/279 plus the million-row plan gate on PostgreSQL 16.14 and 18.3**, and the clean Python-3.13 worker/unit lane is **149/149**. S2-05 stays closed until the round-4 review of Stage 2B and the contract-0.1.2 upgrade path is adjudicated.
 
 **Round-4 handoff ready:** the immutable [review request](./design-review-4/REQUEST.md) requires an independent contract-0.1.2 catalog/upgrade audit and adversarial worker review, with R2-11 live-sync safety, settlement replay, fatal stop, races, SQL conservation, resource cleanup, packaging, and CI as explicit targets. S2-05 remains closed until its response is adjudicated.
+
+**Round-4 verdict blocked:** the immutable [response](./design-review-4/RESPONSE.md) verified the database safety and contract-0.1.2 upgrade core, then executed counterexamples for heartbeat loss during settlement and incorrect external-task cancellation. R4-01..08 must land as a worker-local remediation with permanent race/oracle evidence on PostgreSQL 16 and 18; S2-05 remains closed and no further full review round is required for that gate.
 
 ## Stage 3 — FastAPI + outlabs-auth
 
