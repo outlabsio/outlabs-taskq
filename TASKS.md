@@ -25,14 +25,13 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2B S2-04 specification open** — contract 0.1.2 is implemented, verified, and cross-version green |
+| Stage | **Stage 2B worker implementation open** — S2-04 lifecycle/API/acceptance contracts are frozen; S2-04A is next |
 | Suite | 221/221 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Freeze the S2-04 worker lifecycle, cancellation matrix, APIs, and acceptance evidence |
+| Next review | Implement S2-04A execution primitives and deterministic harness utilities |
 
 ## Now — Stage 2B worker runtime
 
-- [ ] **S2-04-SPEC** — freeze worker lifecycle, state machine, cancellation matrix, module/API boundary, and acceptance matrix
 - [ ] **S2-04A** — execution context, cancellation token, closed handler-result types, sync/async registration, and deterministic test utilities
 - [ ] **S2-04B** — heartbeat-per-job and fenced per-job supervision
 - [ ] **S2-04C** — verb-aware settlement replay policy and programmable lost-response injection
@@ -58,6 +57,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-04-SPEC · Worker-runtime contracts frozen** — the new Tier-3 specification fixes the S2-04-only module/API boundary, closed result normalization, cancellation precedence, monotonic lease-derived heartbeat state machine, verb-aware replay, R2-11 sync honesty, bounded supervisor/soft stop, deterministic harness, and A/B/C/D/audit acceptance matrix; S2-05 and Stage 3 remain excluded.
 - [x] **S2-CI-01 · Contract 0.1.2 implemented and proven** — immutable migration `0003` appends `claimed_job.lease_seconds`, returns the exact effective duration, advances meta without changing the 40-function surface, and is decoded by the Python transport; `verify()` plus an independent ordered catalog assertion, default/stamped/override vectors, fresh install, and the full `0001 → 0002 → 0003` upgrade chain pass on PG18.3 and PG16.14 (221/221 plus the million-row plan gate on both).
 - [x] **S2-CQ-01 · Effective claimed lease adjudicated docs-first** — accepted ADR-013 and amended Protocol v1, the Function Manifest, and Unified Spec §14 before SQL: contract 0.1.2 appends the exact effective `lease_seconds`, retains `lease_expires_at`, and bans client-wall-clock duration derivation; implementation was separately gated as S2-CI-01.
 - [x] **S2-AUDIT-03 · Function-specific outcome enforcement** — every scalar and composite transport result is checked against its command's own protocol-owned outcome set; rollback-only wrong-command outcomes become `TQ500` even when the value is valid for a different command (217/217 on PG18 and PG16, plus the plan gate on both).

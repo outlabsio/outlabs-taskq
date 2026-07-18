@@ -38,6 +38,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Contract 0.1.2 implementation green:** immutable migration 0003, the exact verifier, independent ordered catalog assertion, Python transport decoding, queue-default/task-stamped/claim-override vectors, and the full fresh plus `0001 → 0002 → 0003` upgrade paths pass on PostgreSQL 16.14 and 18.3. The full **221/221** suite and million-row plan gate are green on both. S2-04-SPEC is open; S2-05 and Stage 3 remain closed.
 
+**S2-04 specification frozen:** the [Stage 2B Worker Runtime Specification](./Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) fixes the worker-only boundary, closed handler intents, execution context, cancellation precedence, monotonic heartbeat state machine, verb-aware settlement replay, bounded sync/async execution, soft stop, deterministic harness, and the S2-04A..D/audit acceptance matrix. S2-04A is open; claiming/NOTIFY/CLI remain S2-05 and integrations remain Stage 3.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
