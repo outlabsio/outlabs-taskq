@@ -140,7 +140,14 @@ class ScriptedTransport:
     ) -> SettleResult:
         return await self._next(
             "complete",
-            {"job_id": job_id, "attempt_id": attempt_id, "worker_id": worker_id},
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "result": result,
+                "stats": stats,
+                "followups": followups,
+            },
             SettleOkResult(job_status=JobStatus.SUCCEEDED, scheduled_at=None),
         )
 
@@ -162,7 +169,11 @@ class ScriptedTransport:
                 "job_id": job_id,
                 "attempt_id": attempt_id,
                 "worker_id": worker_id,
+                "error": error,
                 "retryable": retryable,
+                "retry_after_seconds": retry_after_seconds,
+                "progress": progress,
+                "stats": stats,
             },
             (
                 SettleRetryScheduledResult(job_status=JobStatus.QUEUED, scheduled_at=None)
@@ -181,7 +192,18 @@ class ScriptedTransport:
         reason: str | None = None,
         progress: Mapping[str, Any] | None = None,
     ) -> SettleResult:
-        return await self._settle_default("snooze", job_id, attempt_id, worker_id)
+        return await self._next(
+            "snooze",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "delay_seconds": delay_seconds,
+                "reason": reason,
+                "progress": progress,
+            },
+            SettleOkResult(job_status=JobStatus.QUEUED, scheduled_at=None),
+        )
 
     async def release(
         self,
@@ -193,12 +215,32 @@ class ScriptedTransport:
         delay_seconds: int = 0,
         progress: Mapping[str, Any] | None = None,
     ) -> SettleResult:
-        return await self._settle_default("release", job_id, attempt_id, worker_id)
+        return await self._next(
+            "release",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "cause": cause,
+                "delay_seconds": delay_seconds,
+                "progress": progress,
+            },
+            SettleOkResult(job_status=JobStatus.QUEUED, scheduled_at=None),
+        )
 
     async def cancel_running(
         self, job_id: UUID, attempt_id: UUID, worker_id: str, reason: str
     ) -> SettleResult:
-        return await self._settle_default("cancel_running", job_id, attempt_id, worker_id)
+        return await self._next(
+            "cancel_running",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "reason": reason,
+            },
+            SettleOkResult(job_status=JobStatus.CANCELLED, scheduled_at=None),
+        )
 
     async def _settle_default(
         self, command: str, job_id: UUID, attempt_id: UUID, worker_id: str

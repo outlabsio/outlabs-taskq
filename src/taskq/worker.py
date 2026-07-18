@@ -593,7 +593,10 @@ class WorkerSupervisor:
                 progress=claim.progress,
             )
 
-        report = await self._settle_with_retry(claim.job_id, CommandName.RELEASE, operation)
+        try:
+            report = await self._settle_with_retry(claim.job_id, CommandName.RELEASE, operation)
+        except (TaskqValidationError, TaskqCapabilityError):
+            return self._runtime_failure(claim.job_id, CommandName.RELEASE)
         if report.state is JobRunState.SETTLED:
             return report.model_copy(update={"outcome": JobRunOutcome.NO_HANDLER})
         return report
@@ -758,9 +761,12 @@ class WorkerSupervisor:
                 progress=progress,
             )
 
-        failed = await self._settle_with_retry(
-            claim.job_id, CommandName.FAIL, terminal_fail, control=control
-        )
+        try:
+            failed = await self._settle_with_retry(
+                claim.job_id, CommandName.FAIL, terminal_fail, control=control
+            )
+        except (TaskqValidationError, TaskqCapabilityError):
+            return self._runtime_failure(claim.job_id, CommandName.FAIL)
         if failed.state is not JobRunState.SETTLED:
             return failed
         return JobRunReport(

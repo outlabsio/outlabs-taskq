@@ -171,6 +171,7 @@ async def test_lost_response_retries_identical_verb_and_runs_handler_once(
     report = await running
     assert report.state is JobRunState.SETTLED
     assert [call.command for call in transport.calls] == [command, command]
+    assert transport.calls[0].arguments == transport.calls[1].arguments
     assert transport.semantic_applications[command] == 1
     if handler is complete_handler:
         assert calls == 1
@@ -328,6 +329,20 @@ async def test_nonretryable_settlement_error_is_fatal_and_not_retried() -> None:
     await supervisor.aclose()
 
 
+@pytest.mark.parametrize("error", [TaskqValidationError(), TaskqCapabilityError()])
+async def test_no_handler_contract_error_becomes_fatal_report(error: Exception) -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script("release", error)
+    supervisor = _supervisor(transport, clock, None)
+    report = await supervisor.run_job(_claim("missing"))
+    assert report.state is JobRunState.RUNTIME_FAILED
+    assert report.outcome is JobRunOutcome.RUNTIME_ERROR
+    assert report.settlement_command == "release"
+    assert report.fatal
+    await supervisor.aclose()
+
+
 @pytest.mark.parametrize(
     ("error", "fatal"),
     [(TaskqValidationError(), False), (TaskqCapabilityError(), True)],
@@ -343,6 +358,22 @@ async def test_followup_rejection_terminal_fails_parent_before_optional_soft_sto
     assert report.outcome is JobRunOutcome.FOLLOWUP_REJECTED
     assert report.fatal is fatal
     assert report.state is (JobRunState.RUNTIME_FAILED if fatal else JobRunState.SETTLED)
+    assert [call.command for call in transport.calls] == ["complete", "fail"]
+    await supervisor.aclose()
+
+
+@pytest.mark.parametrize("error", [TaskqValidationError(), TaskqCapabilityError()])
+async def test_followup_escape_contract_error_becomes_fatal_report(error: Exception) -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script("complete", TaskqValidationError())
+    transport.script("fail", error)
+    supervisor = _supervisor(transport, clock, followup_handler)
+    report = await supervisor.run_job(_claim())
+    assert report.state is JobRunState.RUNTIME_FAILED
+    assert report.outcome is JobRunOutcome.RUNTIME_ERROR
+    assert report.settlement_command == "fail"
+    assert report.fatal
     assert [call.command for call in transport.calls] == ["complete", "fail"]
     await supervisor.aclose()
 
