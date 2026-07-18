@@ -19,6 +19,7 @@ from taskq.errors import (
 )
 from taskq.protocol import ClaimedJob, EnqueueResult, EnqueueStatus, TqCode
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
+from taskq.transport import TaskqTransport
 
 __all__ = [
     "ClaimedJob",
@@ -28,6 +29,7 @@ __all__ = [
     "RetryValue",
     "Task",
     "TaskRegistry",
+    "TaskqTransport",
     "TaskqBackpressureError",
     "TaskqCapabilityError",
     "TaskqConfigError",
