@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..011](docs/adr/README.md) accepted; both review rounds folded in; protocol v1 + 0.1 function manifest canonical). **Stage 0 is exit-ready** — next: migration 0001 + harness per the [build plan](docs/Task%20Queue%20Build%20Plan.md).
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..011](docs/adr/README.md) accepted; both review rounds folded in; protocol v1 + 0.1 function manifest canonical). **Stage 1 in progress** — kernel migration + harness landed, 42/42 contract tests green on live PostgreSQL. Live task board: [`TASKS.md`](TASKS.md); stage strategy: the [build plan](docs/Task%20Queue%20Build%20Plan.md).
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -14,6 +14,7 @@ Start here:
 |---|---|
 | [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..011) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
+| [`TASKS.md`](TASKS.md) | **Live execution tracker — start here to contribute** |
 | [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |
 | [`docs/Task Queue Transport Protocol v1.md`](docs/Task%20Queue%20Transport%20Protocol%20v1.md) | **Canonical wire contract** (ADR-005 satisfied) |
 | [`docs/Task Queue 0.1 Function Manifest.md`](docs/Task%20Queue%200.1%20Function%20Manifest.md) | **Canonical 0.1 SQL surface** — migration 0001 derives from this |

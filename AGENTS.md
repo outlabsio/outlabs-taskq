@@ -1,6 +1,8 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library. **Docs first** — implementation is pre-alpha.
+Postgres-native task queue library, now in implementation (Stage 1).
+
+**Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 
 ## Source of truth
 
@@ -9,7 +11,7 @@ Postgres-native task queue library. **Docs first** — implementation is pre-alp
 | **Tier map / authority chain (read first)** | `docs/README.md` |
 | **Locked contracts (Tier 0)** | `docs/Task Queue Transport Protocol v1.md`, `docs/Task Queue 0.1 Function Manifest.md` |
 | **Accepted decisions (Tier 1)** | `docs/adr/` (ADR-001..011) |
-| What to do next (Tier 2) | `docs/Task Queue Build Plan.md` |
+| What to do next (Tier 2) | `TASKS.md` (task board) + `docs/Task Queue Build Plan.md` (stages) |
 | Destination design (Tier 3) | `docs/Task Queue — Unified Design Spec.md` (v1.6) |
 | Package + auth boundaries | `docs/Task Queue Library Extraction Design Brief.md` |
 | Queue-scoped authorization + provisioning | `docs/Task Queue Authorization & Queue Permissions.md` |
@@ -18,6 +20,8 @@ Postgres-native task queue library. **Docs first** — implementation is pre-alp
 | Peer provenance | `docs/Task Queue Peer Patterns Research.md` |
 
 ## Hard rules
+
+0. Update `TASKS.md` in the same commit as the work it describes.
 
 1. SQL functions in schema `taskq` are the contract. Python is a client. Schema name is FIXED (`taskq`, ADR-002).
 2. Core package must import without FastAPI and without `outlabs-auth`.

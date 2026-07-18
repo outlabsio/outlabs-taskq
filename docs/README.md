@@ -23,7 +23,7 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 
 ## Tier 2 — operating plan
 
-[Build Plan](./Task%20Queue%20Build%20Plan.md) — stages 1–8 with exit gates. The only doc that answers "what do we do next."
+Two living docs: [`TASKS.md`](../TASKS.md) (repo root — the task board, cold-start steps, definition of done; **agents start there**) and the [Build Plan](./Task%20Queue%20Build%20Plan.md) (stages 1–8 with exit gates). Board = tasks; plan = stages; nothing else records progress.
 
 ## Tier 3 — design (destination)
 
@@ -47,7 +47,7 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 
 ## Rules of the corpus
 
-1. **New contract content** goes in a Tier-0 doc via ADR; **new decisions** are new ADRs; **new design detail** extends the owning Tier-3 doc; **status/progress** goes only in the Build Plan. No new top-level docs without a tier assignment here.
+1. **New contract content** goes in a Tier-0 doc via ADR; **new decisions** are new ADRs; **new design detail** extends the owning Tier-3 doc; **status/progress** goes only in `TASKS.md` (tasks) and the Build Plan (stages). No new top-level docs without a tier assignment here.
 2. **Tier-4 files are never edited** (their supersession is recorded in ADRs, not in them).
 3. **Third-party queue projects are never named** anywhere in this repo — generic descriptors only (standing rule since the initial commit).
 4. Route/URL sketches outside the Protocol doc are illustrative by definition.

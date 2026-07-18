@@ -1,0 +1,61 @@
+# outlabs-taskq — Execution Tracker
+
+> **Tier 2 (live).** Task-level truth for the implementation: what is in flight, what is next, what is done. The [Build Plan](docs/Task%20Queue%20Build%20Plan.md) owns stage strategy and exit gates; this file owns the granular work. **Update this file in the same commit as the work it describes** — a task not updated here didn't happen.
+
+## Cold start (any agent, from zero)
+
+1. Read `AGENTS.md` (hard rules) → `docs/README.md` (tier map — Tier-0 contracts beat everything) → this file.
+2. Environment: Python 3.12+, `uv`, and a local PostgreSQL. A dev Postgres 18 usually runs via docker (`docker ps` → container from localDevServices, `postgres/postgres@localhost:5432`). Create/reuse the scratch DB:
+   `psql postgresql://postgres:postgres@localhost:5432/postgres -c "CREATE DATABASE taskq_stage1_test"` (ignore exists-error).
+   Caveat: migration 0001 creates six cluster-wide `taskq_*` roles on that server — expected on a dev cluster; never point tests at a shared/production server.
+3. Run everything:
+   ```bash
+   uv sync --extra dev
+   uv run pytest tests/ -q                                   # T1 only (no DSN)
+   TASKQ_TEST_DSN="postgresql://postgres:postgres@localhost:5432/taskq_stage1_test" \
+     uv run pytest tests/ -q                                 # T1 + T2 (must be 42/42 before you start)
+   uv run ruff check .
+   ```
+4. Pick the topmost unchecked task in **Now**, or the next in **Next**. Work it to its acceptance criteria.
+5. Definition of done, every task: suite green (no skips you introduced), `ruff check` clean, docs amended if the task's row says so, this file updated (move the task, one-line result note), one commit ending with the repo's `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` trailer convention.
+
+**Standing rules (non-negotiable):** Tier-0 contracts and ADRs win every conflict — if implementation reveals a contract bug, STOP, record it under **Contract questions** below, and fix docs-first (errata/ADR), never code-around. Never name third-party queue projects. Never edit Tier-4 historical docs. New SQL functions require a Function Manifest entry first.
+
+## Status snapshot
+
+| | |
+|---|---|
+| Stage | **1 — secure SQL kernel** (opening slice landed) |
+| Suite | 42/42 green vs live PG 18.3 (`3e7d55d`) |
+| Contracts | Protocol v1 + 0.1 Function Manifest (+ errata §8) |
+| Next review | Round 3 after Stage-1 exit gate (migration 0001 + harness vs manifest) |
+
+## Now — Stage 1 exit gate
+
+- [ ] **S1-01 · T3 choreographed races.** New `tests/test_t3_races.py` per Harness doc §2: two-session advisory-lock barriers + hold-open transactions. Cases: concurrent same-key enqueue (one `created`), double-claim impossibility (`uq_job_attempts_running`), fence `lost` after reap, verb-aware `settle_conflict` under race, concurrency-cap no-overshoot at `max_running=1` under 10 concurrent claims, paused-mid-claim. Acceptance: deterministic (loop 20× stable), runs in T2's DSN env.
+- [ ] **S1-02 · T3-R randomized stress.** K producers × M workers × mixed verbs for a bounded wall-clock (default 30s, env-scalable); invariants only: zero duplicate claims, conservation (every enqueued job exactly one terminal/active state after drain + final tick), no wedged rows. Seed logged for replay.
+- [ ] **S1-03 · T4 stateful model.** `tests/test_t4_model.py`: hypothesis stateful machine per Harness doc §3 — ops enqueue/claim/complete/fail/release/snooze/cancel/lease-rewind(tick)/redrive against real PG, model asserts §3.3 budget table + ≤1 running attempt + dedup + typed-results-only. Time travel via test-only owner function installed by conftest into the scratch DB only (never in migrations).
+- [ ] **S1-04 · verify corruption matrix.** Extend T2: each hardening axis deliberately broken then restored — drop pinned search_path, grant PUBLIC execute, wrong owner, ledger checksum tamper, missing role — `verify()` must name each precisely.
+- [ ] **S1-05 · PG16 lane.** Run the full suite against a PostgreSQL 16 container (uuid7 SQL fallback path). Fix version-specific breaks; document any PG16 caveat in the manifest errata. Acceptance: same 100% pass on 16 and 18.
+- [ ] **S1-06 · 1M-row plan checks.** Seed 1M jobs (mixed statuses) in a scratch DB; `EXPLAIN (ANALYZE, BUFFERS)` on claim, dedup insert, reap select, stats snapshot — assert index families per Harness doc (structural asserts, not cost numbers). Store the queries as `tests/test_plans.py` (`taskq_sql`-marked, opt-in via env `TASKQ_PLAN_CHECKS=1`).
+- [ ] **S1-07 · B1–B4 benchmark smoke.** `bench/` runner skeleton + workloads B1 (single enqueue), B2 (bulk), B3 (claim+no-op settle empty/deep), B4 (mixed sustained) at toy scale, JSON result artifact per Harness doc §5 method rules. No baselines yet — the harness must run, record, and print.
+- [ ] **S1-08 · CI wiring.** GitHub Actions per Harness doc §4: lint, import-isolation (core installs without extras), T1, sql-contract on PG16+PG18 service containers, races job. Branch protection note in README.
+- [ ] **S1-09 · Stage-1 exit review packet.** When S1-01..08 are green: update Build Plan stage status, assemble the round-3 review prompt (migration 0001 + runner + suites vs manifest), hand to Andi.
+
+## Next — Stage 2 kickoff (do not start before S1-09)
+
+- [ ] S2-01 typed `Task[In, Out]` registry + wire names/aliases (features 01/03/08-lite)
+- [ ] S2-02 async SQL transport implementing the protocol commands + typed results
+- [ ] S2-03 SQLAlchemy `AsyncSession` transactional enqueue (`session=`)
+- [ ] S2-04 worker supervisor: heartbeat-per-job, verb-aware settle retries, R2-11 cancellation contracts, soft stop (feature 11)
+- [ ] S2-05 NOTIFY listener + poll loop (feature 06); `taskq worker` CLI
+- [ ] S2-06 `taskq.testing` fixtures + inline transport (feature 10)
+
+## Contract questions (STOP-and-record before coding around)
+
+*(none open — manifest errata §8 resolved the Stage-1 set)*
+
+## Done
+
+- [x] **Design phase** — spec v1.6, ADR-001..011, two review rounds folded, Protocol v1 + Function Manifest canonical, docs constitution (`6cf6793`..`e1237c5`)
+- [x] **S1 opening slice** — migration `0001_initial.sql` (6 roles, 39 hardened functions, self-checking), ADR-004 runner (`migrate`/`migrate_sync`/`verify` + CLI), T1 (26) + T2 (15) suites, 42/42 green vs PG 18.3, wheel packaging fixed, single-writer ledger + typed-cancel reconciliations in manifest errata §8 (`3e7d55d`)
