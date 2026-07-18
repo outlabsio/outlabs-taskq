@@ -22,7 +22,9 @@ Build, in one vertical slice against ephemeral PostgreSQL 18:
 
 Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/handler-result unions; async SQL transport implementing `TaskqTransport`; SQLAlchemy `AsyncSession` transactional enqueue; worker supervisor (heartbeat-per-job, verb-aware settle retries, R2-11 split cancellation contracts, soft stop); NOTIFY listener + poll; `taskq worker` CLI; `taskq.testing` fixtures + inline transport. Usability gate: a new FastAPI service goes install → typed task <15 lines → transactional enqueue → one-command worker → diagnose a retry from CLI/logs without opening tables.
 
-**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. The required Stage-1 remediation now passes PostgreSQL 16 and 18, so S2-01 is open.
+**Stage 2A specification drafted 2026-07-18:** the [typed-enqueue implementation specification](./Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) freezes the S2-01..03 module/API boundary and acceptance matrix. The required Stage-1 remediation passes PostgreSQL 16 and 18, which opened S2-01.
+
+**Stage 2A implementation:** S2-01 is complete with immutable generic tasks, collision-safe canonical/alias registration, closed enqueue and TQ values, fence-redacted claim models, and SQLSTATE-only public error normalization. S2-02 (the complete async SQL transport) is next.
 
 ## Stage 3 — FastAPI + outlabs-auth
 

@@ -26,17 +26,16 @@
 | | |
 |---|---|
 | Stage | **2A open** — Stage 1 and all round-3 remediation complete on PG16 + PG18 |
-| Suite | 126/126 regular + opt-in 1M plan gate green vs PG 18.3 and PG 16.14 |
+| Suite | 188/188 regular + opt-in 1M plan gate green vs PG 18.3; Stage-1 126/126 + plan gate green vs PG 16.14 |
 | Contracts | Protocol v1 + Function Manifest 0.1.1 (+ ADR-012) |
 | Next review | Round-3 findings fully remediated; Stage 2A acceptance matrix governs S2-01..03 |
 
 ## Now — Stage 2A typed enqueue
 
-- [ ] S2-01 typed `Task[In, Out]` registry + wire names/aliases (features 01/03/08-lite)
+- [ ] S2-02 async SQL transport implementing the protocol commands + typed results
 
 ## Next — Stage 2A typed enqueue
 
-- [ ] S2-02 async SQL transport implementing the protocol commands + typed results
 - [ ] S2-03 SQLAlchemy `AsyncSession` transactional enqueue (`session=`)
 
 ## Later — Stage 2 worker runtime
@@ -55,6 +54,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-01 · Typed task registry and protocol values** — immutable generic Pydantic task metadata validates canonical names, queues, aliases, stamped retry policy, handler annotations, and JSON payloads; collision-atomic deterministic registration preserves rename dispatch; the closed enqueue/TQ models, fence-redacted claim projection, SQLSTATE-only typed errors, safe public exports, and 62 unit/property vectors bring the PG18 suite to 188/188.
 - [x] **R3-F08 · Cross-version exact-catalog normalization** — the exact constraint axis now excludes PostgreSQL 18's version-specific `NOT NULL` projection while table shapes continue to close nullability; the identical 126-test suite and opt-in million-row plan gate pass on PostgreSQL 16.14 and 18.3.
 - [x] **R3-F07 · Plan-query drift detection** — every representative million-row structural query is now bound to normalized fragments from the actual owning function definition; a rollback-only full-scan mutation proves the regular guard fails on function drift and recovers after rollback (126/126 plus the opt-in gate on PG18).
 - [x] **R3-F06 · Benchmark reset and conservation** — every B1–B4 scenario now creates/migrates/fingerprints/drops its own fresh database; B4 stops and joins producers before a bounded worker drain, then records and asserts accepted = terminal + active with zero active/running jobs or attempts (all four toy smokes green, no databases leaked).

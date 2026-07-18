@@ -1,0 +1,346 @@
+"""S2-01 typed task, protocol value, error, and registry contracts."""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from uuid import UUID, uuid4
+
+import pytest
+from hypothesis import given, strategies as st
+from pydantic import BaseModel, ValidationError
+
+from taskq import (
+    ClaimedJob,
+    EnqueueResult,
+    EnqueueStatus,
+    RetryStrategy,
+    Task,
+    TaskRegistry,
+    TaskqConfigError,
+    UnknownTaskError,
+)
+from taskq.errors import (
+    TaskqBackpressureError,
+    TaskqCapabilityError,
+    TaskqConflictError,
+    TaskqInternalError,
+    TaskqNotFoundError,
+    TaskqUnavailableError,
+    TaskqValidationError,
+    TaskqVersionError,
+    taskq_error_from_exception,
+)
+from taskq.protocol import TQ_ERROR_REGISTRY, TqCode
+
+
+class Input(BaseModel):
+    value: int
+
+
+class Output(BaseModel):
+    doubled: int
+
+
+def _task(
+    name: str = "math.double",
+    *,
+    aliases: tuple[str, ...] = (),
+    queue: str = "default",
+) -> Task[Input, Output]:
+    return Task(
+        name=name,
+        queue=queue,
+        input_model=Input,
+        output_model=Output,
+        aliases=aliases,
+    )
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["a", "emails.send", "v2.email_2.send_now", "a" * 120],
+)
+def test_valid_wire_names(name: str) -> None:
+    assert _task(name).name == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["", ".email", "email.", "Email.send", "email-send", "1email.send", "a..b", "a" * 121],
+)
+def test_invalid_wire_names(name: str) -> None:
+    with pytest.raises(TaskqConfigError, match="wire-name"):
+        _task(name)
+
+
+@pytest.mark.parametrize("queue", ["a", "queue_2", "0", "q" * 57])
+def test_valid_queue_names(queue: str) -> None:
+    assert _task(queue=queue).queue == queue
+
+
+@pytest.mark.parametrize("queue", ["", "Email", "email.send", "email-send", "q" * 58])
+def test_invalid_queue_names(queue: str) -> None:
+    with pytest.raises(TaskqConfigError, match="queue"):
+        _task(queue=queue)
+
+
+def test_task_metadata_is_immutable_and_payload_is_json_mode() -> None:
+    task = _task()
+    assert task.validate_payload({"value": 4}) == {"value": 4}
+    with pytest.raises(ValidationError):
+        task.validate_payload({"value": "not-an-int"})
+    with pytest.raises((AttributeError, TypeError)):
+        task.queue = "other"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"aliases": ("old", "old")}, "aliases"),
+        ({"aliases": ("math.double",)}, "aliases"),
+        ({"retry": 0}, "retry"),
+        ({"retry": 101}, "retry"),
+        ({"priority": -1}, "priority"),
+        ({"priority": 1001}, "priority"),
+        ({"lease_seconds": 14}, "lease_seconds"),
+        ({"lease_seconds": 86401}, "lease_seconds"),
+    ],
+)
+def test_invalid_task_policy(kwargs: dict[str, object], message: str) -> None:
+    with pytest.raises(TaskqConfigError, match=message):
+        Task(
+            name="math.double",
+            queue="default",
+            input_model=Input,
+            output_model=Output,
+            **kwargs,
+        )
+
+
+def test_retry_strategy_is_frozen_and_closed() -> None:
+    strategy = RetryStrategy(max_attempts=5, mode="fixed", retry_exceptions=(TimeoutError,))
+    assert strategy.max_attempts == 5
+    with pytest.raises(ValidationError):
+        RetryStrategy(mode="random")
+    with pytest.raises(ValidationError):
+        RetryStrategy(base_seconds=60, cap_seconds=30)
+    with pytest.raises(ValidationError):
+        strategy.max_attempts = 4  # type: ignore[misc]
+
+
+async def valid_handler(payload: Input) -> Output:
+    return Output(doubled=payload.value * 2)
+
+
+def sync_handler(payload: Input) -> Output:
+    return Output(doubled=payload.value * 2)
+
+
+async def wrong_handler(payload: Output) -> Input:
+    return Input(value=payload.doubled)
+
+
+def test_optional_handler_annotations_are_validated() -> None:
+    task = Task(
+        name="math.double",
+        queue="default",
+        input_model=Input,
+        output_model=Output,
+        handler=valid_handler,
+    )
+    assert task.handler is valid_handler
+    with pytest.raises(TaskqConfigError, match="async"):
+        Task(
+            name="math.sync",
+            queue="default",
+            input_model=Input,
+            output_model=Output,
+            handler=sync_handler,
+        )
+    with pytest.raises(TaskqConfigError, match="annotations"):
+        Task(
+            name="math.wrong",
+            queue="default",
+            input_model=Input,
+            output_model=Output,
+            handler=wrong_handler,
+        )
+
+
+def test_alias_resolution_and_deterministic_iteration() -> None:
+    first = _task("math.double", aliases=("math.double_v1",))
+    second = _task("math.triple")
+    registry = TaskRegistry([first, second])
+    assert list(registry) == [first, second]
+    assert registry.resolve("math.double_v1") is first
+    assert registry.canonical("math.double_v1") == "math.double"
+    assert registry.require(first) is first
+    assert registry.require("math.triple") is second
+
+
+@pytest.mark.parametrize(
+    "candidate",
+    [
+        _task("math.double"),
+        _task("math.double_v1"),
+        _task("math.other", aliases=("math.double",)),
+        _task("math.other", aliases=("math.double_v1",)),
+    ],
+)
+def test_every_registry_collision_direction_is_atomic(candidate: Task[Input, Output]) -> None:
+    existing = _task("math.double", aliases=("math.double_v1",))
+    registry = TaskRegistry([existing])
+    before = list(registry)
+    with pytest.raises(TaskqConfigError, match="collision"):
+        registry.register(candidate)
+    assert list(registry) == before
+    assert registry.resolve("math.other") is None
+
+
+def test_register_many_is_atomic_across_the_whole_batch() -> None:
+    existing = _task("math.double")
+    registry = TaskRegistry([existing])
+    with pytest.raises(TaskqConfigError, match="collision"):
+        registry.register_many([_task("math.triple"), _task("math.triple")])
+    assert list(registry) == [existing]
+    assert registry.resolve("math.triple") is None
+
+
+def test_require_rejects_unknown_name_and_unregistered_lookalike() -> None:
+    registered = _task()
+    registry = TaskRegistry([registered])
+    with pytest.raises(UnknownTaskError):
+        registry.require("missing")
+    with pytest.raises(UnknownTaskError):
+        registry.require(_task())
+
+
+_segment = st.from_regex(r"[a-z][a-z0-9_]{0,15}", fullmatch=True)
+_wire_name = st.lists(_segment, min_size=1, max_size=4).map(".".join)
+
+
+@given(_wire_name)
+def test_generated_valid_names_round_trip_as_aliases(name: str) -> None:
+    canonical = "root.task" if name != "root.task" else "other.task"
+    task = _task(canonical, aliases=(name,))
+    registry = TaskRegistry([task])
+    assert registry.resolve(name) is task
+    assert registry.canonical(name) == canonical
+
+
+@pytest.mark.parametrize("status", list(EnqueueStatus))
+def test_enqueue_result_is_closed_consistent_and_frozen(status: EnqueueStatus) -> None:
+    result = EnqueueResult(
+        status=status,
+        job_id=uuid4(),
+        created=status is EnqueueStatus.CREATED,
+        queue="default",
+        job_type="math.double",
+    )
+    assert result.ok
+    with pytest.raises(ValidationError):
+        EnqueueResult(
+            status=status,
+            job_id=uuid4(),
+            created=status is not EnqueueStatus.CREATED,
+            queue="default",
+            job_type="math.double",
+        )
+    with pytest.raises(ValidationError):
+        EnqueueResult(
+            status="replaced",
+            job_id=uuid4(),
+            created=False,
+            queue="default",
+            job_type="math.double",
+        )
+
+
+def test_claimed_job_fence_is_excluded_from_repr_and_dump() -> None:
+    fence = uuid4()
+    job = ClaimedJob(
+        job_id=uuid4(),
+        queue="default",
+        job_type="math.double",
+        priority=100,
+        payload={"value": 3},
+        headers={},
+        progress=None,
+        attempt_id=fence,
+        attempt_number=1,
+        failure_count=0,
+        max_attempts=5,
+        lease_expires_at=datetime.now(UTC),
+    )
+    assert job.attempt_id == fence
+    assert str(fence) not in repr(job)
+    assert "attempt_id" not in job.model_dump()
+    assert str(fence) not in job.model_dump_json()
+
+
+class DriverError(Exception):
+    def __init__(self, state: str | None, message: str = "driver secret") -> None:
+        self.sqlstate = state
+        super().__init__(message)
+
+
+@pytest.mark.parametrize(
+    ("code", "error_type"),
+    [
+        (TqCode.NOT_FOUND, TaskqNotFoundError),
+        (TqCode.CONFLICT, TaskqConflictError),
+        (TqCode.VALIDATION, TaskqValidationError),
+        (TqCode.VERSION, TaskqVersionError),
+        (TqCode.BACKPRESSURE, TaskqBackpressureError),
+        (TqCode.INTERNAL, TaskqInternalError),
+        (TqCode.CAPABILITY, TaskqCapabilityError),
+        (TqCode.UNAVAILABLE, TaskqUnavailableError),
+    ],
+)
+def test_closed_tq_registry_normalizes_from_sqlstate_only(
+    code: TqCode, error_type: type[Exception]
+) -> None:
+    source = DriverError(code.value)
+    error = taskq_error_from_exception(source)
+    assert isinstance(error, error_type)
+    assert error.code is code
+    assert error.retryable is TQ_ERROR_REGISTRY[code].retryable
+    assert error.cause is source
+    assert "driver secret" not in str(error)
+    assert "driver secret" not in repr(error)
+
+
+@pytest.mark.parametrize("state", ["08006", "53300", "57P01", "57P03"])
+def test_known_availability_states_normalize_to_tq503(state: str) -> None:
+    assert isinstance(taskq_error_from_exception(DriverError(state)), TaskqUnavailableError)
+
+
+@pytest.mark.parametrize("state", [None, "23505", "XX000", "TQ999"])
+def test_native_or_unknown_states_normalize_to_tq500(state: str | None) -> None:
+    assert isinstance(taskq_error_from_exception(DriverError(state)), TaskqInternalError)
+
+
+def test_nested_driver_error_is_found_without_reading_messages() -> None:
+    wrapper = RuntimeError("public wrapper secret")
+    wrapper.__cause__ = DriverError("TQ422", "inner secret")
+    error = taskq_error_from_exception(wrapper)
+    assert isinstance(error, TaskqValidationError)
+    assert "secret" not in str(error)
+
+
+def test_sensitive_error_details_are_removed() -> None:
+    fence = uuid4()
+    error = TaskqInternalError(
+        details={"attempt_id": fence, "dsn": "postgresql://secret", "incident": "safe-ref"}
+    )
+    assert error.details == {"incident": "safe-ref"}
+    assert str(fence) not in str(error)
+    assert "secret" not in repr(error)
+
+
+def test_public_exports_do_not_import_optional_frameworks() -> None:
+    import sys
+
+    assert "fastapi" not in sys.modules
+    assert "outlabs_auth" not in sys.modules
+    assert UUID is not None  # keep the public UUID-typed assertions explicit
