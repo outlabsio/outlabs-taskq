@@ -1,4 +1,10 @@
-"""Closed Protocol-v1 value models shared by every taskq transport."""
+"""Closed Protocol-v1 value models shared by every taskq transport.
+
+Model extras are direction-aware. Inbound command values forbid unknown fields
+so caller typos fail before crossing a transport boundary. Outbound/result
+values ignore unknown fields because ADR-005 permits additive response fields:
+an older client must continue decoding a newer compatible producer.
+"""
 
 from __future__ import annotations
 
@@ -113,7 +119,7 @@ class CancelOutcome(StrEnum):
 
 
 class EnqueueResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     status: EnqueueStatus
     job_id: UUID
@@ -135,7 +141,7 @@ class EnqueueResult(BaseModel):
 
 
 class EnqueueCommand(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     queue: str
     job_type: str
@@ -154,7 +160,7 @@ class EnqueueCommand(BaseModel):
 
 
 class EnqueueManyItem(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="forbid")
 
     job_type: str
     payload: dict[str, Any] = Field(default_factory=dict)
@@ -180,7 +186,7 @@ class ClaimState(StrEnum):
 
 
 class ClaimResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     state: ClaimState
     jobs: tuple[ClaimedJob, ...] = ()
@@ -193,7 +199,7 @@ class ClaimResult(BaseModel):
 
 
 class HeartbeatResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     ok: bool
     cancel_requested: bool
@@ -201,7 +207,7 @@ class HeartbeatResult(BaseModel):
 
 
 class SettleResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     result: SettleOutcome
     job_status: JobStatus | None
@@ -209,7 +215,7 @@ class SettleResult(BaseModel):
 
 
 class AuthorizationProjection(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     job_id: UUID
     queue: str
@@ -218,7 +224,7 @@ class AuthorizationProjection(BaseModel):
 
 
 class JobDetail(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     job_id: UUID
     queue: str
@@ -241,7 +247,7 @@ class JobDetail(BaseModel):
 
 
 class QueueStats(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     as_of: datetime
     queue: str
@@ -249,14 +255,14 @@ class QueueStats(BaseModel):
 
 
 class ContractMeta(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     contract_version: str
     capabilities: dict[str, Any]
 
 
 class Metric(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     name: str
     labels: dict[str, Any]
@@ -264,21 +270,21 @@ class Metric(BaseModel):
 
 
 class CancelResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     result: CancelOutcome
     job_status: JobStatus
 
 
 class EnsureQueueResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     result: ConfigChangeOutcome
     profile: dict[str, Any]
 
 
 class ExpireWorkerLeasesResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     matched: int
     reaped: int
@@ -286,7 +292,7 @@ class ExpireWorkerLeasesResult(BaseModel):
 
 
 class RedriveFailedResult(BaseModel):
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     redriven: int
     skipped: int
@@ -541,7 +547,7 @@ COMMAND_SPECS: Final = MappingProxyType(
 class ClaimedJob(BaseModel):
     """Runner projection; the attempt fence is intentionally non-serializable."""
 
-    model_config = ConfigDict(frozen=True)
+    model_config = ConfigDict(frozen=True, extra="ignore")
 
     job_id: UUID
     queue: str

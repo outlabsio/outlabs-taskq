@@ -34,6 +34,8 @@ from taskq.errors import (
 from taskq.protocol import (
     COMMAND_SPECS,
     CommandName,
+    EnqueueCommand,
+    EnqueueManyItem,
     SettleOutcome,
     SettleResult,
     TQ_ERROR_REGISTRY,
@@ -275,6 +277,36 @@ def test_enqueue_result_is_closed_consistent_and_frozen(status: EnqueueStatus) -
             queue="default",
             job_type="math.double",
         )
+
+
+def test_inbound_command_typo_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        EnqueueCommand.model_validate(
+            {
+                "queue": "default",
+                "job_type": "math.double",
+                "payload": {"value": 3},
+                "prioroty": 10,
+            }
+        )
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        EnqueueManyItem.model_validate(
+            {"job_type": "math.double", "payload": {"value": 3}, "prioroty": 10}
+        )
+
+
+def test_outbound_result_ignores_unknown_additive_field() -> None:
+    result = EnqueueResult.model_validate(
+        {
+            "status": "created",
+            "job_id": uuid4(),
+            "created": True,
+            "queue": "default",
+            "job_type": "math.double",
+            "future_server_field": {"added": True},
+        }
+    )
+    assert "future_server_field" not in result.model_dump()
 
 
 def test_claimed_job_fence_is_excluded_from_repr_and_dump() -> None:

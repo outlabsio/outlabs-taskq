@@ -25,14 +25,15 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2B complete; round 4 packet ready** — the worker kernel and contract-0.1.2 upgrade await external adjudication; S2-05 remains closed |
-| Suite | 279/279 regular + opt-in 1M plan gate on PG18.3 and PG16.14; clean Python 3.13 worker/unit lane 149/149 |
+| Stage | **S3-PREP boundary hardening active** — inbound extras policy is green; tagged result unions are next; round 4 remains pending and S2-05 closed |
+| Suite | 281/281 regular on PG18.3; prior PG16.14/plan/artifact evidence remains CI-gated |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | Hand off `docs/design-review-4/REQUEST.md`; adjudicate the response before opening S2-05 |
 
-## Now — gated pending round 4
+## Now — S3-PREP Python-surface only
 
-*(none — do not open S2-05 until the Stage 2B review is adjudicated)*
+- [ ] **S3-PREP-02** — tagged/discriminated enqueue and settlement result unions with byte-identical wire serialization
+- [ ] **S3-PREP-03** — module-level bulk-item/claim-batch `TypeAdapter`s and B2/B3 before/after evidence
 
 ## Next — gated after Stage 2B review
 
@@ -41,7 +42,7 @@
 
 ## Later
 
-- [ ] **S3-PREP · Pydantic boundary hardening (before any Stage-3 HTTP work).** (1) Direction-aware extras policy: inbound command models (`EnqueueCommand`, bulk items, future HTTP request bodies) get `extra="forbid"` so a typoed field fails loudly; outbound/result models stay tolerant (`extra="ignore"`) for ADR-005 additive forward-compat — document the rule in protocol.py's module docstring. (2) Convert result types (`EnqueueResult`, settle results) to tagged/discriminated unions on their status field — additive Python-surface refactor; feeds exhaustive client matching and per-variant OpenAPI schemas in Stage 3. (3) Module-level `TypeAdapter(list[...])` for bulk-enqueue items and claim batches; measure via B2/B3 before/after. (4) S2-05 CLI config goes through pydantic-settings, not hand-rolled env parsing.
+- [ ] **S3-PREP-04 guidance (deferred to S2-05)** — worker CLI configuration must use `pydantic-settings`, not hand-rolled environment parsing; do not implement configuration before S2-05 opens.
 
 *(subsequent stages remain sequenced by the Build Plan)*
 
@@ -55,6 +56,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-PREP-01 · Direction-aware extras policy** — documented the ADR-005 boundary rule in `taskq.protocol`: inbound enqueue command/bulk-item models now forbid unknown fields so typos fail locally, while outbound projections/results explicitly ignore additive fields for forward-compatible decoding; typo and unknown-result vectors bring PG18 to 281/281 without changing wire or SQL contracts.
 - [x] **S2-04-R4 · Round-4 review packet** — registered an immutable, contract-first adversarial request covering the contract-0.1.2 additive upgrade and verifier, every S2-04 execution/heartbeat/replay/lifecycle acceptance row, mandatory R2-11 live-sync counterexamples, repeated races, real-SQL conservation, resource cleanup, artifact/import isolation, CI collection, and strict absence of S2-05/Stage-3 scope; the reviewer may add only `docs/design-review-4/RESPONSE.md` and must decide whether S2-05 may open.
 - [x] **S2-04-AUDIT · Stage 2B permanent completion evidence** — five repeated, barrier-choreographed race families cover both winner orders without correctness sleeps; live SQL vectors prove complete/retry/snooze/cancel/shutdown/no-handler budget and exact event conservation plus committed-response replay; task, exception, executor-thread, and SQL-pool ledgers return to baseline; source CI imports the worker on Python 3.12/3.13 and every fresh wheel/sdist core/HTTP/OutLabs install smokes it outside the checkout. The exact full suite is 279/279 plus the million-row plan gate on PostgreSQL 18.3 and 16.14, with 149/149 in the clean Python 3.13 worker/unit lane.
 - [x] **S2-04D · Bounded concurrency and soft stop** — added synchronous slot reservation, duplicate-attempt rejection, capacity waiting, lazy bounded sync execution with active heartbeat while thread-queued, atomic intake close, cooperative/infinite drain, monotonic deadline, shared escalation, async shutdown release, honest live-sync process-exit signaling, fatal auto-stop, and complete task/executor joining; 8 deterministic vectors bring PG18 to 264/264.
