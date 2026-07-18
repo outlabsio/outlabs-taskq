@@ -23,6 +23,8 @@ from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+from uuid import uuid4
 
 import asyncpg
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -84,6 +86,29 @@ def _sqlalchemy_dsn(dsn: str) -> str:
     return "postgresql+asyncpg" + sep + rest
 
 
+def _database_dsn(dsn: str, database: str) -> str:
+    parts = urlsplit(_plain_dsn(dsn))
+    return urlunsplit((parts.scheme, parts.netloc, f"/{database}", parts.query, parts.fragment))
+
+
+async def _create_fresh_database(dsn: str, scenario: str) -> tuple[str, str]:
+    database = f"taskq_bench_{scenario.lower()}_{uuid4().hex}"
+    admin = await asyncpg.connect(_database_dsn(dsn, "postgres"))
+    try:
+        await admin.execute(f'CREATE DATABASE "{database}"')
+    finally:
+        await admin.close()
+    return _database_dsn(dsn, database), database
+
+
+async def _drop_fresh_database(dsn: str, database: str) -> None:
+    admin = await asyncpg.connect(_database_dsn(dsn, "postgres"))
+    try:
+        await admin.execute(f'DROP DATABASE "{database}"')
+    finally:
+        await admin.close()
+
+
 def _percentile(values: Sequence[float], percentile: float) -> float:
     if not values:
         return 0.0
@@ -127,22 +152,40 @@ async def _connect_role(dsn: str, role: str) -> asyncpg.Connection:
     return conn
 
 
-async def _reset(admin: asyncpg.Connection) -> None:
-    rows = await admin.fetch(
-        "SELECT tablename FROM pg_catalog.pg_tables WHERE schemaname = 'taskq'"
-    )
-    keep = {"schema_migrations", "meta"}
-    names = [row["tablename"] for row in rows if row["tablename"] not in keep]
-    if names:
-        targets = ", ".join(f'taskq."{name}"' for name in names)
-        await admin.execute(f"TRUNCATE {targets} CASCADE")
-
-
 async def _ensure_queue(operator: asyncpg.Connection, queue: str) -> None:
     row = await operator.fetchrow(
         "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'benchmark')", queue
     )
     assert row is not None
+
+
+async def _reset_fingerprint(admin: asyncpg.Connection) -> dict[str, Any]:
+    jobs = await admin.fetchrow(
+        "SELECT count(*) AS rows, pg_relation_filenode('taskq.jobs') AS relfilenode, "
+        "pg_total_relation_size('taskq.jobs') AS table_bytes, "
+        "pg_indexes_size('taskq.jobs') AS index_bytes FROM taskq.jobs"
+    )
+    stats = await admin.fetchrow(
+        "SELECT COALESCE(n_live_tup,0) AS live, COALESCE(n_dead_tup,0) AS dead "
+        "FROM pg_catalog.pg_stat_user_tables "
+        "WHERE schemaname='taskq' AND relname='jobs'"
+    )
+    ledger = await admin.fetch("SELECT id, checksum FROM taskq.schema_migrations ORDER BY id")
+    assert jobs["rows"] == 0
+    assert stats is not None and stats["live"] == 0 and stats["dead"] == 0
+    return {
+        "database": await admin.fetchval("SELECT current_database()"),
+        "jobs_rows": jobs["rows"],
+        "jobs_relfilenode": jobs["relfilenode"],
+        "jobs_table_bytes": jobs["table_bytes"],
+        "jobs_index_bytes": jobs["index_bytes"],
+        "jobs_live_tuples": stats["live"],
+        "jobs_dead_tuples": stats["dead"],
+        "migration_ledger": [row["id"] for row in ledger],
+        "migration_checksums_sha256": hashlib.sha256(
+            json.dumps([tuple(row) for row in ledger], sort_keys=True).encode()
+        ).hexdigest(),
+    }
 
 
 async def _database_snapshot(admin: asyncpg.Connection) -> dict[str, Any]:
@@ -399,6 +442,7 @@ async def _b3(
 
 async def _b4(
     dsn: str,
+    admin: asyncpg.Connection,
     queue: str,
     scale: Scale,
     repetitions: int,
@@ -408,7 +452,8 @@ async def _b4(
     for repetition in range(repetitions):
         producers = [await _connect_role(dsn, "taskq_producer") for _ in range(scale.producers)]
         workers = [await _connect_role(dsn, "taskq_runner") for _ in range(scale.workers)]
-        stop = asyncio.Event()
+        producers_stopped = asyncio.Event()
+        production_done = asyncio.Event()
         accepted = 0
         settled = 0
         enqueue_latencies: list[float] = []
@@ -431,7 +476,7 @@ async def _b4(
         async def produce(conn: asyncpg.Connection, lane: int) -> None:
             nonlocal accepted
             index = 0
-            while not stop.is_set():
+            while not producers_stopped.is_set():
                 started = time.perf_counter()
                 await _enqueue_one(conn, queue, f"b4-{seed}-{repetition}-{lane}-{index}")
                 enqueue_latencies.append(time.perf_counter() - started)
@@ -442,10 +487,12 @@ async def _b4(
             nonlocal settled
             rng = random.Random(seed + repetition * 1000 + lane)
             worker = f"bench-b4-{repetition}-{lane}"
-            while not stop.is_set():
+            while True:
                 started = time.perf_counter()
                 batch = await conn.fetchrow("SELECT * FROM taskq.claim_jobs($1, $2)", queue, worker)
                 if batch["state"] == "empty":
+                    if production_done.is_set() and settled >= accepted:
+                        return
                     await asyncio.sleep(0)
                     continue
                 job = batch["jobs"][0]
@@ -468,21 +515,60 @@ async def _b4(
                 settled += 1
                 e2e_latencies.append(time.perf_counter() - started)
 
-        tasks = [
-            *(asyncio.create_task(produce(conn, lane)) for lane, conn in enumerate(producers)),
-            *(asyncio.create_task(work(conn, lane)) for lane, conn in enumerate(workers)),
+        producer_tasks = [
+            asyncio.create_task(produce(conn, lane)) for lane, conn in enumerate(producers)
         ]
+        worker_tasks = [asyncio.create_task(work(conn, lane)) for lane, conn in enumerate(workers)]
         started = time.perf_counter()
         await asyncio.sleep(scale.duration_seconds)
-        stop.set()
-        await asyncio.gather(*tasks)
+        producers_stopped.set()
+        await asyncio.gather(*producer_tasks)
+        production_done.set()
+        production_duration = time.perf_counter() - started
+        drain_started = time.perf_counter()
+        drain_timeout = max(30.0, scale.duration_seconds * 2)
+        await asyncio.wait_for(asyncio.gather(*worker_tasks), timeout=drain_timeout)
+        drain_duration = time.perf_counter() - drain_started
         duration = time.perf_counter() - started
+
+        prefix = f"b4-{seed}-{repetition}-%"
+        conservation = await admin.fetchrow(
+            "SELECT count(*) FILTER (WHERE status IN ('succeeded','failed','cancelled')) AS terminal, "
+            "count(*) FILTER (WHERE status IN ('blocked','queued','running')) AS active, "
+            "count(*) FILTER (WHERE status='running') AS running "
+            "FROM taskq.jobs WHERE queue=$1 AND idempotency_key LIKE $2",
+            queue,
+            prefix,
+        )
+        running_attempts = await admin.fetchval(
+            "SELECT count(*) FROM taskq.job_attempts a JOIN taskq.jobs j ON j.id=a.job_id "
+            "WHERE j.queue=$1 AND j.idempotency_key LIKE $2 AND a.status='running'",
+            queue,
+            prefix,
+        )
+        terminal = conservation["terminal"]
+        active = conservation["active"]
+        conservation_equal = accepted == terminal + active
+        assert settled == terminal
+        assert conservation_equal
+        assert active == 0
+        assert conservation["running"] == 0
+        assert running_attempts == 0
         for conn in (*producers, *workers):
             await conn.close()
         results.append(
             {
                 "accepted": accepted,
                 "settled": settled,
+                "terminal": terminal,
+                "remaining_active": active,
+                "running_jobs": conservation["running"],
+                "running_attempts": running_attempts,
+                "conservation_equal": conservation_equal,
+                "drained": active == 0 and running_attempts == 0,
+                "production_duration_seconds": production_duration,
+                "drain_duration_seconds": drain_duration,
+                "drain_timeout_seconds": drain_timeout,
                 "duration_seconds": duration,
                 "throughput_rows_per_second": settled / duration,
                 "enqueue_latency": _latency_summary(enqueue_latencies),
@@ -492,7 +578,7 @@ async def _b4(
     return results
 
 
-async def run_scenario(
+async def _run_scenario_in_database(
     scenario: str,
     *,
     dsn: str,
@@ -516,7 +602,7 @@ async def run_scenario(
     runner = await _connect_role(dsn, "taskq_runner")
     queue = f"bench_{scenario.lower()}"
     try:
-        await _reset(admin)
+        reset_fingerprint = await _reset_fingerprint(admin)
         await _ensure_queue(operator, queue)
         before = await _database_snapshot(admin)
         loop_delay = await _event_loop_delay()
@@ -527,7 +613,7 @@ async def run_scenario(
         elif scenario == "B3":
             runs = await _b3(producer, runner, operator, scale, repetitions, seed)
         else:
-            runs = await _b4(dsn, queue, scale, repetitions, seed)
+            runs = await _b4(dsn, admin, queue, scale, repetitions, seed)
         explain_queue = "bench_b3_0" if scenario == "B3" else queue
         explain = await _representative_claim_plan(admin, explain_queue)
         after = await _database_snapshot(admin)
@@ -571,7 +657,8 @@ async def run_scenario(
             "method": {
                 "repetitions": repetitions,
                 "warmup_operations": scale.warmup,
-                "database_reset": "caller scratch database; taskq state truncated before scenario",
+                "database_reset": "fresh database created for scenario and dropped afterward",
+                "reset_fingerprint": reset_fingerprint,
                 "baseline": None,
             },
             "runs": runs,
@@ -600,6 +687,30 @@ async def run_scenario(
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result, output
+
+
+async def run_scenario(
+    scenario: str,
+    *,
+    dsn: str,
+    scale_name: str = "toy",
+    repetitions: int = 3,
+    seed: int = 1,
+    output: Path | None = None,
+) -> tuple[dict[str, Any], Path]:
+    scenario = scenario.upper()
+    fresh_dsn, database = await _create_fresh_database(dsn, scenario)
+    try:
+        return await _run_scenario_in_database(
+            scenario,
+            dsn=fresh_dsn,
+            scale_name=scale_name,
+            repetitions=repetitions,
+            seed=seed,
+            output=output,
+        )
+    finally:
+        await _drop_fresh_database(dsn, database)
 
 
 def _parser() -> argparse.ArgumentParser:
