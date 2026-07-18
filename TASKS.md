@@ -25,19 +25,21 @@
 
 | | |
 |---|---|
-| Stage | **Stage 2C complete** — the DB-direct worker service and CLI are green; no Stage-3 code exists yet |
+| Stage | **Stage 2D in progress** — the consumer testing contract is frozen; no Stage-3 code exists yet |
 | Suite | 350/350 regular on PG18.3 and PG16.14; the 2/2 million-row plan gate is scheduled in CI |
 | Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
 | Next review | No further full round required; next natural external boundary is the Stage-3 round-5 review |
 
 ## Now
 
-*(Stage 2C is complete; the next queued task remains under **Next**.)*
+- [ ] S2-06A fake client, typed ledger, matcher assertions, and `TaskQ.replace_client`
+- [ ] S2-06B direct `work`, inline execution, real/fake `require_enqueued`, and bounded drain
+- [ ] S2-06-AUDIT race/resource/artifact evidence on PostgreSQL 16 and 18; stop at the Stage-3 gate
 
 
-## Next — after S2-05
+## Next — after S2-06
 
-- [ ] S2-06 `taskq.testing` fixtures + inline transport (feature 10)
+*(Stage 3 remains closed until the S2-06 audit and Stage-3 gate.)*
 
 ## Later
 
@@ -57,6 +59,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S2-06-SPEC · Consumer testing contracts frozen** — the Tier-3 Stage-2D specification fixes the test-runner-neutral fake client, exact replacement ownership, fence-free enqueue matchers, shared handler normalization, inline/followup bounds, caller-owned PostgreSQL work/drain transactions, packaging isolation, and the S2-06A/B/audit acceptance matrix; no runtime or Stage-3 code was added.
 - [x] **S2-05-AUDIT · Stage 2C permanent completion evidence** — repeated notification/poll, reconnect/close, fatal-admission, cancellation, and resource races join the existing ten-family matrix; live SQL proves poll-only, notification reconnect/wake, fair queues, remote drain, and CLI signal/process-exit paths; R4-09..12 are closed, B8/B13 run as honest fresh-database report-only scenarios, and wheel/sdist × core/HTTP/OutLabs plus Python 3.13 gates pass. The identical suite is 350/350 on PG18.3 and PG16.14 with one opt-in skip, the PG18 million-row gate is 2/2, and Ruff/format are clean; Stage 3 remains untouched.
 - [x] **S2-05C · pydantic-settings, worker CLI, and observability** — added core `pydantic-settings`, frozen secret-safe environment/CLI precedence and deployment interlocks, explicit instance/factory registry loading before database construction, bounded SQL/listener ownership, unique worker ids, temporary soft/hard signal handling with unsafe-sync process exit, stable structured events, and fence-free monotonic snapshots; 330/330 pass on PG18 with one opt-in skip and Ruff clean.
 - [x] **S2-05B · Capacity-safe claim, presence, and shutdown** — advisory presence now completes before first claim, reports bounded safe metadata, drives degraded/recovered readiness and sticky remote drain; claim-to-submit admission survives graceful/hard stop ordering, fatal reports auto-stop the service, and external `run()` cancellation performs shielded cleanup then re-raises.
