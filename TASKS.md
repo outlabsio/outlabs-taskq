@@ -41,6 +41,8 @@
 
 ## Later
 
+- [ ] **S3-PREP · Pydantic boundary hardening (before any Stage-3 HTTP work).** (1) Direction-aware extras policy: inbound command models (`EnqueueCommand`, bulk items, future HTTP request bodies) get `extra="forbid"` so a typoed field fails loudly; outbound/result models stay tolerant (`extra="ignore"`) for ADR-005 additive forward-compat — document the rule in protocol.py's module docstring. (2) Convert result types (`EnqueueResult`, settle results) to tagged/discriminated unions on their status field — additive Python-surface refactor; feeds exhaustive client matching and per-variant OpenAPI schemas in Stage 3. (3) Module-level `TypeAdapter(list[...])` for bulk-enqueue items and claim batches; measure via B2/B3 before/after. (4) S2-05 CLI config goes through pydantic-settings, not hand-rolled env parsing.
+
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
