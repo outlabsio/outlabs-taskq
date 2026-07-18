@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from collections.abc import Mapping, Sequence
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
@@ -30,6 +32,21 @@ class TaskQ:
         self.transport = transport
         self.registry = registry or TaskRegistry()
         self.validate_job_types = validate_job_types
+        self._replacement_active = False
+
+    @contextmanager
+    def replace_client(self, client: TaskqTransport) -> Iterator[TaskqTransport]:
+        """Temporarily replace this facade's transport for a test scope."""
+        if self._replacement_active:
+            raise TaskqConfigError("TaskQ client replacement cannot be nested")
+        previous = self.transport
+        self._replacement_active = True
+        self.transport = client
+        try:
+            yield client
+        finally:
+            self.transport = previous
+            self._replacement_active = False
 
     @classmethod
     def from_dsn(

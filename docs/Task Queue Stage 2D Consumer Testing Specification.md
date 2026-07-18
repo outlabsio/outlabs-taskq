@@ -51,8 +51,10 @@ class RecordedSettlement:
     job_id: UUID
     queue: str
     job_type: str
-    intent: HandlerResult
-    outcome: Literal["ok", "already_settled", "lost", "settle_conflict"]
+    command: Literal["complete", "fail", "snooze", "release", "cancel_running"]
+    intent: HandlerResult | None       # release has no handler intent
+    outcome: Literal["ok", "retry_scheduled", "dead"]
+    cause: str | None                  # release-only safe cause
 
 class DrainReport:
     claimed: int

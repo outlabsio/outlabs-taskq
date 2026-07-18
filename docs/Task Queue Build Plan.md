@@ -62,6 +62,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **S2-06 specification frozen:** the [Stage 2D Consumer Testing Specification](./Task%20Queue%20Stage%202D%20Consumer%20Testing%20Specification.md) fixes the test-runner-neutral fake client, replacement scope, safe enqueue assertions, shared handler normalization, inline/followup limits, transaction-bound PostgreSQL work and drains, fence/resource/import boundaries, and the S2-06A/B/audit matrix. Implementation opens at S2-06A; Stage 3 remains closed.
 
+**S2-06A implementation:** core now ships the fence-free `FakeTaskQClient` with typed producer/runner results, bounded SQL-non-emulating state, safe matcher assertions, and replay-aware settlement records. `TaskQ.replace_client` restores exact non-owned transports across normal, error, nesting, and cancellation boundaries without importing testing or optional packages. S2-06B is next; Stage 3 remains closed.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
