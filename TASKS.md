@@ -25,18 +25,20 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 specification gate complete** — round-5 request ready; implementation remains closed pending response |
+| Stage | **Stage 3 blocked by round 5** — two Contract questions and docs-only remediation must close before S3-01 |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.3 + Function Manifest 0.1.2 (+ ADR-012..016) |
-| Next review | External round 5 must decide whether S3-01 may open |
+| Next review | Targeted round-5 delta check after ADR-017 and documentation remediation; no full round 6 required |
 
 ## Now
 
-*(none — send `docs/design-review-5/REQUEST.md` for external review)*
+- [ ] S3-R5-CQ adjudicate R5-CQ-A/B docs-first through ADR-017 + Protocol v1.0.4; remediation remains closed until approval
 
 
-## Next — blocked on round-5 response
+## Next — after S3-R5-CQ
 
+- [ ] S3-R5-DOC amend the Stage-3 specification and Authorization/Harness docs for R5-01..08 plus acceptance-oracle findings R5-09/R5-11/R5-16; no source or SQL change
+- [ ] S3-R5-DELTA prove response byte preservation, contract/spec deltas, unchanged source/SQL, green suite, and reviewer-targeted disposition; then decide whether S3-01 opens
 - [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
 - [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
 - [ ] S3-03 implement TaskqRuntime, housekeeper, embedded worker, HTTP worker/CLI integration, and process budgets
@@ -115,6 +117,49 @@ until R2-16 freezes the safe projection. Queue detail remains deferred out becau
 model is absent, while worker list stays declared because only its public projection is pending.
 SQL contract 0.1.2 and migrations 0001–0003 remain unchanged.
 
+### R5-CQ-A — General job list has no adjudicated 0.1 disposition
+
+**Blocking evidence:** Protocol amendment 3 calls the adopted `GET /taskq/v1/jobs` row
+“operator-minimal, pre-H-08,” while the Protocol exit status says H-08 is deferred behind a
+capability gate. Function Manifest §7 implies an operator-minimal form exists, but migration 0001
+explicitly records `list_jobs: absent`, and the exact 0.1.2 catalog contains no function or view that
+can serve any list form. Tier 3 cannot decide whether the route is active, gated, or deferred.
+
+**Recommended adjudication:** ADR-017 / Protocol document revision 1.0.4 applies ADR-016's
+undesigned-command rule: defer `GET /taskq/v1/jobs` out of H-13, add it visibly to the §2.2 deferred
+table with H-08's Growth §4/R2-16 projection/cursor/index/plan reactivation gate, correct amendment
+3, and state in the Function Manifest that no `list_jobs` exists in 0.1. A reserved-path negative
+vector returns typed `TQ501` while remaining absent from OpenAPI/client success surfaces. No SQL or
+migration change.
+
+**Decision needed:** approve the recommended deferral or select a contract-backed 0.1 disposition.
+Do not amend Tier 3 or start S3-01 first.
+
+### R5-CQ-B — Enqueue `created_at` has no contract-backed source
+
+**Blocking evidence:** the adopted Protocol base promises `created_at` in the single-enqueue
+`created` response, while `taskq.enqueue(...)` returns only `(job_id, created)`. The core model has no
+`created_at`; its queue/job-type/idempotency/schedule fields are request echoes, not durable row
+truth—especially for `existed`. A follow-up observer read would mix capabilities and add a round
+trip; a facade timestamp would be invented.
+
+**Recommended adjudication:** the same ADR-017 manifest-wins amendment removes `created_at` from
+0.1 enqueue responses. The wire result contains durable `job_id` plus created/existed disposition;
+any request-echo fields are explicitly labeled non-authoritative and cannot masquerade as stored
+state. Clients needing timestamps use authorized job detail. H-13's independent catalog oracle
+asserts exact response-field sets per command. No SQL or migration change.
+
+**Decision needed:** approve the manifest-backed response or authorize a different Tier-0 source.
+Do not add an observer lookup or client-clock field in Tier 3.
+
+## Round-5 finding dispositions
+
+The immutable response verdict is **BLOCKED**. Its architecture/catalog/boundary assessment is
+positive; S3-01 remains closed on R5-CQ-A/B, documentation BLOCKERs R5-01..03, documentation HIGHs
+R5-04..08, and acceptance-oracle MEDIUMs R5-09/R5-11/R5-16. Source-backed adjudication and the exact
+docs-only remediation choices remain pending; no finding authorizes implementation, SQL, grant, or
+migration work.
+
 ## Round-4 finding dispositions
 
 The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed implementation, evidence, or CI findings; no Tier-0 conflict exists. R4-01..08 were the worker-kernel remediation gate; the Stage-2C audit closes R4-09..12 with the pre-0.1.2 decode pin, SQL claim bounds, cancelled-stop-waiter ledger, and scheduled million-row plan lane.
@@ -125,6 +170,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-R5-RESPONSE · Round-5 response recorded** — registered the 235-line external response byte-for-byte as immutable Tier 4; verdict BLOCKED, architecture and scope accepted, two Contract questions plus three BLOCKER/five HIGH documentation findings gate S3-01, and the board sequences ADR-017 before docs-only remediation and a targeted delta check.
 - [x] **S3-00-R5 · Round-5 design gate assembled** — the immutable Tier-4 request pins the Stage-2 baseline through S3-00 and requires an independently derived Protocol-v1.0.3 route/backing/action/outcome catalog, ADR-014..016 governance audit, H-13/capability feasibility, fence/client/retry security, authorization and credential split, long-poll/lifespan/R2-11 races, OutLabs source validation, packaging/CI/benchmark honesty, scope proof, and an explicit S3-01 verdict; no implementation landed.
 - [x] **S3-00-SPEC · Stage-3 integration contracts frozen** — the Tier-3 specification fixes capability-sized transport boundaries, H-13-generated active/gated/deferred HTTP surfaces, exact envelopes/client replay and ownership, authoritative queue authorization with separate operator credentials, connection-free long polling, composable housekeeper/embedded runtime and process budgets, OutLabs catalog/provisioning, and the S3-01..04/AUDIT acceptance matrix; no integration code or SQL change landed.
 - [x] **S3-CQ-03 · Final HTTP wire models normalized docs-first** — accepted ADR-016 and Protocol v1 document revision 1.0.3 define bounded request-id mint/echo behavior, correct queue ensure to the exact version-free SQL profile, and retain worker list as a generated typed-capability gate pending R2-16, with the declared-vs-deferred rule explicit and no SQL or migration change.

@@ -82,6 +82,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Round-5 gate ready:** the immutable [request](./design-review-5/REQUEST.md) pins the Stage-2 baseline through the S3-00 specification and requires an independent final Protocol-v1.0.3 catalog, H-13/capability audit, fence/client/retry review, authorization and credential matrix, long-poll/lifespan/R2-11 races, OutLabs source reality check, packaging/CI/benchmark assessment, and an explicit decision on whether S3-01 may open. No integration implementation landed with the packet.
 
+**Round-5 response recorded — BLOCKED:** the immutable [response](./design-review-5/RESPONSE.md) accepts the architecture and boundary but keeps S3-01 closed on two adopted-base-versus-Manifest Contract questions, three BLOCKER and five HIGH documentation defects, and the acceptance-oracle MEDIUMs R5-09/R5-11/R5-16. The required path is ADR-017 / Protocol 1.0.4 docs-first, then specification/authorization/harness amendments with no source, SQL, grant, or migration change and a targeted green delta check; no full round 6 is required.
+
 ## Stage 4 — outlabsAPI dogfood (first host)
 
 One or two low-consequence lanes (tools, notifications) on the embedded runtime; durable run rows replace fire-and-forget; `GET job` result read backs the 202 flow (R2-18 gate). Prereq: outlabsAPI upgrades outlabs-auth to a supported a24+ range (R2-17) or starts on the static adapter. Exit: two normal deploy cycles + one forced failure recovered with zero manual table edits; rollback rehearsed; legacy-broker retirement begins lane-by-lane.
