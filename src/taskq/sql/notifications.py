@@ -34,37 +34,85 @@ class PostgresNotificationSource:
         self._connection: asyncpg.Connection[Any] | None = None
         self._disconnected = asyncio.Event()
         self._closed = False
+        self._lock = asyncio.Lock()
+        self._channels: set[str] = set()
+        self._nudge: Callable[[], None] | None = None
+        self._listener: Callable[..., None] | None = None
 
     def __repr__(self) -> str:
         return "PostgresNotificationSource()"
 
-    async def connect(self, channels: Sequence[str], nudge: Callable[[], None]) -> None:
-        if self._closed:
-            raise TaskqConfigError("notification source is closed")
-        if self._connection is not None and not self._connection.is_closed():
-            raise TaskqConfigError("notification source is already connected")
-        if not channels or any(_CHANNEL.fullmatch(channel) is None for channel in channels):
+    @property
+    def channels(self) -> tuple[str, ...]:
+        return tuple(sorted(self._channels))
+
+    @staticmethod
+    def _validated_channels(channels: Sequence[str], *, empty_ok: bool = False) -> set[str]:
+        result = set(channels)
+        if (not result and not empty_ok) or any(
+            _CHANNEL.fullmatch(channel) is None for channel in result
+        ):
             raise TaskqConfigError("invalid taskq notification channel")
+        return result
 
-        self._disconnected = asyncio.Event()
-        connection = await asyncpg.connect(self._dsn)
-        try:
-            connection.add_termination_listener(lambda _connection: self._disconnected.set())
+    async def connect(self, channels: Sequence[str], nudge: Callable[[], None]) -> None:
+        requested = self._validated_channels(channels)
+        async with self._lock:
+            if self._closed:
+                raise TaskqConfigError("notification source is closed")
+            if self._connection is not None and not self._connection.is_closed():
+                raise TaskqConfigError("notification source is already connected")
+            self._channels.update(requested)
+            self._nudge = nudge
+            disconnected = asyncio.Event()
+            self._disconnected = disconnected
+            connection = await asyncpg.connect(self._dsn)
+            try:
+                connection.add_termination_listener(lambda _connection: disconnected.set())
 
-            def notified(
-                _connection: asyncpg.Connection[Any],
-                _pid: int,
-                _channel: str,
-                _payload: str,
-            ) -> None:
-                nudge()
+                def notified(
+                    _connection: asyncpg.Connection[Any],
+                    _pid: int,
+                    _channel: str,
+                    _payload: str,
+                ) -> None:
+                    callback = self._nudge
+                    if callback is not None:
+                        callback()
 
-            for channel in channels:
-                await connection.add_listener(channel, notified)
-        except BaseException:
-            await connection.close()
-            raise
-        self._connection = connection
+                for channel in sorted(self._channels):
+                    await connection.add_listener(channel, notified)
+            except BaseException:
+                await connection.close()
+                raise
+            self._listener = notified
+            self._connection = connection
+
+    async def add_channels(self, channels: Sequence[str]) -> None:
+        requested = self._validated_channels(channels, empty_ok=True)
+        async with self._lock:
+            if self._closed:
+                raise TaskqConfigError("notification source is closed")
+            additions = requested - self._channels
+            self._channels.update(additions)
+            connection = self._connection
+            listener = self._listener
+            if connection is None or connection.is_closed() or listener is None:
+                return
+            for channel in sorted(additions):
+                await connection.add_listener(channel, listener)
+
+    async def remove_channels(self, channels: Sequence[str]) -> None:
+        requested = self._validated_channels(channels, empty_ok=True)
+        async with self._lock:
+            removals = requested & self._channels
+            self._channels.difference_update(removals)
+            connection = self._connection
+            listener = self._listener
+            if connection is None or connection.is_closed() or listener is None:
+                return
+            for channel in sorted(removals):
+                await connection.remove_listener(channel, listener)
 
     async def wait_disconnected(self) -> None:
         if self._connection is None:
@@ -72,10 +120,12 @@ class PostgresNotificationSource:
         await self._disconnected.wait()
 
     async def aclose(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
-        connection, self._connection = self._connection, None
+        async with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            connection, self._connection = self._connection, None
+            self._listener = None
         if connection is not None and not connection.is_closed():
             await connection.close()
         self._disconnected.set()

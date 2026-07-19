@@ -257,6 +257,11 @@ class AuthContext(BaseModel):
     principal: object
 
 class QueueAuthorizer(Protocol):
+    async def authenticate(self, request: Request) -> AuthContext: ...
+    async def authorize_context(
+        self, request: Request, context: AuthContext,
+        action: TaskqAction, queue: str | None
+    ) -> None: ...
     async def authorize(
         self, request: Request, action: TaskqAction, queue: str | None
     ) -> AuthContext: ...
@@ -267,6 +272,10 @@ static API-key, bearer-token, callable, legacy read/write/operator shim, and an 
 test-only no-auth adapter. There is no production default authorizer: `create_taskq_app` refuses to
 construct without one. Queue-blind simple adapters authorize all queues after credential success;
 that simplicity is explicit, never represented as queue isolation.
+The two phased methods are the facade's security boundary: authenticate produces one context before
+body-error disclosure or job lookup, then `authorize_context` applies each canonical queue check
+without re-authenticating. `authorize` is the one-call convenience for consumers that already know
+their queue. Construction rejects adapters missing either phase rather than weakening the ordering.
 
 ### 7.2 Ordering and queue source
 
@@ -313,9 +322,16 @@ operator pool never executes producer/runner/housekeeper commands; the ordinary 
 an operator command after permission denial. Omitting the operator pool omits those routes.
 
 Internal housekeeper calls use only `HousekeeperTransport`; there is no public tick route. Metrics
-uses observer capability and an independently configurable scrape authorizer. `/meta` is
+uses observer capability and an independently configurable scrape authorizer; when omitted, the
+primary authorizer performs global `read` authorization. `/meta` is
 authenticated `read` by default, with an explicit deployment-policy option for public metadata as
 per Protocol v1.
+
+The gated 0.1 worker-list operation authorizes global `read` before returning `TQ501`; its possible
+future operator/control semantics do not create an any-of exception while the safe projection is
+inactive. Per-queue stats with no snapshot return typed `ok` plus an empty `items` list. In 0.1 that
+honestly covers both snapshot lag and an unknown configuration because the observer contract exposes
+no separate queue-profile oracle; it never borrows operator access to distinguish them.
 
 ## 8. FastAPI sub-application and long polling
 
@@ -345,13 +361,17 @@ examples. Documentation UIs remain host policy.
 `TaskqRuntime`—never the sub-application—is the sole Taskq lifecycle/resource owner. The facade
 runtime owns one reconnectable PostgreSQL LISTEN connection per process for long-poll
 hints, not one per request. A generation-based `ClaimWaitHub` coalesces notifications and wakes
-subscribers; payload content is never authoritative. Each claim request performs:
+subscribers; payload content is never authoritative. Each claim request performs the normative race
+closure in this order:
 
-1. one short authoritative claim transaction;
-2. immediate return for claimed/paused/unknown/target-unavailable;
-3. if empty and time remains, subscribe using a generation token, release every SQL connection,
-   and await notification or monotonic poll deadline; then repeat; and
-4. return typed timeout at the caller deadline.
+1. capture the current hub generation, then run one short authoritative claim transaction;
+2. return immediately for claimed/paused/unknown/target-unavailable;
+3. if empty and time remains, subscribe against the captured generation after releasing every SQL
+   connection; a changed generation arms the subscription immediately;
+4. run an immediate second authoritative claim after subscription, before waiting;
+5. if still empty, await only until the next notification or bounded monotonic poll deadline, close
+   the subscription, and repeat from generation capture; and
+6. return typed timeout at the caller deadline.
 
 The mandatory poll interval bounds missed-notification and future-due latency. No database
 transaction or pooled connection spans the wait. Subscribe-after-check races are closed by the
@@ -361,6 +381,8 @@ shutdown rejects new waits, wakes/drains every subscriber, then closes the liste
 
 Listener loss marks runtime unready and degraded while authoritative polling remains correct.
 Reconnect performs an immediate catch-up sweep. Listener callbacks never execute SQL or user code.
+Disconnect/cancellation closes only that subscription; shutdown rejects new subscriptions, wakes all
+current waiters, and leaves listener/pool ownership to `TaskqRuntime`.
 
 ## 9. TaskqRuntime and lifespan composition
 
@@ -517,6 +539,8 @@ outcome/code, duration, queue when authorized, actor identity, listener/housekee
 pool budget, and retries. They never include payload, headers, progress, result, error text, SQL,
 credential, raw principal, attempt id, or arbitrary presence metadata. Metrics use the SQL metrics
 contract and bounded facade counters; request id and actor are never metric labels.
+Public error diagnostics admit at most 16 scalar entries, with keys capped at 64 characters and
+string values at 256 characters; sensitive field names are dropped before serialization.
 
 Rate/concurrency limits at the facade are deployment policy, not queue correctness. Proxy/body
 limits must be at least as strict as H-09. CORS, TLS, network exposure, and host authentication

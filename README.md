@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..013](docs/adr/README.md) accepted; four review rounds processed; protocol v1 + 0.1.2 function manifest canonical). **Stages 1 through 2D complete** — the SQL kernel, typed registry/client/transport, supervised execution, notification-aware authoritative poller, presence/drain lifecycle, `taskq worker` CLI, and consumer testing helpers are implemented and green on PostgreSQL 16/18. Stage 3 integrations remain untouched. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; five review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 2D and Stage 3's clients/facade are complete** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, and long-poll hub are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -12,7 +12,7 @@ Start here:
 
 | Doc | What it is |
 |---|---|
-| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..013) — override conflicting passages elsewhere** |
+| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..017) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
 | [`TASKS.md`](TASKS.md) | **Live execution tracker — start here to contribute** |
 | [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |
@@ -49,7 +49,7 @@ src/taskq/
   settings.py    # secret-safe worker environment/CLI configuration
   testing.py     # fake client, enqueue assertions, direct work, inline and drain helpers
   cli.py         # migrate / verify / worker
-  http/          # optional FastAPI facade (Stage 3, not started)
+  http/          # optional generated HTTP clients + mounted FastAPI facade
 ```
 
 ## Consumer testing

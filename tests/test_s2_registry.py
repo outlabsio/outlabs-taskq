@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+import subprocess
+import sys
 from uuid import UUID, uuid4
 
 import pytest
@@ -539,8 +541,14 @@ def test_sensitive_error_details_are_removed() -> None:
 
 
 def test_public_exports_do_not_import_optional_frameworks() -> None:
-    import sys
-
-    assert "fastapi" not in sys.modules
-    assert "outlabs_auth" not in sys.modules
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import taskq; "
+            "assert 'fastapi' not in sys.modules; "
+            "assert 'outlabs_auth' not in sys.modules",
+        ],
+        check=True,
+    )
     assert UUID is not None  # keep the public UUID-typed assertions explicit

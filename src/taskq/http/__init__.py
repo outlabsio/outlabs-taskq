@@ -5,6 +5,7 @@ I/O and constructs no client, application, pool, or background task.
 """
 
 try:
+    import fastapi as _fastapi  # noqa: F401
     import httpx as _httpx  # noqa: F401
 except ModuleNotFoundError:
     raise ModuleNotFoundError(
@@ -17,6 +18,17 @@ from taskq.http.client import (
     TaskqAuthorizationError,
     TaskqHttpClient,
 )
+from taskq.http.deps import (
+    AuthContext,
+    QueueAuthorizer,
+    bearer_token_auth,
+    callable_auth,
+    legacy_taskq_auth,
+    no_auth_for_tests,
+    static_api_key_auth,
+)
+from taskq.http.facade import TaskqFacadeTransports, create_taskq_app, merge_taskq_openapi
+from taskq.http.hub import ClaimWaitHub, ClaimWaitSubscription
 from taskq.protocol import (
     HTTP_COMMAND_SPECS,
     CommandEnvelope,
@@ -30,6 +42,7 @@ from taskq.protocol import (
 
 __all__ = [
     "AsyncTaskqHttpClient",
+    "AuthContext",
     "CommandEnvelope",
     "ErrorEnvelope",
     "HTTP_COMMAND_SPECS",
@@ -41,4 +54,15 @@ __all__ = [
     "TaskqHttpClient",
     "TaskqAuthenticationError",
     "TaskqAuthorizationError",
+    "ClaimWaitHub",
+    "ClaimWaitSubscription",
+    "QueueAuthorizer",
+    "TaskqFacadeTransports",
+    "bearer_token_auth",
+    "callable_auth",
+    "create_taskq_app",
+    "legacy_taskq_auth",
+    "merge_taskq_openapi",
+    "no_auth_for_tests",
+    "static_api_key_auth",
 ]

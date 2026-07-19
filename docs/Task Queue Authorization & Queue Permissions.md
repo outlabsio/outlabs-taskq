@@ -68,11 +68,22 @@ The generated Taskq sub-application declares, per active route: `(action, queue_
 Defined in `taskq.http.deps`, zero outlabs imports:
 
     class QueueAuthorizer(Protocol):
+        async def authenticate(self, request: Request) -> AuthContext: ...
+        async def authorize_context(
+            self, request: Request, context: AuthContext,
+            action: TaskqAction, queue: str | None,
+        ) -> None: ...
         async def authorize(
             self, request: Request, action: TaskqAction, queue: str | None,
         ) -> AuthContext:
             """Raise HTTPException(401/403) or return the principal context.
             queue=None means a global (non-queue-scoped) route."""
+
+`authenticate` runs before body-error disclosure or authoritative job lookup;
+`authorize_context` then checks one or more canonical queues against that same context. `authorize`
+is the queue-known convenience composing both phases. This split is mandatory for adapters because a
+job-id request cannot safely learn its queue before authentication, and a global permission probe is
+not an authentication substitute.
 
 - `AuthContext` (actor string + opaque principal) is unchanged from the extraction brief §5.2.
 - **Back-compat shim:** a v1 `TaskqAuth` (read/write/operator) wraps into a `QueueAuthorizer` that ignores `queue` — `read → read`, `enqueue/run → write`, `control/admin → operator`. The bundled `static_api_key_auth` / `bearer_token_auth` / `no_auth_for_tests` adapters stay queue-blind exactly this way: one credential, all queues. Queue scoping is opt-in sophistication, never a toll on the simple path.
