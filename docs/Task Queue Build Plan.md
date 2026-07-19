@@ -86,6 +86,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **S3-01 implementation:** capability-sized protocols now narrow core and worker dependencies while retaining the complete SQL intersection; one independently-oracled Protocol-v1.0.4 metadata source drives strict bounded wire models and both generated clients. Sync/async clients normalize to core domain values, keep fences claim-only, negotiate headers/version, enforce credential and ownership boundaries, issue fresh retry request IDs, replay only keyed producer or safe idempotent commands, and leave fenced settlement replay to the worker. The benchmark runner moved under `taskq`; installed artifacts contain neither placeholder files nor a generic `bench` package and core-only HTTP imports name the exact missing extra. The unchanged SQL/migration surface passes **390/390** on PostgreSQL 18.3 with one opt-in skip; S3-02 is next.
 
+**S3-01 independently accepted:** live PostgreSQL 18.3, no-DSN, Ruff/format, wheel/sdist, core-only import-isolation, installed namespace, fence/retry/wire, and capability-boundary checks reproduce the implementation evidence. All seven S3-01-owned round-5 residuals are closed; no SQL, migration, Tier-0, or Tier-4 file changed. S3-02 is open.
+
 ## Stage 4 — outlabsAPI dogfood (first host)
 
 One or two low-consequence lanes (tools, notifications) on the embedded runtime; durable run rows replace fire-and-forget; `GET job` result read backs the 202 flow (R2-18 gate). Prereq: outlabsAPI upgrades outlabs-auth to a supported a24+ range (R2-17) or starts on the static adapter. Exit: two normal deploy cycles + one forced failure recovered with zero manual table edits; rollback rehearsed; legacy-broker retirement begins lane-by-lane.
