@@ -25,19 +25,22 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 complete and independently accepted** — S4-00 is the active planning gate; no host implementation has started |
+| Stage | **S4-00 frozen** — round-6 review is the active gate; no host implementation has started |
 | Suite | 448/448 regular on PG18.3 and PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12 |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | S4-00 first-host dogfood specification before any outlabsAPI implementation |
+| Next review | Round 6 decides whether first-host dependency/database preflight may open at S4-01 |
 
 ## Now
 
-- [ ] S4-00 freeze the first-host dogfood plan and acceptance/rollback evidence; do not implement a lane before this gate
+- [ ] S4-00-R6 external review of the frozen first-host plan; S4-01 remains closed
 
 
-## Next — after S4-00
+## Next — after a READY round-6 verdict
 
-*(Host implementation is sequenced only by the frozen S4-00 specification.)*
+- [ ] S4-01 immutable taskq artifact, exact OutLabs a24 upgrade, and managed-PostgreSQL preflight
+- [ ] S4-02 disabled-by-default host integration plus local/live acceptance harness
+- [ ] S4-03 allowlisted tools canary and two normal deploy cycles
+- [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance
 
 ## Later
 
@@ -187,6 +190,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S4-00 · First-host dogfood plan frozen** — added the Tier-3 outlabsAPI specification and round-6 adversarial gate after inspecting both clean repositories at taskq `8a13262` and host `a0019cd`. The plan resolves R2-17 with an exact a24 upgrade (the host's complete 47-test collection remains 44 green/3 opt-in skips under a real a24 overlay), requires an immutable hashed taskq alpha rather than a local path, and makes managed-PostgreSQL role/pooler/SSL/ceiling/migration proof a preview-branch precondition. One `tools` queue and canonical `outlabs.tools.run` task migrate only allowlisted read-only tools through a mutually exclusive producer switch; HTTP 202 returns job id/disposition/canonical authorized result URL, keyed replay is honest, callers receive read but never generic enqueue, and external-effect lanes stay untouched. The poll-only one-process embedded topology has explicit pool/grace/health/CORS/IAM arithmetic; two deploy cycles, a side-effect-free process-termination probe, zero-DML rollback/re-enable, and delayed legacy retirement form the exit gate. No host source/dependency/deployment, taskq SQL/migration/Tier-0/Tier-1, or existing Tier-4 file changed; S4-01 stays closed pending round 6.
 - [x] **S3-AUDIT-ACCEPT · Stage 3 independently accepted** — external verification reproduced the identical 448/448 suite with one opt-in skip on exact PostgreSQL 18.3 and 16.14, 289/289 DB-free on Python 3.12 and 3.13.9, the 2/2 million-row plan gate, Ruff/format, and representative wheel/sdist dependency corners. Source inspection accepted both deliberate oracle-drift proofs, the nullable redaction decode fix, exact CI/harness/front-door corrections, legitimate ADR-014 context-only attribution repair, and real-path B11/B14 evidence. All round-5 findings are closed or Growth-owned; no SQL, migration, Tier-0, Tier-4, or Stage-4 host change exists. Stage 3 is complete and S4-00 may proceed.
 - [x] **S3-AUDIT · Stage-3 completion evidence** — added the contract-derived live SQL↔mounted-ASGI scenario and raw-table/function read oracles, with deliberate generated-catalog and projection mutations proving the two oracles fail independently. That path found and pinned one implementation defect: redacted nullable job-detail fields now decode when absent, matching the accepted projection contract. The existing security, malformed-input, fence, authorization, long-poll, lifespan, cancellation, process-exit, and resource suites run in the dedicated warnings-as-errors Stage-3 CI gate; full SQL lanes install the exact OutLabs extra, artifacts now matrix Python 3.12/3.13, and the scheduled million-row gate remains explicit. B11 and B14 are executable report-only scenarios through the real runtime/generated-client→ASGI→SQL paths; the toy audit reported B11 facade-only/embedded median p99 2.664/1.831 ms (the negative delta is environmental noise, not a win) and B14 SQL/client median p99 1.378/3.516 ms with 2.084 ms facade overhead. The identical suite passes 448/448 on PostgreSQL 18.3 and 16.14 with one opt-in skip; DB-free passes 289/289 on both Python versions; wheel+sdist × core/HTTP/OutLabs × Python 3.12/3.13 is 12/12; Ruff/format and the 2/2 million-row plan gate are green. Harness/front-door wording now matches the repository. No SQL, migration, Tier-0, Tier-4, Stage-4 host, or future-capability implementation changed.
 - [x] **S3-04-ACCEPT · S3-04 independently accepted** — external verification reproduced 443/443 on live PostgreSQL 18.3 with one opt-in skip, 288/288 DB-free, Ruff/format, wheel+sdist, and fresh core/HTTP/OutLabs wheel isolation against exact `outlabs-auth==0.1.0a24`. Source inspection accepted all eight owned round-5 remediations: opaque 429/503 mapping, owned three-shape session resolution with subject revalidation, strict queue plus real permission validation, side-effect-free imports/config-free seeding, deterministic API-key policy notes, explicit legacy candidates, exact public alpha APIs, and SAVEPOINT/caller-transaction semantics. The real-schema first-apply/idempotency/drift/reconcile and Enterprise/Simple policy vectors passed; the Tier-3 edits are as-built precision, SQL/migrations/Tier 0/Tier 4 are unchanged, and S3-AUDIT may proceed while Stage 4 remains closed.
