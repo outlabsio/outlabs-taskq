@@ -1027,7 +1027,7 @@ class ClaimedJobWire(BaseModel):
     priority: int
     payload: dict[str, Any]
     headers: dict[str, Any]
-    progress: dict[str, Any] | None
+    progress: dict[str, Any] | None = None
     attempt_id: UUID = Field(repr=False)
     attempt_number: int
     failure_count: int

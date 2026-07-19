@@ -158,14 +158,29 @@ async def _run_worker(
     process_exit: Callable[[int], NoReturn] = os._exit,
 ) -> int:
     logger = logging.getLogger("taskq.worker")
-    dsn = settings.dsn.get_secret_value()
-    assert settings.pool_size is not None
-    transport = SqlTaskqTransport.from_dsn(
-        dsn,
-        pool_size=settings.pool_size,
-        max_overflow=0,
-    )
-    notifications = PostgresNotificationSource(dsn) if settings.listen else None
+    http_mode = settings.http_base_url is not None
+    if http_mode:
+        from taskq.http.client import AsyncTaskqHttpClient
+
+        transport = AsyncTaskqHttpClient(
+            settings.http_base_url or "",
+            bearer_token=settings.http_bearer_token,
+            header_name=settings.http_header_name,
+            header_value=settings.http_header_value,
+            claim_wait_seconds=settings.http_claim_wait_seconds,
+            timeout=max(30.0, settings.http_claim_wait_seconds + 5),
+        )
+        await transport.start()
+        notifications = None
+    else:
+        assert settings.dsn is not None and settings.pool_size is not None
+        dsn = settings.dsn.get_secret_value()
+        transport = SqlTaskqTransport.from_dsn(
+            dsn,
+            pool_size=settings.pool_size,
+            max_overflow=0,
+        )
+        notifications = PostgresNotificationSource(dsn) if settings.listen else None
     service = WorkerService(
         transport,
         registry,
@@ -176,6 +191,7 @@ async def _run_worker(
             poll_interval=settings.poll_interval,
             listen=settings.listen,
             presence_interval=settings.presence_interval,
+            cancel_inflight_claim_on_stop=http_mode and settings.http_claim_wait_seconds > 0,
         ),
         supervisor_options=WorkerOptions(
             concurrency=settings.concurrency,
@@ -231,6 +247,7 @@ async def _run_worker(
             "batch": settings.batch,
             "pool_size": settings.pool_size,
             "listener_connections": int(settings.listen),
+            "transport_mode": "http" if http_mode else "sql",
         },
     )
     exit_monitor = asyncio.create_task(
@@ -255,6 +272,11 @@ async def _run_worker(
 def _add_worker_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     worker = subparsers.add_parser("worker", help="run a DB-direct task worker")
     worker.add_argument("--dsn")
+    worker.add_argument("--http-base-url")
+    worker.add_argument("--http-bearer-token")
+    worker.add_argument("--http-header-name")
+    worker.add_argument("--http-header-value")
+    worker.add_argument("--http-claim-wait-seconds", type=float)
     worker.add_argument("--registry")
     worker.add_argument("--queue", dest="queues", action="append")
     worker.add_argument("--environment")
@@ -274,6 +296,11 @@ def _add_worker_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
 def _worker_overrides(args: argparse.Namespace) -> dict[str, object]:
     names = (
         "dsn",
+        "http_base_url",
+        "http_bearer_token",
+        "http_header_name",
+        "http_header_value",
+        "http_claim_wait_seconds",
         "registry",
         "queues",
         "environment",

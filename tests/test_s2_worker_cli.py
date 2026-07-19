@@ -21,6 +21,11 @@ from taskq.protocol import ClaimResult, ClaimState
 
 _ENV_NAMES = (
     "TASKQ_DSN",
+    "TASKQ_HTTP_BASE_URL",
+    "TASKQ_HTTP_BEARER_TOKEN",
+    "TASKQ_HTTP_HEADER_NAME",
+    "TASKQ_HTTP_HEADER_VALUE",
+    "TASKQ_HTTP_CLAIM_WAIT_SECONDS",
     "TASKQ_REGISTRY",
     "TASKQ_QUEUES",
     "TASKQ_ENVIRONMENT",

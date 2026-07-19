@@ -149,6 +149,7 @@ class WorkerServiceOptions(BaseModel):
     presence_interval: float = Field(default=60.0, ge=5, le=3600)
     listener_backoff_base: float = Field(default=0.25, gt=0)
     listener_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
+    cancel_inflight_claim_on_stop: bool = False
 
     @model_validator(mode="after")
     def _valid_service_options(self) -> WorkerServiceOptions:
@@ -387,6 +388,8 @@ class WorkerService:
         self._stop_requested.set()
         self._nudge.nudge()
         if self._claim_task is not None:
+            if self.options.cancel_inflight_claim_on_stop:
+                self._claim_task.cancel()
             await asyncio.gather(self._claim_task, return_exceptions=True)
         self._admission_closed = True
         await self.supervisor.stop(cancel=self._cancel_stop_requested)

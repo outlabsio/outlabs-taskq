@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; five review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 2D and Stage 3's clients/facade are complete** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, and long-poll hub are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; five review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 2D and Stage 3's clients/facade/runtime are complete** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, long-poll hub, composable lifespan, housekeeper, and opt-in embedded worker are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -49,7 +49,7 @@ src/taskq/
   settings.py    # secret-safe worker environment/CLI configuration
   testing.py     # fake client, enqueue assertions, direct work, inline and drain helpers
   cli.py         # migrate / verify / worker
-  http/          # optional generated HTTP clients + mounted FastAPI facade
+  http/          # optional clients, mounted facade, composable runtime/lifespan
 ```
 
 ## Consumer testing

@@ -413,6 +413,8 @@ class _FacadeDispatcher:
         queue: str,
         body: ClaimWireRequest,
     ) -> tuple[str, ClaimWireData]:
+        if body.wait_seconds > 0:
+            await self.resources.claim_wait_hub.prepare_queue(queue)
         deadline = time.monotonic() + body.wait_seconds
         while True:
             generation = self.resources.claim_wait_hub.generation
@@ -779,7 +781,7 @@ def _openapi_extra(spec: HttpCommandSpec) -> dict[str, Any]:
 
 
 def create_taskq_app(
-    resources: TaskqFacadeTransports,
+    resources: TaskqFacadeTransports | object,
     *,
     authorizer: QueueAuthorizer,
     operator_transport: OperatorTransport | None = None,
@@ -808,6 +810,10 @@ def create_taskq_app(
         )
     if poll_interval <= 0 or poll_interval > 30:
         raise TaskqConfigError("poll_interval must be greater than zero and at most 30 seconds")
+
+    resources = getattr(resources, "facade_transports", resources)
+    if not isinstance(resources, TaskqFacadeTransports):
+        raise TaskqConfigError("facade resources are not configured")
 
     app = FastAPI(lifespan=None, openapi_url="/openapi.json", docs_url=None, redoc_url=None)
     dispatcher = _FacadeDispatcher(

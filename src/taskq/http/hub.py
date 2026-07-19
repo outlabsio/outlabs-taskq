@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 
 from taskq.errors import TaskqUnavailableError
@@ -41,11 +42,12 @@ class ClaimWaitSubscription:
 class ClaimWaitHub:
     """Coalesce untrusted hints into generations; never performs SQL itself."""
 
-    def __init__(self) -> None:
+    def __init__(self, queue_registrar: Callable[[str], Awaitable[None]] | None = None) -> None:
         self._generation = 0
         self._closed = False
         self._lock = asyncio.Lock()
         self._subscribers: set[asyncio.Event] = set()
+        self._queue_registrar = queue_registrar
 
     @property
     def generation(self) -> int:
@@ -58,6 +60,17 @@ class ClaimWaitHub:
     @property
     def closed(self) -> bool:
         return self._closed
+
+    async def prepare_queue(self, queue: str) -> None:
+        if self._closed:
+            raise TaskqUnavailableError(details={"reason": "claim_wait_hub_stopped"})
+        if self._queue_registrar is not None:
+            await self._queue_registrar(queue)
+
+    def install_queue_registrar(self, registrar: Callable[[str], Awaitable[None]]) -> None:
+        if self._queue_registrar is not None or self._generation or self._subscribers:
+            raise TaskqUnavailableError(details={"reason": "claim_wait_hub_already_configured"})
+        self._queue_registrar = registrar
 
     async def subscribe(self, observed_generation: int) -> ClaimWaitSubscription:
         event = asyncio.Event()
