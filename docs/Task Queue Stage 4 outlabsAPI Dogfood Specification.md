@@ -214,6 +214,24 @@ objects proven to have been created by the drill; it never drops a shared role b
 immutable migrations and `verify()` run twice, IAM runs report → apply → idempotent report, and the
 `tools` queue profile returns `created` → `unchanged`.
 
+The 2026-07-19 actual-cluster drill completed those mechanics on a disposable database and then
+dropped only that database. It measured PostgreSQL 16.14, `max_connections=100`, direct internal
+port 5432, and TLS disabled. Taskq migrations 0001–0003 plus both verifier passes converged; OutLabs
+Auth reached `20260715_0020` twice; IAM converged from fourteen creates to fourteen existing records
+with no changes or conflicts; and the complete `tools` profile returned `created` then `unchanged`.
+The production sentinels remained application migration `20260616_0005`, one legacy
+`outbound_tasks` row, and no `taskq` schema before and after teardown. The six taskq contract roles
+remain as cluster-wide `NOLOGIN` roles.
+
+The same drill found that the deployed application DSN authenticates as PostgreSQL superuser. That
+credential bypasses the role boundary and therefore cannot be the Stage-4 runtime pool. S4-CQ-02
+blocks production migration and enablement until a dedicated non-superuser runtime login and an
+owner/operator-only provisioning path are approved and proven.
+
+Coolify mounts the named PostgreSQL data volume at `/var/lib/postgresql/data`. Scheduled backups run
+daily at 03:00 to S3; the 2026-07-19 run completed successfully. This records the observed durability
+posture, not a claim of tested restore or point-in-time recovery.
+
 If the runtime credential cannot create roles, that is expected least privilege: the migration uses
 the managed owner/admin credential. If the managed service cannot support the contract even with its
 owner credential, Stage 4 stops; source must not emulate or weaken migrations.

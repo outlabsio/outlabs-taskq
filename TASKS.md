@@ -25,14 +25,13 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 same-cluster preflight open** — S4-CQ-01 approved the actual Coolify PostgreSQL target; enablement remains paused until its complete disposable-database proof is recorded |
+| Stage | **S4-03 paused at S4-CQ-02** — the actual-cluster preflight is complete and clean, but the deployed app pool uses PostgreSQL superuser and cannot satisfy the operator-credential separation contract |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
-- [ ] S4-03B actual-cluster disposable-database preflight: server/ceiling/connection/TLS, role authority, migrate/verify/idempotency, IAM/profile convergence, backup/durability record, and database-only teardown
 - [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
@@ -45,6 +44,29 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S4-CQ-02 — The production app pool is PostgreSQL superuser
+
+**Blocking evidence:** the approved same-cluster preflight connected through the exact deployed
+`POSTGRES_DSN` and measured `current_user=postgres`, `rolsuper=true`, `rolcreatedb=true`, and
+`rolcreaterole=true`. Taskq's six contract roles are correctly `NOLOGIN`, but PostgreSQL superuser
+bypasses their privilege boundaries. Therefore the ordinary application pool can execute
+operator-only functions even if it is not granted `taskq_operator`; this directly contradicts
+ADR-011 and Stage-4 specification §4.1's requirement that the operator credential is never present
+in the app pool. Do not migrate the production database, provision production IAM/queue state, or
+set `TASKQ_ENABLED=true` while the runtime DSN remains superuser.
+
+**Recommended adjudication:** keep the approved one-database topology, but introduce a dedicated
+non-superuser host runtime login. Grant it only the existing host runtime access plus
+`taskq_producer`, `taskq_runner`, `taskq_observer`, and `taskq_housekeeper`; prove it cannot
+`SET ROLE taskq_operator`, call `ensure_queue`, create roles, create databases, or bypass row-level
+security. Rotate the application's `POSTGRES_DSN` to that login. Run host/auth/taskq migrations and
+operator provisioning through an owner/operator credential used only by an explicit one-off
+pre-deploy action and never injected into the running application. Before rotation, derive and test
+the exact public/outlabs-auth runtime grants on a disposable database; after rotation, prove host
+health and the disabled taskq posture before production taskq migration. Keeping the superuser app
+pool would require explicitly reopening the accepted privilege-separation design and is not
+recommended.
 
 ### S4-CQ-01 — The live production database is not the frozen Neon target
 
@@ -220,6 +242,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-03B · Actual-cluster disposable-database preflight** — on the exact Coolify PostgreSQL service, measured PostgreSQL 16.14, direct internal port 5432, TLS disabled, `max_connections=100`, and superuser/CREATEDB/CREATEROLE migration authority. A disposable same-cluster database ran taskq 0001→0002→0003, `verify: ok`, no-op second migrate, and a second green verify; OutLabs Auth reached `20260715_0020` twice; IAM converged report→14 creates→14 existing with zero changes/conflicts; and the complete poll-only `tools` profile returned `created`→`unchanged` with an authoritative-field oracle. Production stayed at app head `20260616_0005`, one legacy `outbound_tasks` row, and no `taskq` schema before/after. The exact disposable database was dropped and proved absent; only the six contract `NOLOGIN` roles remain cluster-wide. Coolify has a named PostgreSQL data volume and a successful daily S3 backup from 2026-07-19. The drill exposed S4-CQ-02: the app DSN itself is superuser, so enablement remains paused.
 
 - [x] **S4-CQ-01 · Actual production database adjudicated docs-first** — approved the Coolify-internal PostgreSQL service for first-host dogfood rather than introducing a host data migration or second taskq DSN. The living Stage-4 specification now records the real `staging-prep`/`d1b00fe` production line, 53/53 plus five-skip host gate, interim Postgres `outbound_tasks` legacy path, removed WhatsApp boundary, stale S4-00 inventory, exact no-dual-execution/R6-06 posture, and superseded Neon-only facts. A complete same-cluster disposable-database proof plus backup/durability record gates enablement, only that database may be dropped, and post-Stage-4 branch reconciliation is explicit. No source, SQL, migration, Tier-0, ADR, or Tier-4 file changed.
 
