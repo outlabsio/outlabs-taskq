@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from bench.runner import SCENARIOS, run_scenario
+from taskq.bench import SCENARIOS, run_scenario
 
 pytestmark = pytest.mark.taskq_sql
 

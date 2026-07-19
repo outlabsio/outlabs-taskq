@@ -46,7 +46,16 @@ from taskq.protocol import (
 )
 from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.settings import WorkerSettings
-from taskq.transport import TaskqTransport
+from taskq.transport import (
+    AuthorizationLookupTransport,
+    HousekeeperTransport,
+    ObserverTransport,
+    OperatorTransport,
+    ProducerTransport,
+    RunnerTransport,
+    TaskqTransport,
+    non_owning_transport_view,
+)
 from taskq.worker import (
     JobRunOutcome,
     JobRunReport,
@@ -97,6 +106,13 @@ __all__ = [
     "TaskRegistry",
     "TaskCancelled",
     "TaskqTransport",
+    "AuthorizationLookupTransport",
+    "HousekeeperTransport",
+    "ObserverTransport",
+    "OperatorTransport",
+    "ProducerTransport",
+    "RunnerTransport",
+    "non_owning_transport_view",
     "TaskqBackpressureError",
     "TaskqCapabilityError",
     "TaskqConfigError",

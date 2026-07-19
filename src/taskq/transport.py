@@ -1,9 +1,9 @@
-"""Transport-neutral typed command interface for Protocol v1 / contract 0.1."""
+"""Capability-sized transport interfaces for Protocol v1 / contract 0.1."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import Any, Literal, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, TypeVar, cast, runtime_checkable
 from uuid import UUID
 
 from taskq.protocol import (
@@ -22,21 +22,49 @@ from taskq.protocol import (
     HeartbeatResult,
     JobDetail,
     Metric,
-    QueueStats,
     QueueControlOutcome,
+    QueueStats,
     RedriveFailedResult,
     SettleResult,
 )
 
+TTransport = TypeVar("TTransport")
+
+
+class _NonOwningTransportView:
+    """Capability view whose close is deliberately a no-op."""
+
+    def __init__(self, transport: object) -> None:
+        self._transport = transport
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._transport, name)
+
+    async def aclose(self) -> None:
+        return None
+
+
+def non_owning_transport_view(transport: TTransport) -> TTransport:
+    """Return a delegating view that cannot close the underlying transport."""
+
+    return cast(TTransport, _NonOwningTransportView(transport))
+
+
+class ClosableTransport(Protocol):
+    async def aclose(self) -> None: ...
+
 
 @runtime_checkable
-class TaskqTransport(Protocol):
+class ProducerTransport(ClosableTransport, Protocol):
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult: ...
 
     async def enqueue_many(
         self, queue: str, items: Sequence[EnqueueManyItem]
     ) -> list[EnqueueResult]: ...
 
+
+@runtime_checkable
+class RunnerTransport(ClosableTransport, Protocol):
     async def claim(
         self,
         queue: str,
@@ -121,10 +149,9 @@ class TaskqTransport(Protocol):
         meta: Mapping[str, Any] | None = None,
     ) -> bool: ...
 
-    async def get_authorization_projection(
-        self, job_id: UUID
-    ) -> AuthorizationProjection | None: ...
 
+@runtime_checkable
+class ObserverTransport(ClosableTransport, Protocol):
     async def get_job(
         self,
         job_id: UUID,
@@ -141,6 +168,18 @@ class TaskqTransport(Protocol):
 
     async def metrics(self) -> list[Metric]: ...
 
+
+@runtime_checkable
+class AuthorizationLookupTransport(ClosableTransport, Protocol):
+    """Facade-internal observer projection; never an HTTP client command."""
+
+    async def get_authorization_projection(
+        self, job_id: UUID
+    ) -> AuthorizationProjection | None: ...
+
+
+@runtime_checkable
+class OperatorTransport(ClosableTransport, Protocol):
     async def ensure_queue(
         self, name: str, profile: Mapping[str, Any] | None = None, actor: str | None = None
     ) -> EnsureQueueResult: ...
@@ -179,11 +218,35 @@ class TaskqTransport(Protocol):
         self, worker_id: str, actor: str
     ) -> ExpireWorkerLeasesResult: ...
 
+
+@runtime_checkable
+class HousekeeperTransport(ClosableTransport, Protocol):
     async def tick(self, reap_limit: int = 100) -> dict[str, Any]: ...
 
     async def janitor(self) -> dict[str, Any]: ...
 
-    async def aclose(self) -> None: ...
+
+@runtime_checkable
+class TaskqTransport(
+    ProducerTransport,
+    RunnerTransport,
+    ObserverTransport,
+    AuthorizationLookupTransport,
+    OperatorTransport,
+    HousekeeperTransport,
+    Protocol,
+):
+    """Complete direct-SQL transport intersection retained for compatibility."""
 
 
-__all__ = ["TaskqTransport"]
+__all__ = [
+    "AuthorizationLookupTransport",
+    "ClosableTransport",
+    "HousekeeperTransport",
+    "ObserverTransport",
+    "OperatorTransport",
+    "ProducerTransport",
+    "RunnerTransport",
+    "TaskqTransport",
+    "non_owning_transport_view",
+]

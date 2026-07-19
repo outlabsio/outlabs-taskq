@@ -18,13 +18,13 @@ from taskq.protocol import (
 )
 from taskq.registry import InT, OutT, RetryStrategy, Task, TaskRegistry
 from taskq.sql.transport import SqlTaskqTransport
-from taskq.transport import TaskqTransport
+from taskq.transport import ProducerTransport
 
 
 class TaskQ:
     def __init__(
         self,
-        transport: TaskqTransport,
+        transport: ProducerTransport,
         *,
         registry: TaskRegistry | None = None,
         validate_job_types: bool = True,
@@ -35,7 +35,7 @@ class TaskQ:
         self._replacement_active = False
 
     @contextmanager
-    def replace_client(self, client: TaskqTransport) -> Iterator[TaskqTransport]:
+    def replace_client(self, client: ProducerTransport) -> Iterator[ProducerTransport]:
         """Temporarily replace this facade's transport for a test scope."""
         if self._replacement_active:
             raise TaskqConfigError("TaskQ client replacement cannot be nested")

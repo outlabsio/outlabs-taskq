@@ -61,18 +61,20 @@ Documentation = "https://github.com/outlabsio/outlabs-taskq/tree/main/docs"
 
 [project.scripts]
 taskq = "taskq.cli:main"
-taskq-bench = "bench.runner:main"
+taskq-bench = "taskq.bench:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[tool.hatch.build]
+exclude = ["**/.gitkeep"]
+
 [tool.hatch.build.targets.wheel]
-packages = ["src/taskq", "bench"]
+packages = ["src/taskq"]
 
 [tool.hatch.build.targets.sdist]
 include = [
-    "/bench",
     "/src",
     "/docs",
     "/tests",
@@ -83,6 +85,7 @@ include = [
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100

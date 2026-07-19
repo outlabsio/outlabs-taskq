@@ -25,22 +25,21 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 implementation open** — targeted round-5 delta accepted; S3-01 is the active slice |
-| Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
+| Stage | **Stage 3 implementation open** — S3-01 complete; S3-02 is the active slice |
+| Suite | 390/390 regular on PG18.3; 366/366 Stage-2 baseline on PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | Stage-3 completion gate after S3-01..04/AUDIT; no additional pre-implementation review required |
 
 ## Now
 
-- [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
-
-
-## Next — after S3-01
-
 - [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
+
+
+## Next — after S3-02
+
 - [ ] S3-03 implement TaskqRuntime, housekeeper, embedded worker, HTTP worker/CLI integration, and process budgets
 - [ ] S3-04 implement the OutLabs authorizer, catalog, provisioning service, and auth CLI
-- [ ] S3-AUDIT complete SQL/HTTP parity, security/race/resource evidence, PG16/18, artifacts, CI, and B9/B11 reporting
+- [ ] S3-AUDIT complete SQL/HTTP parity, security/race/resource evidence, PG16/18, artifacts, CI, and B14/B11 reporting
 
 ## Later
 
@@ -190,6 +189,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-01 · Capability protocols, generated wire surface, and HTTP clients** — split the SQL intersection into exact producer/runner/observer/authorization/operator/housekeeper protocols with non-owning close-safe views; added the independently-oracled Protocol-v1.0.4 HTTP catalog, strict bounded request/result models, fence-only claim wire projection, and metadata-driven active/gated/deferred generation; shipped side-effect-free sync/async HTTP clients with exact credentials, protocol/request-id negotiation, typed SQL-domain normalization, fresh-per-attempt retry IDs, keyed-only producer replay, worker-owned settlement replay, no claim replay, owned/borrowed cleanup, cancellation/fork/thread guards, and typed `TQ501`; moved the benchmark runner under `taskq`, removed wheel placeholders/top-level `bench`, and strengthened artifact missing-extra smoke evidence. The unchanged SQL/migrations pass 390/390 on PG18.3 with one opt-in skip, Ruff/format and wheel/sdist builds are clean; S3-02 is open.
 - [x] **S3-R5-DELTA · Round-5 remediation delta accepted** — independent review of `49c0d0b..11bba1a` confirmed the nine-path docs-only range, both trailers and same-commit board updates, byte-identical round-5 response hash, every ADR-017/remediation condition and acceptance vector, explicit residual ownership, clean worktree, Ruff, and 366/366 PG18 tests with one opt-in skip; S3-01 is open without a full round 6.
 - [x] **S3-R5-DOC · Round-5 documentation remediation** — froze the mounted lifespan-free sub-application and complete envelope ownership, operator-only queue ensure/pool/authorizer split, explicit five-name admin role plus reconcilable non-system roles, mode-honest personal-key policy, hidden deferred-route responders, single-queue-only HTTP long poll with scoped stop cancellation, timeout→`ClaimState.EMPTY`, generated retry classification, canonical authorization matrix, B14 benchmark identity, and the required S3-02/S3-04 vectors; every remaining R5 finding has an owning board slice and no source/SQL/grant/migration changed.
 - [x] **S3-R5-CQ · Round-5 Contract questions adjudicated** — accepted ADR-017 / Protocol document revision 1.0.4 defers the SQL-unbacked general list behind a hidden `TQ501`, corrects every surviving operator-minimal statement, removes the unproducible enqueue `created_at` and all non-authoritative echoes, and pins authenticated/non-reflective invalid-request-id behavior; the manifest records no 0.1 `list_jobs`, while SQL contract 0.1.2, grants, source, and migrations remain unchanged.

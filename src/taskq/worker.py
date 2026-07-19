@@ -43,7 +43,7 @@ from taskq.protocol import (
     SettleResult,
 )
 from taskq.registry import Task, TaskRegistry
-from taskq.transport import TaskqTransport
+from taskq.transport import RunnerTransport
 
 from taskq import __version__
 
@@ -224,7 +224,7 @@ class WorkerService:
 
     def __init__(
         self,
-        transport: TaskqTransport,
+        transport: RunnerTransport,
         registry: TaskRegistry,
         worker_id: str,
         *,
@@ -674,7 +674,7 @@ class WorkerSupervisor:
 
     def __init__(
         self,
-        transport: TaskqTransport,
+        transport: RunnerTransport,
         registry: TaskRegistry,
         worker_id: str,
         *,

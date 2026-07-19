@@ -8,14 +8,32 @@ an older client must continue decoding a newer compatible producer.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import datetime
 from dataclasses import dataclass
 from enum import StrEnum
+import json
 from types import MappingProxyType
-from typing import Annotated, Any, Final, Literal, TypeAlias
+from typing import Annotated, Any, Final, Generic, Literal, TypeAlias, TypeVar
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
+
+PROTOCOL_MAJOR: Final = 1
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.4"
+T = TypeVar("T")
+
+
+def _json_size(value: Any) -> int:
+    return len(
+        json.dumps(value, ensure_ascii=False, separators=(",", ":"), default=str).encode("utf-8")
+    )
+
+
+def _bounded_json(value: Any, limit: int, field: str) -> Any:
+    if value is not None and _json_size(value) > limit:
+        raise ValueError(f"{field} exceeds {limit} UTF-8 bytes")
+    return value
 
 
 class TqCode(StrEnum):
@@ -65,6 +83,32 @@ TQ_ERROR_REGISTRY: Final = MappingProxyType(
         ),
     }
 )
+
+
+class ProtocolError(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    code: TqCode | Literal["AUTH401", "AUTH403"]
+    message: str
+    retryable: bool
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ErrorEnvelope(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    protocol_version: Literal[1]
+    request_id: str
+    error: ProtocolError
+
+
+class CommandEnvelope(BaseModel, Generic[T]):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    protocol_version: Literal[1]
+    request_id: str
+    outcome: str
+    data: T
 
 
 class EnqueueStatus(StrEnum):
@@ -193,6 +237,259 @@ ENQUEUE_MANY_ITEMS_ADAPTER: Final[TypeAdapter[list[EnqueueManyItem]]] = TypeAdap
 )
 
 
+class EnqueueWireRequest(BaseModel):
+    """Canonical path-scoped enqueue body; queue never appears in the body."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    job_type: str
+    payload: dict[str, Any]
+    priority: int | None = None
+    scheduled_at: datetime | None = None
+    idempotency_key: str | None = None
+    concurrency_key: str | None = None
+    affinity_key: str | None = None
+    max_attempts: int | None = None
+    lease_seconds: int | None = None
+    backoff_mode: Literal["fixed", "exponential"] | None = None
+    backoff_base: int | None = None
+    backoff_cap: int | None = None
+    headers: dict[str, Any] | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 65536, "payload")
+
+    @field_validator("headers")
+    @classmethod
+    def _headers_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 8192, "headers")
+
+
+class EnqueueWireData(BaseModel):
+    """Exact authoritative single-enqueue response fields (ADR-017)."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID
+
+
+class EnqueueManyWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    items: tuple[EnqueueManyItem, ...] = Field(min_length=1, max_length=1000)
+
+    @model_validator(mode="after")
+    def _body_bound(self) -> EnqueueManyWireRequest:
+        _bounded_json(self.model_dump(mode="json"), 4 * 1024 * 1024, "bulk body")
+        for item in self.items:
+            _bounded_json(item.payload, 65536, "payload")
+            _bounded_json(item.headers, 8192, "headers")
+        return self
+
+
+class EnqueueManyWireItem(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    input_index: int = Field(ge=1)
+    job_id: UUID
+    outcome: EnqueueStatus
+
+
+class EnqueueManyWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    items: tuple[EnqueueManyWireItem, ...]
+
+
+class ClaimWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    worker_id: str = Field(min_length=1, max_length=200)
+    batch: int = Field(default=1, ge=1, le=50)
+    job_types: tuple[str, ...] | None = Field(default=None, max_length=20)
+    lease_seconds: int | None = Field(default=None, ge=15, le=86400)
+    affinity_key: str | None = None
+    job_id: UUID | None = None
+    wait_seconds: float = Field(default=0, ge=0, le=30)
+
+
+class AttemptRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    attempt_id: UUID = Field(repr=False, json_schema_extra={"writeOnly": True})
+    worker_id: str = Field(min_length=1, max_length=200)
+
+
+class HeartbeatWireRequest(AttemptRequest):
+    lease_seconds: int | None = Field(default=None, ge=15, le=86400)
+    progress: dict[str, Any] | None = None
+    stats: dict[str, Any] | None = None
+
+    @field_validator("progress")
+    @classmethod
+    def _progress_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 2048, "progress")
+
+
+class CompleteWireRequest(AttemptRequest):
+    result: dict[str, Any] | None = None
+    stats: dict[str, Any] | None = None
+    followups: tuple[dict[str, Any], ...] | None = None
+
+    @field_validator("result")
+    @classmethod
+    def _result_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 8192, "result")
+
+
+class FailWireRequest(AttemptRequest):
+    error: str
+    retryable: bool = True
+    retry_after_seconds: int | None = Field(default=None, ge=0)
+    progress: dict[str, Any] | None = None
+    stats: dict[str, Any] | None = None
+
+    @field_validator("progress")
+    @classmethod
+    def _progress_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 2048, "progress")
+
+
+class SnoozeWireRequest(AttemptRequest):
+    delay_seconds: int = Field(ge=0, le=2592000)
+    reason: str | None = None
+    progress: dict[str, Any] | None = None
+
+    @field_validator("progress")
+    @classmethod
+    def _progress_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 2048, "progress")
+
+
+class ReleaseWireRequest(AttemptRequest):
+    cause: Literal["released", "worker_shutdown", "no_handler"]
+    delay_seconds: int = Field(default=0, ge=0, le=86400)
+    progress: dict[str, Any] | None = None
+
+    @field_validator("progress")
+    @classmethod
+    def _progress_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 2048, "progress")
+
+
+class CancelRunningWireRequest(AttemptRequest):
+    reason: str
+
+
+class WorkerPresenceWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    worker_id: str = Field(min_length=1, max_length=200)
+    queues: tuple[str, ...] = Field(min_length=1)
+    hostname: str | None = Field(default=None, max_length=200)
+    pid: int | None = Field(default=None, gt=0, le=2147483647)
+    version: str | None = Field(default=None, max_length=200)
+    meta: dict[str, Any] | None = None
+
+    @field_validator("queues")
+    @classmethod
+    def _distinct_queues(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("queues must be distinct")
+        return value
+
+    @field_validator("meta")
+    @classmethod
+    def _meta_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 8192, "meta")
+
+
+class HeartbeatWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    cancel_requested: bool
+    lease_expires_at: datetime | None
+
+
+class SettleWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_status: JobStatus | None = None
+    scheduled_at: datetime | None = None
+    prior_verb: str | None = None
+
+
+class WorkerPresenceWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    shutdown_requested: bool
+
+
+class EnsureQueueWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    profile: dict[str, Any] = Field(default_factory=dict)
+
+
+class EmptyWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+
+class EnsureQueueWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    profile: dict[str, Any]
+
+
+class ReasonWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: str | None = None
+
+
+class CancelWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_status: JobStatus
+
+
+class RedriveWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reset_progress: bool = False
+
+
+class PurgeWireRequest(ReasonWireRequest):
+    limit: int = Field(default=100, ge=1, le=1000)
+
+
+class ReprioritizeWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    priority: int = Field(ge=0, le=1000)
+
+
+class ConcurrencyLimitWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    max_running: int = Field(ge=0)
+
+
+class ShutdownRequestWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    worker_id: str | None = None
+    queue: str | None = None
+
+
+class CountWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    count: int = Field(ge=0)
+
+
 class ClaimState(StrEnum):
     CLAIMED = "claimed"
     EMPTY = "empty"
@@ -306,6 +603,12 @@ class QueueStats(BaseModel):
     stats: dict[str, Any]
 
 
+class QueueStatsWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    items: tuple[QueueStats, ...]
+
+
 class ContractMeta(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -394,6 +697,97 @@ class CapabilityRole(StrEnum):
 class ReplayRule(StrEnum):
     FENCED = "verb-aware attempt replay"
     STATE_DERIVED = "state-derived idempotency or documented repeat"
+
+
+class HttpCommandName(StrEnum):
+    META = "meta"
+    ENSURE_QUEUE = "ensure_queue"
+    ENQUEUE = "enqueue"
+    ENQUEUE_MANY = "enqueue_many"
+    CLAIM = "claim"
+    HEARTBEAT = "heartbeat"
+    COMPLETE = "complete"
+    FAIL = "fail"
+    RELEASE = "release"
+    SNOOZE = "snooze"
+    CANCEL_RUNNING = "cancel_running"
+    WORKER_HEARTBEAT = "worker_heartbeat"
+    GET_JOB = "get_job"
+    GET_QUEUE_STATS = "get_queue_stats"
+    LIST_QUEUE_STATS = "list_queue_stats"
+    METRICS = "metrics"
+    PAUSE_QUEUE = "pause_queue"
+    RESUME_QUEUE = "resume_queue"
+    CANCEL = "cancel"
+    REDRIVE = "redrive"
+    EXPIRE_JOB = "expire_job"
+    EXPIRE_WORKER_LEASES = "expire_worker_leases"
+    PURGE_QUEUED = "purge_queued"
+    RUN_NOW = "run_now"
+    REPRIORITIZE = "reprioritize"
+    SET_CONCURRENCY_LIMIT = "set_concurrency_limit"
+    REQUEST_WORKER_SHUTDOWN = "request_worker_shutdown"
+    LIST_WORKERS = "list_workers"
+    GET_QUEUE = "get_queue"
+    LIST_JOBS = "list_jobs"
+
+
+class TaskqAction(StrEnum):
+    ENQUEUE = "enqueue"
+    RUN = "run"
+    READ = "read"
+    CONTROL = "control"
+    ADMIN = "admin"
+
+
+class QueueSource(StrEnum):
+    PATH = "path"
+    JOB_LOOKUP = "job_lookup"
+    DECLARED_QUEUES = "declared_queues"
+    GLOBAL = "global"
+    DEPLOYMENT = "deployment_policy"
+
+
+class HttpSurface(StrEnum):
+    ACTIVE = "active"
+    GATED = "gated"
+    DEFERRED = "deferred"
+
+
+class RetryClass(StrEnum):
+    NEVER = "never"
+    KEYED_ENQUEUE = "keyed_enqueue"
+    KEYED_BATCH = "keyed_batch"
+    SAFE_IDEMPOTENT = "safe_idempotent"
+    WORKER_SETTLEMENT = "worker_settlement"
+
+
+@dataclass(frozen=True, slots=True)
+class HttpCommandSpec:
+    method: Literal["GET", "POST", "PUT"]
+    path: str
+    action: TaskqAction | None
+    queue_source: QueueSource
+    surface: HttpSurface
+    outcomes: Mapping[str, int]
+    retry_class: RetryClass
+    sql_command: CommandName | None
+    request_model: type[BaseModel] | None = None
+    data_model: type[BaseModel] | None = None
+    enveloped: bool = True
+
+    @property
+    def active(self) -> bool:
+        return self.surface is HttpSurface.ACTIVE
+
+    @property
+    def errors(self) -> frozenset[TqCode]:
+        if self.surface is not HttpSurface.ACTIVE:
+            return frozenset({TqCode.CAPABILITY})
+        command_errors = (
+            COMMAND_SPECS[self.sql_command].errors if self.sql_command is not None else frozenset()
+        )
+        return frozenset(command_errors | {TqCode.VERSION, TqCode.INTERNAL, TqCode.UNAVAILABLE})
 
 
 @dataclass(frozen=True, slots=True)
@@ -622,40 +1016,460 @@ ClaimResult.model_rebuild()
 CLAIM_BATCH_ADAPTER: Final[TypeAdapter[ClaimResult]] = TypeAdapter(ClaimResult)
 
 
+class ClaimedJobWire(BaseModel):
+    """Claim-only wire projection; this is the sole response model carrying a fence."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID
+    queue: str
+    job_type: str
+    priority: int
+    payload: dict[str, Any]
+    headers: dict[str, Any]
+    progress: dict[str, Any] | None
+    attempt_id: UUID = Field(repr=False)
+    attempt_number: int
+    failure_count: int
+    max_attempts: int
+    lease_expires_at: datetime
+    workflow_id: UUID | None = None
+    step_key: str | None = None
+    lease_seconds: int = Field(ge=15, le=86400)
+
+    def to_core(self) -> ClaimedJob:
+        return ClaimedJob.model_validate(self.model_dump())
+
+
+class ClaimWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    jobs: tuple[ClaimedJobWire, ...] = ()
+    elapsed_seconds: float | None = None
+    deadline: datetime | None = None
+
+
+def _status_map(**outcomes: int) -> Mapping[str, int]:
+    return MappingProxyType(dict(outcomes))
+
+
+def _http(
+    method: Literal["GET", "POST", "PUT"],
+    path: str,
+    action: TaskqAction | None,
+    queue_source: QueueSource,
+    outcomes: Mapping[str, int],
+    retry_class: RetryClass,
+    sql_command: CommandName | None,
+    *,
+    surface: HttpSurface = HttpSurface.ACTIVE,
+    request_model: type[BaseModel] | None = None,
+    data_model: type[BaseModel] | None = None,
+    enveloped: bool = True,
+) -> HttpCommandSpec:
+    return HttpCommandSpec(
+        method=method,
+        path=path,
+        action=action,
+        queue_source=queue_source,
+        surface=surface,
+        outcomes=MappingProxyType(dict(outcomes)),
+        retry_class=retry_class,
+        sql_command=sql_command,
+        request_model=request_model,
+        data_model=data_model,
+        enveloped=enveloped,
+    )
+
+
+_RUN = TaskqAction.RUN
+_READ = TaskqAction.READ
+_CONTROL = TaskqAction.CONTROL
+_ADMIN = TaskqAction.ADMIN
+_PATH = QueueSource.PATH
+_LOOKUP = QueueSource.JOB_LOOKUP
+_GLOBAL = QueueSource.GLOBAL
+_SAFE = RetryClass.SAFE_IDEMPOTENT
+_NEVER = RetryClass.NEVER
+_SETTLE = RetryClass.WORKER_SETTLEMENT
+
+# Human-maintained protocol metadata. Tests derive the expected identities and
+# mappings independently from Tier 0 and never import this table for expected values.
+HTTP_COMMAND_SPECS: Final = MappingProxyType(
+    {
+        HttpCommandName.META: _http(
+            "GET",
+            "/taskq/v1/meta",
+            _READ,
+            QueueSource.DEPLOYMENT,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_CONTRACT_META,
+            data_model=ContractMeta,
+        ),
+        HttpCommandName.ENSURE_QUEUE: _http(
+            "PUT",
+            "/taskq/v1/queues/{queue}",
+            _ADMIN,
+            _PATH,
+            _status_map(created=201, updated=200, unchanged=200),
+            _SAFE,
+            CommandName.ENSURE_QUEUE,
+            request_model=EnsureQueueWireRequest,
+            data_model=EnsureQueueWireData,
+        ),
+        HttpCommandName.ENQUEUE: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/jobs",
+            TaskqAction.ENQUEUE,
+            _PATH,
+            _status_map(created=201, existed=200),
+            RetryClass.KEYED_ENQUEUE,
+            CommandName.ENQUEUE,
+            request_model=EnqueueWireRequest,
+            data_model=EnqueueWireData,
+        ),
+        HttpCommandName.ENQUEUE_MANY: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/jobs/batch",
+            TaskqAction.ENQUEUE,
+            _PATH,
+            _status_map(ok=200),
+            RetryClass.KEYED_BATCH,
+            CommandName.ENQUEUE_MANY,
+            request_model=EnqueueManyWireRequest,
+            data_model=EnqueueManyWireData,
+        ),
+        HttpCommandName.CLAIM: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/claims",
+            _RUN,
+            _PATH,
+            _status_map(claimed=200, empty=200, timeout=200, paused=200, unavailable=200),
+            _NEVER,
+            CommandName.CLAIM,
+            request_model=ClaimWireRequest,
+            data_model=ClaimWireData,
+        ),
+        HttpCommandName.HEARTBEAT: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/heartbeat",
+            _RUN,
+            _LOOKUP,
+            _status_map(ok=200, lost=409),
+            _SAFE,
+            CommandName.HEARTBEAT,
+            request_model=HeartbeatWireRequest,
+            data_model=HeartbeatWireData,
+        ),
+        HttpCommandName.COMPLETE: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/complete",
+            _RUN,
+            _LOOKUP,
+            _status_map(ok=200, already_settled=200, settle_conflict=409, lost=409),
+            _SETTLE,
+            CommandName.COMPLETE,
+            request_model=CompleteWireRequest,
+            data_model=SettleWireData,
+        ),
+        HttpCommandName.FAIL: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/fail",
+            _RUN,
+            _LOOKUP,
+            _status_map(
+                retry_scheduled=200, dead=200, already_settled=200, settle_conflict=409, lost=409
+            ),
+            _SETTLE,
+            CommandName.FAIL,
+            request_model=FailWireRequest,
+            data_model=SettleWireData,
+        ),
+        HttpCommandName.RELEASE: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/release",
+            _RUN,
+            _LOOKUP,
+            _status_map(ok=200, already_settled=200, settle_conflict=409, lost=409),
+            _SETTLE,
+            CommandName.RELEASE,
+            request_model=ReleaseWireRequest,
+            data_model=SettleWireData,
+        ),
+        HttpCommandName.SNOOZE: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/snooze",
+            _RUN,
+            _LOOKUP,
+            _status_map(ok=200, already_settled=200, settle_conflict=409, lost=409),
+            _SETTLE,
+            CommandName.SNOOZE,
+            request_model=SnoozeWireRequest,
+            data_model=SettleWireData,
+        ),
+        HttpCommandName.CANCEL_RUNNING: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/cancel-running",
+            _RUN,
+            _LOOKUP,
+            _status_map(ok=200, already_settled=200, settle_conflict=409, lost=409),
+            _SETTLE,
+            CommandName.CANCEL_RUNNING,
+            request_model=CancelRunningWireRequest,
+            data_model=SettleWireData,
+        ),
+        HttpCommandName.WORKER_HEARTBEAT: _http(
+            "POST",
+            "/taskq/v1/workers/heartbeat",
+            _RUN,
+            QueueSource.DECLARED_QUEUES,
+            _status_map(**{"continue": 200, "shutdown_requested": 200}),
+            _SAFE,
+            CommandName.WORKER_HEARTBEAT,
+            request_model=WorkerPresenceWireRequest,
+            data_model=WorkerPresenceWireData,
+        ),
+        HttpCommandName.GET_JOB: _http(
+            "GET",
+            "/taskq/v1/jobs/{job_id}",
+            _READ,
+            _LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_JOB,
+            data_model=JobDetail,
+        ),
+        HttpCommandName.GET_QUEUE_STATS: _http(
+            "GET",
+            "/taskq/v1/stats/queues/{queue}",
+            _READ,
+            _PATH,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_QUEUE_STATS,
+            data_model=QueueStatsWireData,
+        ),
+        HttpCommandName.LIST_QUEUE_STATS: _http(
+            "GET",
+            "/taskq/v1/stats/queues",
+            _READ,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_QUEUE_STATS,
+            data_model=QueueStatsWireData,
+        ),
+        HttpCommandName.METRICS: _http(
+            "GET",
+            "/taskq/metrics",
+            None,
+            QueueSource.DEPLOYMENT,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.METRICS,
+            enveloped=False,
+        ),
+        HttpCommandName.PAUSE_QUEUE: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/pause",
+            _CONTROL,
+            _PATH,
+            _status_map(paused=200, already_paused=200),
+            _SAFE,
+            CommandName.PAUSE_QUEUE,
+            request_model=ReasonWireRequest,
+        ),
+        HttpCommandName.RESUME_QUEUE: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/resume",
+            _CONTROL,
+            _PATH,
+            _status_map(resumed=200, already_resumed=200),
+            _SAFE,
+            CommandName.RESUME_QUEUE,
+            request_model=EmptyWireRequest,
+        ),
+        HttpCommandName.CANCEL: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/cancel",
+            _CONTROL,
+            _LOOKUP,
+            _status_map(cancelled=200, cancel_requested=202, already_terminal=200),
+            _SAFE,
+            CommandName.CANCEL,
+            request_model=ReasonWireRequest,
+            data_model=CancelWireData,
+        ),
+        HttpCommandName.REDRIVE: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/redrive",
+            _CONTROL,
+            _LOOKUP,
+            _status_map(redriven=200),
+            _SAFE,
+            CommandName.REDRIVE,
+            request_model=RedriveWireRequest,
+        ),
+        HttpCommandName.EXPIRE_JOB: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/expire",
+            _CONTROL,
+            _LOOKUP,
+            _status_map(expired_and_reaped=200, not_running=409),
+            _SAFE,
+            CommandName.EXPIRE_JOB,
+            request_model=EmptyWireRequest,
+        ),
+        HttpCommandName.EXPIRE_WORKER_LEASES: _http(
+            "POST",
+            "/taskq/v1/workers/{worker_id}/expire-leases",
+            _CONTROL,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.EXPIRE_WORKER_LEASES,
+            request_model=EmptyWireRequest,
+            data_model=ExpireWorkerLeasesResult,
+        ),
+        HttpCommandName.PURGE_QUEUED: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/purge",
+            _CONTROL,
+            _PATH,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.PURGE_QUEUED,
+            request_model=PurgeWireRequest,
+            data_model=CountWireData,
+        ),
+        HttpCommandName.RUN_NOW: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/run-now",
+            _CONTROL,
+            _LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.RUN_NOW,
+            request_model=EmptyWireRequest,
+        ),
+        HttpCommandName.REPRIORITIZE: _http(
+            "POST",
+            "/taskq/v1/jobs/{job_id}/reprioritize",
+            _CONTROL,
+            _LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.REPRIORITIZE,
+            request_model=ReprioritizeWireRequest,
+        ),
+        HttpCommandName.SET_CONCURRENCY_LIMIT: _http(
+            "PUT",
+            "/taskq/v1/concurrency-limits/{key}",
+            _ADMIN,
+            _GLOBAL,
+            _status_map(created=201, updated=200, unchanged=200),
+            _SAFE,
+            CommandName.SET_CONCURRENCY_LIMIT,
+            request_model=ConcurrencyLimitWireRequest,
+        ),
+        HttpCommandName.REQUEST_WORKER_SHUTDOWN: _http(
+            "POST",
+            "/taskq/v1/workers/shutdown-requests",
+            _CONTROL,
+            _GLOBAL,
+            _status_map(accepted=202),
+            _SAFE,
+            CommandName.REQUEST_WORKER_SHUTDOWN,
+            request_model=ShutdownRequestWireRequest,
+            data_model=CountWireData,
+        ),
+        HttpCommandName.LIST_WORKERS: _http(
+            "GET", "/taskq/v1/workers", _READ, _GLOBAL, {}, _NEVER, None, surface=HttpSurface.GATED
+        ),
+        HttpCommandName.GET_QUEUE: _http(
+            "GET",
+            "/taskq/v1/queues/{queue}",
+            _READ,
+            _PATH,
+            {},
+            _NEVER,
+            None,
+            surface=HttpSurface.DEFERRED,
+        ),
+        HttpCommandName.LIST_JOBS: _http(
+            "GET", "/taskq/v1/jobs", _READ, _GLOBAL, {}, _NEVER, None, surface=HttpSurface.DEFERRED
+        ),
+    }
+)
+
+
 __all__ = [
+    "AttemptRequest",
     "AuthorizationProjection",
     "COMMAND_SPECS",
     "CLAIM_BATCH_ADAPTER",
+    "CancelRunningWireRequest",
+    "CancelWireData",
     "CancelOutcome",
     "CancelResult",
     "CapabilityRole",
     "ClaimedJob",
     "ClaimResult",
     "ClaimState",
+    "ClaimWireData",
+    "ClaimWireRequest",
+    "ClaimedJobWire",
+    "CommandEnvelope",
     "CommandName",
     "CommandOkOutcome",
     "CommandSpec",
     "ConfigChangeOutcome",
+    "ConcurrencyLimitWireRequest",
+    "CountWireData",
     "ContractMeta",
+    "CompleteWireRequest",
     "ENQUEUE_MANY_ITEMS_ADAPTER",
     "ENQUEUE_RESULT_ADAPTER",
     "EnqueueCommand",
+    "EmptyWireRequest",
     "EnqueueCreatedResult",
     "EnqueueExistedResult",
     "EnqueueManyItem",
+    "EnqueueManyWireData",
+    "EnqueueManyWireItem",
+    "EnqueueManyWireRequest",
     "EnqueueResult",
     "EnqueueStatus",
+    "EnqueueWireData",
+    "EnqueueWireRequest",
+    "ErrorEnvelope",
     "EnsureQueueResult",
+    "EnsureQueueWireData",
+    "EnsureQueueWireRequest",
     "ExpireJobOutcome",
     "ExpireWorkerLeasesResult",
     "HeartbeatResult",
+    "HeartbeatWireData",
+    "HeartbeatWireRequest",
+    "HTTP_COMMAND_SPECS",
+    "HttpCommandName",
+    "HttpCommandSpec",
+    "HttpSurface",
     "JobDetail",
     "JobStatus",
     "Metric",
     "QueueControlOutcome",
+    "QueueSource",
     "QueueStats",
+    "QueueStatsWireData",
     "RedriveFailedResult",
     "ReplayRule",
+    "ReleaseWireRequest",
+    "ReasonWireRequest",
+    "RedriveWireRequest",
+    "ReprioritizeWireRequest",
+    "RetryClass",
     "SETTLE_RESULT_ADAPTER",
     "SettleAlreadySettledResult",
     "SettleConflictResult",
@@ -665,7 +1479,18 @@ __all__ = [
     "SettleOutcome",
     "SettleResult",
     "SettleRetryScheduledResult",
+    "SettleWireData",
+    "SnoozeWireRequest",
+    "ShutdownRequestWireRequest",
+    "PurgeWireRequest",
+    "FailWireRequest",
+    "PROTOCOL_DOCUMENT_REVISION",
+    "PROTOCOL_MAJOR",
+    "ProtocolError",
+    "TaskqAction",
     "TQ_ERROR_REGISTRY",
     "TqCode",
     "TqErrorSpec",
+    "WorkerPresenceWireData",
+    "WorkerPresenceWireRequest",
 ]

@@ -95,6 +95,20 @@ _ERROR_TYPES: dict[TqCode, type[TaskqError]] = {
 }
 
 
+def taskq_error_from_code(
+    code: TqCode | str,
+    *,
+    details: Mapping[str, Any] | None = None,
+) -> TaskqError:
+    """Construct a stable public error from a Protocol error code."""
+
+    try:
+        normalized = code if isinstance(code, TqCode) else TqCode(code)
+    except ValueError:
+        normalized = TqCode.INTERNAL
+    return _ERROR_TYPES[normalized](details=details)
+
+
 def _exception_chain(exc: BaseException) -> list[BaseException]:
     pending: list[BaseException] = [exc]
     result: list[BaseException] = []
@@ -147,5 +161,6 @@ __all__ = [
     "TaskqValidationError",
     "TaskqVersionError",
     "UnknownTaskError",
+    "taskq_error_from_code",
     "taskq_error_from_exception",
 ]

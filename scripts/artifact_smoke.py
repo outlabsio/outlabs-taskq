@@ -90,15 +90,23 @@ def main() -> None:
     if args.mode == "core":
         assert importlib.util.find_spec("fastapi") is None
         assert importlib.util.find_spec("outlabs_auth") is None
+        try:
+            import taskq.http  # noqa: F401
+        except ModuleNotFoundError as exc:
+            assert str(exc) == ("taskq.http requires the HTTP extra: install 'outlabs-taskq[http]'")
+        else:
+            raise AssertionError("core-only taskq.http import must name the missing HTTP extra")
     elif args.mode == "http":
         assert importlib.util.find_spec("fastapi") is not None
         assert importlib.util.find_spec("outlabs_auth") is None
         import fastapi  # noqa: F401
+        import taskq.http  # noqa: F401
     else:
         assert importlib.util.find_spec("fastapi") is not None
         assert importlib.util.find_spec("outlabs_auth") is not None
         import fastapi  # noqa: F401
         import outlabs_auth  # noqa: F401
+        import taskq.http  # noqa: F401
 
     assert TaskQ is not None
     assert TaskRegistry is not None
