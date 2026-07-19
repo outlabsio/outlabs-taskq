@@ -76,7 +76,9 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 ## Stage 3 — FastAPI + outlabs-auth
 
-`taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
+`taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.http.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
+
+**S3-00 specification frozen:** the [Stage 3 FastAPI and Authorization Specification](./Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) fixes capability-sized transports, H-13 generation, active/gated/deferred routes, exact envelopes and client retry/ownership, authoritative queue authorization, separate operator credentials, notification-hint long polling, composable runtime/housekeeper/embedded topology, process budgets, OutLabs adapter/provisioning, and the S3-01..04/AUDIT evidence matrix. Implementation remains closed pending round-5 review.
 
 ## Stage 4 — outlabsAPI dogfood (first host)
 

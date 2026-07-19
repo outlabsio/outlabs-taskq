@@ -25,19 +25,23 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 specification gate in progress** — ADR-016 closes S3-CQ-03 docs-first; implementation remains untouched |
+| Stage | **Stage 3 round-5 gate assembly** — specification frozen; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.3 + Function Manifest 0.1.2 (+ ADR-012..016) |
-| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
+| Next review | Round-5 request is next; no implementation before the response is accepted |
 
 ## Now
 
-- [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
-
-
-## Next — after S3-00-SPEC
-
 - [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
+
+
+## Next — blocked on round-5 response
+
+- [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
+- [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
+- [ ] S3-03 implement TaskqRuntime, housekeeper, embedded worker, HTTP worker/CLI integration, and process budgets
+- [ ] S3-04 implement the OutLabs authorizer, catalog, provisioning service, and auth CLI
+- [ ] S3-AUDIT complete SQL/HTTP parity, security/race/resource evidence, PG16/18, artifacts, CI, and B9/B11 reporting
 
 ## Later
 
@@ -121,6 +125,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-00-SPEC · Stage-3 integration contracts frozen** — the Tier-3 specification fixes capability-sized transport boundaries, H-13-generated active/gated/deferred HTTP surfaces, exact envelopes/client replay and ownership, authoritative queue authorization with separate operator credentials, connection-free long polling, composable housekeeper/embedded runtime and process budgets, OutLabs catalog/provisioning, and the S3-01..04/AUDIT acceptance matrix; no integration code or SQL change landed.
 - [x] **S3-CQ-03 · Final HTTP wire models normalized docs-first** — accepted ADR-016 and Protocol v1 document revision 1.0.3 define bounded request-id mint/echo behavior, correct queue ensure to the exact version-free SQL profile, and retain worker list as a generated typed-capability gate pending R2-16, with the declared-vs-deferred rule explicit and no SQL or migration change.
 - [x] **S3-CQ-02 · Queue-profile read contradiction adjudicated docs-first** — accepted ADR-015 and Protocol v1 document revision 1.0.2 visibly defer the unbacked GET route to H-11's Growth §4/R2-16 read-model design, exclude it from H-13's active generated surface, pin `TQ501`, retain stats/admin-ensure as the honest interim posture, and leave SQL contract 0.1.2 plus migrations 0001–0003 unchanged.
 - [x] **S3-CQ-01 · HTTP worker presence adjudicated docs-first** — accepted ADR-014 and Protocol v1 document revision 1.0.1 define the canonical route, all-declared-queue `run` authorization, advisory label/authenticated actor split, typed 200 outcomes, presence/job-heartbeat non-confusion rule, shared-fleet honesty edge, and H-13 generation/parity obligation without changing SQL contract 0.1.2 or adding a migration.
