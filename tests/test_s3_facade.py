@@ -180,6 +180,46 @@ async def test_bad_credentials_win_over_invalid_request_id_and_body() -> None:
     assert not transport.calls
 
 
+@pytest.mark.parametrize(
+    ("status", "reason", "code"),
+    [
+        (429, "auth_rate_limited", "TQ429"),
+        (503, "auth_infrastructure_unavailable", "TQ503"),
+    ],
+)
+async def test_auth_dependency_failures_have_typed_retryable_envelopes(
+    status: int, reason: str, code: str
+) -> None:
+    transport = FacadeTransport()
+
+    async def authenticate(request: Any) -> AuthContext:
+        raise HTTPException(
+            status_code=status,
+            detail={"reason": reason, "secret": "must-not-escape"},
+            headers={"Retry-After": "7"},
+        )
+
+    app = _mounted(create_taskq_app(_resources(transport), authorizer=callable_auth(authenticate)))
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.get("/taskq/v1/meta", headers=_headers())
+    body = response.json()
+    assert response.status_code == status
+    assert response.headers["Retry-After"] == "7"
+    assert body["error"] == {
+        "code": code,
+        "message": (
+            "authorization rate limited"
+            if status == 429
+            else "authorization dependency unavailable"
+        ),
+        "retryable": True,
+        "details": {"reason": reason},
+    }
+    assert "must-not-escape" not in response.text
+
+
 async def test_enqueue_authorizes_path_and_returns_exact_manifest_backed_data() -> None:
     transport = FacadeTransport()
     authorized: list[tuple[TaskqAction, str | None]] = []

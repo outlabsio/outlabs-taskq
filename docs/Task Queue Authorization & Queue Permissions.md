@@ -121,9 +121,12 @@ outlabs-auth builds permission checkers per name-set. The adapter builds them **
         # no resource_prefix: the taskq namespace is fixed (ADR-006; R2-17)
 
         async def authorize(self, request, action, queue):
-            names = ([f"{self._prefix}_{queue}:{action}"] if queue else []) + [f"{self._prefix}:{action}"]
+            names = (([f"taskq_{queue}:{action}"] if queue else [])
+                     + [f"taskq:{action}"]
+                     + list(self._extra_candidates.get(action, ())))
             checker = self._checkers.get_or_build(tuple(names))   # cached makefun dep
-            result = await checker(request=request, session=await self._session(request))
+            async with self._session_scope(request) as session:   # awaitable / async-gen / CM
+                result = await checker(request=request, session=session)
             return _to_auth_context(result)                        # actor = email | key name | service id
 
 There is **no** `resource_prefix`/namespace option (v1.6, R2-17): ADR-006 fixes the grammar and ADR-002 fixes the schema — isolated installations use separate databases. A configurable prefix would fork the permission namespace the provisioning helper, adapters, and catalogs all assume.

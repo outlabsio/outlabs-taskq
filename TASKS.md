@@ -25,19 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 implementation open** — S3-03 complete; S3-04 is the active slice |
-| Suite | 428/428 regular on PG18.3; 366/366 Stage-2 baseline on PG16.14; the PG18 million-row plan gate is 2/2 |
+| Stage | **Stage 3 implementation complete** — S3-04 is green; S3-AUDIT is the active completion gate |
+| Suite | 443/443 regular on PG18.3; 288/288 DB-free; 366/366 Stage-2 baseline on PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | Stage-3 completion gate after S3-01..04/AUDIT; no additional pre-implementation review required |
 
 ## Now
 
-- [ ] S3-04 implement the OutLabs authorizer, catalog, provisioning service, and auth CLI
-
-
-## Next — after S3-04
-
 - [ ] S3-AUDIT complete SQL/HTTP parity, security/race/resource evidence, PG16/18, artifacts, CI, and B14/B11 reporting
+
+
+## Next — after S3-AUDIT
+
+*(Stage 4 remains gated on the Stage-3 completion evidence.)*
 
 ## Later
 
@@ -171,7 +171,7 @@ owned explicitly rather than treated as closed:
   dynamic listener/disconnect races, stats semantics, envelope wording, metrics default, gated-worker
   action before activation, normative long-poll sequence).
 - **S3-03 (closed):** R5-20 (runtime-owned unsafe-sync process-exit actor and live-ASGI evidence).
-- **S3-04:** R5-12, R5-13, R5-15, R5-31, R5-32, R5-34, R5-35, R5-36 (auth 429/503, session lifecycle, queue input grammar,
+- **S3-04 (closed):** R5-12, R5-13, R5-15, R5-31, R5-32, R5-34, R5-35, R5-36 (auth 429/503, session lifecycle, queue input grammar,
   seed side effects, API-key wildcard honesty, legacy candidates, alpha/API names, transaction savepoint).
 - **S3-AUDIT:** R5-21, R5-25, R5-26, R5-28, R5-30 plus the accepted S3-02 §8 route-mechanism wording correction (independent oracle proof, exact CI/artifact claims, raw-read
   parity mutation, front-door freshness, documentation accuracy). R5-29 belongs to the future Growth §4 reactivation slice
@@ -187,6 +187,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-04 · OutLabs authorizer, catalog, provisioning, and auth CLI** — added the explicitly imported `taskq.http.outlabs` boundary against exact `outlabs-auth==0.1.0a24`: real-validator queue/global/legacy any-of authorization with concurrent checker caching, bounded subject-derived actors, owned awaitable/async-generator/context-manager session scopes, and sanitized auth 429/503 envelopes with `Retry-After`. The strict pure catalog emits five global plus five per canonical queue; explicit report/apply/reconcile provisioning uses `include_config=False`, non-system standard roles, the public role service, caller-owned transactions, and a SAVEPOINT, with deterministic policy notes for wildcard/API-key/SimpleRBAC limits. The lazy `taskq auth sync-permissions` CLI and non-atomic queue/IAM composition report partial failure without secrets. A real isolated-schema OutLabs installation proves first apply, idempotency, public-service drift conflict/reconciliation, and no global logging leakage; Enterprise/Simple policy, session, error, rollback, artifact, and import boundaries close all eight owned round-5 residuals. PG18.3 passes 443/443 with one opt-in skip and the DB-free lane passes 288/288; Ruff/format, wheel/sdist, and installed core/HTTP/OutLabs isolation are green. SQL contract 0.1.2, migrations, Tier 0, and Tier 4 are unchanged; S3-AUDIT is open and PG16 remains its gate.
 - [x] **S3-03-ACCEPT · S3-03 independently accepted** — external verification reproduced 428/428 on live PostgreSQL 18.3 with one opt-in skip, 274/274 DB-free, Ruff/format, wheel+sdist, both core and HTTP artifact-isolation proofs, clean worktree, and trailer/board hygiene. Source scrutiny accepted the SQL/HTTP stop split, runtime budgets and unwind, dynamic listener registration, response-loss settlement replay, nullable progress decode, and R5-20's live-thread process-exit evidence; no Tier-3 drift or SQL/migration/Tier-0/Tier-4 change exists. S3-04 may proceed while PG16 remains honestly deferred to S3-AUDIT.
 - [x] **S3-03 · Composable runtime, housekeeper, embedded/HTTP workers, and process budgets** — added the idempotent `TaskqRuntime` state machine, exact host-first lifespan composition/app-state restoration/DI, compatibility/readiness snapshots, five-second jittered housekeeper with transient recovery and fatal cleanup, lazy reconnectable long-poll listener ownership, and explicit resource ownership. Embedded execution is default-off and acknowledgement-gated, reuses the Stage-2 worker unchanged over separate runner pool/LISTEN resources, reports single/multi-process pool/handler/listener arithmetic, refuses database-ceiling oversubscription, and warns on unknown budgets or inverted ASGI grace. The worker CLI now selects exactly one SQL or secret-safe HTTP transport; HTTP mode forbids LISTEN and multi-queue long polling, cancels only its in-flight long-poll claim on stop, and retains worker-owned settlement replay. Live mounted PostgreSQL proves ordinary presence/settlement, dynamic long-poll wake, duplicate-housekeeper advisory-lock safety, HTTP response-loss convergence/remote drain, and R5-20's runtime process-exit actor firing while an ASGI-hosted sync thread remains live. A nullable claim projection decode found by that real HTTP path is pinned. The unchanged SQL/migration/Tier-0/Tier-4 surface passes 428/428 on PG18.3 with one opt-in skip and 274/274 DB-free; Ruff/format, wheel/sdist, and core/HTTP artifact isolation are green. S3-04 is open; PG16 remains for S3-AUDIT.
 - [x] **S3-02-ACCEPT · S3-02 independently accepted** — external verification reproduced 411/411 on live PostgreSQL 18.3 with one opt-in skip, 262/262 DB-free, Ruff/format, wheel+sdist, core/HTTP artifact isolation, clean worktree, trailer/board hygiene, and exact absence of SQL/migration/Tier-0/Tier-4 drift; the phased authorization, envelope/hiding/fence boundaries, long-poll hub, dynamic listener lifecycle, pool split, all nine owned round-5 residuals, and the legitimate order-independent Stage-2 import test were accepted. The non-blocking stale §8 `TaskqRoute` wording is owned by S3-AUDIT; S3-03 may proceed while PG16 remains honestly deferred to that audit.

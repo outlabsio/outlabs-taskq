@@ -45,7 +45,7 @@ http = [
 ]
 outlabs = [
     "outlabs-taskq[http]",
-    "outlabs-auth>=0.1.0a24,<0.2",
+    "outlabs-auth==0.1.0a24",
 ]
 dev = [
     "hypothesis>=6.0.0",

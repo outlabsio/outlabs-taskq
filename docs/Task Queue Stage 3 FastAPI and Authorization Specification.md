@@ -499,6 +499,13 @@ is package-enforced only under EnterpriseRBAC. Under SimpleRBAC it is a host rol
 human roles must not receive `taskq:run` or queue-scoped `run`, and worker credentials should be
 service tokens.
 
+The explicit `session_dependency` may return an awaitable session, an async context manager, or an
+async generator dependency. The adapter resolves and finalizes that provider for each authenticate
+or authorize call; it never retains a session between calls and never relies on FastAPI to tear down
+a manually invoked dependency. Construction rejects an OutLabs dependency surface that does not
+expose its documented `session` parameter. The authorization phase revalidates that the dependency
+result represents the same authenticated subject before accepting its permission decision.
+
 ### 11.2 Catalog and provisioning
 
 `taskq_permission_catalog(queues)` is pure and deterministic: five global permissions plus five per

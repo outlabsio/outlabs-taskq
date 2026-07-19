@@ -736,7 +736,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
-    { name = "outlabs-auth", marker = "extra == 'outlabs'", specifier = ">=0.1.0a24,<0.2" },
+    { name = "outlabs-auth", marker = "extra == 'outlabs'", specifier = "==0.1.0a24" },
     { name = "outlabs-taskq", extras = ["http"], marker = "extra == 'outlabs'" },
     { name = "pydantic", specifier = ">=2.0.0" },
     { name = "pydantic-settings", specifier = ">=2.0.0" },

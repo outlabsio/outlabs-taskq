@@ -20,7 +20,7 @@ import signal
 import socket
 import sys
 from collections.abc import Callable
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from pydantic import ValidationError
 from sqlalchemy import create_engine
@@ -293,6 +293,20 @@ def _add_worker_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     worker.add_argument("--pool-size", type=int)
 
 
+def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    auth = subparsers.add_parser("auth", help="explicit OutLabs IAM provisioning")
+    commands = auth.add_subparsers(dest="auth_command", required=True)
+    sync = commands.add_parser("sync-permissions", help="report or apply taskq IAM rows")
+    sync.add_argument("--dsn", default=os.environ.get("TASKQ_AUTH_DSN"))
+    sync.add_argument("--schema", default=os.environ.get("TASKQ_AUTH_SCHEMA"))
+    sync.add_argument("--queues", required=True, help="comma-separated canonical queue names")
+    sync.add_argument("--roles", choices=("standard", "none"), default="standard")
+    sync.add_argument("--role-prefix", default="taskq-")
+    sync.add_argument("--apply", action="store_true")
+    sync.add_argument("--reconcile", action="store_true")
+    sync.add_argument("--per-queue-roles", action="store_true")
+
+
 def _worker_overrides(args: argparse.Namespace) -> dict[str, object]:
     names = (
         "dsn",
@@ -319,6 +333,62 @@ def _worker_overrides(args: argparse.Namespace) -> dict[str, object]:
     return {name: getattr(args, name) for name in names if getattr(args, name) is not None}
 
 
+async def _run_auth_sync(args: argparse.Namespace) -> Any:
+    try:
+        from outlabs_auth import SimpleRBAC
+        from taskq.http.outlabs import provision_taskq_auth
+    except ModuleNotFoundError:
+        raise TaskqConfigError(
+            "taskq auth requires the OutLabs extra: install 'outlabs-taskq[outlabs]'"
+        ) from None
+
+    if not args.dsn:
+        raise TaskqConfigError("auth DSN is required via --dsn or TASKQ_AUTH_DSN")
+    queues = tuple(part.strip() for part in args.queues.split(",") if part.strip())
+    if not queues:
+        raise TaskqConfigError("--queues must contain at least one canonical queue")
+    url = _normalized_url(args.dsn)
+    if not _is_asyncpg_url(url):
+        raise TaskqConfigError("taskq auth provisioning requires an asyncpg PostgreSQL DSN")
+    auth = SimpleRBAC(
+        database_url=str(url.set(drivername="postgresql+asyncpg")),
+        database_schema=args.schema,
+        secret_key=secrets.token_urlsafe(48),
+        auto_migrate=False,
+    )
+    try:
+        await auth.initialize()
+        async with auth.get_session() as session:
+            report = await provision_taskq_auth(
+                auth,
+                session,
+                queues=queues,
+                roles=None if args.roles == "none" else "standard",
+                role_prefix=args.role_prefix,
+                mode="apply" if args.apply else "report",
+                reconcile=args.reconcile,
+                per_queue_roles=args.per_queue_roles,
+            )
+            if args.apply and report.ok:
+                await session.commit()
+            else:
+                await session.rollback()
+            return report
+    finally:
+        await auth.shutdown()
+
+
+def _print_auth_report(report: Any) -> None:
+    print(f"mode: {report.mode}")
+    for heading in ("created", "existing", "changed", "conflicting"):
+        values = getattr(report, heading)
+        print(f"{heading}: {len(values)}")
+        for value in values:
+            print(f"  - {value}")
+    for note in report.policy_notes:
+        print(f"policy: {note}")
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(
         prog="taskq",
@@ -338,6 +408,7 @@ def main(argv: list[str] | None = None) -> None:
     )
     p_verify.add_argument("dsn", help=_DSN_HELP)
     _add_worker_parser(subparsers)
+    _add_auth_parser(subparsers)
 
     args = parser.parse_args(argv)
 
@@ -370,6 +441,17 @@ def main(argv: list[str] | None = None) -> None:
             raise SystemExit(1) from None
         if exit_code:
             raise SystemExit(exit_code)
+    elif args.command == "auth":
+        try:
+            report = asyncio.run(_run_auth_sync(args))
+        except (TaskqConfigError, ValueError) as exc:
+            parser.error(str(exc))
+        except Exception as exc:
+            print(f"taskq auth sync failed: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(1) from None
+        _print_auth_report(report)
+        if report.conflicting:
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":

@@ -147,6 +147,7 @@ def _error_response(
     details: Mapping[str, Any] | None = None,
     message: str = "request failed",
     retryable: bool | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     if isinstance(code, TqCode):
         owned_retryable = TQ_ERROR_REGISTRY[code].retryable
@@ -162,7 +163,7 @@ def _error_response(
             "details": _safe_details(details),
         },
     }
-    return JSONResponse(body, status_code=status_code)
+    return JSONResponse(body, status_code=status_code, headers=dict(headers or {}))
 
 
 def _command_response(
@@ -863,6 +864,24 @@ def create_taskq_app(
                 403,
                 message="authorization failed",
                 details={"queue": queue} if queue is not None else None,
+            )
+        if exc.status_code in {429, 503}:
+            detail = exc.detail if isinstance(exc.detail, Mapping) else {}
+            reason = str(detail.get("reason") or "auth_dependency_failure")
+            retry_after = (exc.headers or {}).get("Retry-After")
+            headers = {"Retry-After": retry_after} if retry_after else None
+            code = TqCode.BACKPRESSURE if exc.status_code == 429 else TqCode.UNAVAILABLE
+            return _error_response(
+                request,
+                code,
+                exc.status_code,
+                message=(
+                    "authorization rate limited"
+                    if exc.status_code == 429
+                    else "authorization dependency unavailable"
+                ),
+                details={"reason": reason},
+                headers=headers,
             )
         return _error_response(request, TqCode.VALIDATION, 422)
 
