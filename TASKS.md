@@ -25,7 +25,7 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 credential rotation open** — S4-CQ-02 approved a dedicated non-superuser app/worker login; its disposable real-boot proof and rollback-ready rotation gate production taskq provisioning |
+| Stage | **S4-03 paused at S4-CQ-03** — restricted-runtime harness work may continue locally, but production rotation/provisioning waits on the owner-vs-`SET ROLE taskq_owner` migration contradiction |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
@@ -45,6 +45,27 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S4-CQ-03 — Immutable migration cannot execute after `SET ROLE taskq_owner`
+
+**Blocking evidence:** S4-CQ-02 condition 4 requested `taskq migrate/verify` under the owner via
+`SET ROLE taskq_owner`. An executed local scratch-database probe connected as the owner, granted
+database `CREATE` to the existing `NOLOGIN taskq_owner`, ran `SET ROLE taskq_owner`, and invoked the
+packaged installer. Migration 0001 failed with `InsufficientPrivilegeError: permission denied to
+alter role` at its required capability-role hardening. This is structural: the immutable migration
+must create/validate and alter the producer, runner, observer, operator, and housekeeper roles;
+`taskq_owner` correctly has neither CREATEROLE nor admin membership, and adding either would violate
+the locked reserved-role manifest. Do not change migration 0001, broaden `taskq_owner`, or improvise
+a partial production install.
+
+**Recommended adjudication:** name the PostgreSQL owner/admin login as the execution credential for
+`taskq migrate` and `taskq verify`, without `SET ROLE`. The immutable migration itself assigns all
+taskq objects to the `NOLOGIN taskq_owner`, revokes PUBLIC access, grants only capability roles, and
+`verify()` independently proves those ownership/grant facts. Retain the approved restricted runtime
+and operator login boundaries unchanged. This is the smallest correction and matches ADR-004,
+ADR-010, the Function Manifest, and the already executed S4-01/S4-03B migration evidence. Making
+`taskq_owner` capable of managing roles would require a new contract/ADR/migration design and is not
+recommended.
 
 ### S4-CQ-02 — The production app pool is PostgreSQL superuser
 

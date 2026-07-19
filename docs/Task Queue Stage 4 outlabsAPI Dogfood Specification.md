@@ -233,11 +233,14 @@ database creation, and no RLS bypass.
 
 The old owner DSN remains available outside the running application for an immediate env-flip and
 restart rollback. Deployment steps name their credential explicitly: host Alembic and OutLabs Auth
-migrations use the owner; taskq migrate/verify use owner-controlled taskq-owner authority; queue
-ensure and IAM use an operator-only login; API and worker containers receive only the restricted
-runtime DSN. The mandatory order is grant proof, rotation, healthy disabled posture, production
-taskq provisioning, then `TASKQ_ENABLED=true` in legacy mode. The final audit records this broader
-host-security improvement and keeps a restore/PITR rehearsal on the host backlog.
+migrations use the owner; queue ensure and IAM use an operator-only login; API and worker containers
+receive only the restricted runtime DSN. S4-CQ-03 pauses the production step because executing the
+immutable taskq migration after `SET ROLE taskq_owner` fails its required capability-role hardening;
+the recommended correction is direct execution by the owner/admin credential while migration SQL
+assigns objects to `taskq_owner` and `verify()` proves ownership. The mandatory order remains grant
+proof, rotation, healthy disabled posture, production taskq provisioning, then
+`TASKQ_ENABLED=true` in legacy mode. The final audit records this broader host-security improvement
+and keeps a restore/PITR rehearsal on the host backlog.
 
 Coolify mounts the named PostgreSQL data volume at `/var/lib/postgresql/data`. Scheduled backups run
 daily at 03:00 to S3; the 2026-07-19 run completed successfully. This records the observed durability
