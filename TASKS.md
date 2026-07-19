@@ -25,18 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 specification gate in progress** — ADR-015 closes S3-CQ-02 docs-first; implementation remains untouched |
+| Stage | **Stage 3 contract gate blocked** — S3-CQ-03 must close the remaining wire-model omissions; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.2 + Function Manifest 0.1.2 (+ ADR-012..015) |
-| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
+| Next review | Held until S3-CQ-03 closes, then Stage-3 round-5 contract/design boundary |
 
 ## Now
 
+- [ ] S3-CQ-03 close the remaining request-id, queue-ensure, and worker-list wire-model omissions; S3-00 remains closed
+
+
+## Next — after S3-CQ-03
+
 - [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
-
-
-## Next — after S3-00-SPEC
-
 - [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
 
 ## Later
@@ -79,6 +80,32 @@ from H-13's active generated client/OpenAPI/conformance surface. H-11 must react
 Growth §4 / R2-16 exact observer projection and read-model design. Observers retain queue stats;
 administrators receive canonical profiles from idempotent ensure. SQL contract 0.1.2 and migrations
 0001–0003 are unchanged; there is no migration 0004.
+
+### S3-CQ-03 — Remaining active wire models are not fully implementable
+
+**Blocking evidence:** the final H-13 model derivation found three independent gaps in the adopted
+Tier-0 wire text. First, every response requires `request_id` from a “validated inbound correlation
+header,” but the header name, accepted grammar, length, and generation/echo behavior are absent.
+Second, active `PUT /taskq/v1/queues/{queue}` promises a canonical profile **plus version**, while
+`taskq.ensure_queue` returns the canonical profile with no version column or value; H-11 explicitly
+defers optimistic concurrency. Third, active `GET /taskq/v1/workers` promises a safe presence
+projection but freezes neither fields nor pagination; the only SQL backing is observer-granted
+`worker_status`, whose `w.*` includes hostname, pid, and arbitrary direct-SQL `meta`, so forwarding
+the view would violate the no-secret/network-detail promise and an invented projection would violate
+R2-16/H-13. These are protocol-owned inputs/outputs, not Tier-3 implementation choices.
+
+**Recommended adjudication:** accept ADR-016 plus additive Protocol v1 document revision 1.0.3 as
+the final Stage-3 wire normalization: (1) reserve `Taskq-Request-Id`, accept 1–128 ASCII characters
+matching `[A-Za-z0-9._:-]+`, generate a lowercase UUID when absent, and echo the value in the body
+and response header; (2) correct queue ensure's 0.1 response to the exact canonical profile with no
+version, reject `If-Match` as H-11-inactive (`TQ501`), and add version/If-Match only with H-11; (3)
+move worker list into the explicit deferred-routes section with `TQ501`, excluded from H-13's active
+generated surface, until Growth §4/R2-16 freezes a bounded observer projection, redaction, cursor,
+authorization, and plan evidence. Keep per-worker presence writes and worker shutdown/expiry
+commands active; no SQL contract or migration changes.
+
+**Decision needed:** approve the recommendation or select different contract-owned wire shapes.
+Do not resume S3-00 until all three active models can be generated without Tier-3 invention.
 
 ## Round-4 finding dispositions
 
