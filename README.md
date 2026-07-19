@@ -21,7 +21,7 @@ Start here:
 | [`docs/Task Queue — Unified Design Spec.md`](docs/Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md) | Destination design (SQL-first), v1.6 |
 | [`docs/Task Queue Library Extraction Design Brief.md`](docs/Task%20Queue%20Library%20Extraction%20Design%20Brief.md) | Package boundaries + optional outlabs-auth |
 | [`docs/Task Queue Authorization & Queue Permissions.md`](docs/Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md) | Per-queue permissions + outlabs-auth adapter + provisioning DX |
-| [`docs/Task Queue Stage 4 outlabsAPI Dogfood Specification.md`](docs/Task%20Queue%20Stage%204%20outlabsAPI%20Dogfood%20Specification.md) | Frozen first-host lanes, dependency/database preflight, runtime/IAM integration, deploy/failure/rollback gates |
+| [`docs/Task Queue Stage 4 outlabsAPI Dogfood Specification.md`](docs/Task%20Queue%20Stage%204%20outlabsAPI%20Dogfood%20Specification.md) | Round-6-accepted first-host lanes, dependency/database preflight, runtime/IAM integration, deploy/failure/rollback gates |
 | [`docs/Task Queue Test & Benchmark Harness.md`](docs/Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Own test suites, exact CI matrix, and report-only benchmark scenarios |
 | [`docs/Task Queue Growth, Topology & Live Visibility.md`](docs/Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md) | Retention at scale, optional dedicated queue DB, stats API + SSE (partly proposals) |
 | [`docs/taskq-borrowed-features/`](docs/taskq-borrowed-features/README.md) | Normative product features to implement (01–14) |
