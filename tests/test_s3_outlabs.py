@@ -13,6 +13,7 @@ from uuid import uuid4
 import asyncpg
 from fastapi import HTTPException
 import pytest
+from sqlalchemy.engine import make_url
 from starlette.requests import Request
 
 from outlabs_auth import (
@@ -33,7 +34,7 @@ from taskq.http.outlabs import (
     provision_taskq_auth,
     taskq_permission_catalog,
 )
-from taskq.cli import _print_auth_report, main
+from taskq.cli import _asyncpg_dsn, _print_auth_report, main
 from taskq.protocol import TaskqAction
 
 
@@ -488,6 +489,17 @@ def test_cli_report_is_deterministic_and_prints_wildcard_policy(capsys: Any) -> 
     assert "conflicting: 1\n  - role:taskq-worker" in output
     assert "wildcard scopes are not supported" in output
     assert "super-secret-value" not in output
+
+
+def test_auth_cli_renders_the_real_password_for_the_owned_connection() -> None:
+    rendered = _asyncpg_dsn(
+        make_url("postgresql://installer:p%40ss%2Fword@db.example.test/taskq?ssl=require")
+    )
+
+    assert rendered == (
+        "postgresql+asyncpg://installer:p%40ss%2Fword@db.example.test/taskq?ssl=require"
+    )
+    assert "***" not in rendered
 
 
 def test_auth_cli_dispatches_lazily_without_printing_secret(

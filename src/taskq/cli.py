@@ -52,6 +52,11 @@ def _is_asyncpg_url(url: URL) -> bool:
     return url.drivername == "postgresql" or url.drivername.endswith("+asyncpg")
 
 
+def _asyncpg_dsn(url: URL) -> str:
+    """Render a real asyncpg DSN without SQLAlchemy's display-only redaction."""
+    return url.set(drivername="postgresql+asyncpg").render_as_string(hide_password=False)
+
+
 def _run_migrate(dsn: str) -> list[str]:
     url = _normalized_url(dsn)
     if _is_asyncpg_url(url):
@@ -351,7 +356,7 @@ async def _run_auth_sync(args: argparse.Namespace) -> Any:
     if not _is_asyncpg_url(url):
         raise TaskqConfigError("taskq auth provisioning requires an asyncpg PostgreSQL DSN")
     auth = SimpleRBAC(
-        database_url=str(url.set(drivername="postgresql+asyncpg")),
+        database_url=_asyncpg_dsn(url),
         database_schema=args.schema,
         secret_key=secrets.token_urlsafe(48),
         auto_migrate=False,
