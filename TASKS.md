@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 awaiting targeted round-5 delta check** — ADR-017 and all required docs remediation are complete; implementation remains stopped |
+| Stage | **Stage 3 implementation open** — targeted round-5 delta accepted; S3-01 is the active slice |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Targeted round-5 delta check after ADR-017 and documentation remediation; no full round 6 required |
+| Next review | Stage-3 completion gate after S3-01..04/AUDIT; no additional pre-implementation review required |
 
 ## Now
 
-- [ ] S3-R5-DELTA prove response byte preservation, contract/spec deltas, unchanged source/SQL, green suite, and reviewer-targeted disposition; then decide whether S3-01 opens
-
-
-## Next — after S3-R5-DELTA
-
 - [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
+
+
+## Next — after S3-01
+
 - [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
 - [ ] S3-03 implement TaskqRuntime, housekeeper, embedded worker, HTTP worker/CLI integration, and process budgets
 - [ ] S3-04 implement the OutLabs authorizer, catalog, provisioning service, and auth CLI
@@ -191,6 +190,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-R5-DELTA · Round-5 remediation delta accepted** — independent review of `49c0d0b..11bba1a` confirmed the nine-path docs-only range, both trailers and same-commit board updates, byte-identical round-5 response hash, every ADR-017/remediation condition and acceptance vector, explicit residual ownership, clean worktree, Ruff, and 366/366 PG18 tests with one opt-in skip; S3-01 is open without a full round 6.
 - [x] **S3-R5-DOC · Round-5 documentation remediation** — froze the mounted lifespan-free sub-application and complete envelope ownership, operator-only queue ensure/pool/authorizer split, explicit five-name admin role plus reconcilable non-system roles, mode-honest personal-key policy, hidden deferred-route responders, single-queue-only HTTP long poll with scoped stop cancellation, timeout→`ClaimState.EMPTY`, generated retry classification, canonical authorization matrix, B14 benchmark identity, and the required S3-02/S3-04 vectors; every remaining R5 finding has an owning board slice and no source/SQL/grant/migration changed.
 - [x] **S3-R5-CQ · Round-5 Contract questions adjudicated** — accepted ADR-017 / Protocol document revision 1.0.4 defers the SQL-unbacked general list behind a hidden `TQ501`, corrects every surviving operator-minimal statement, removes the unproducible enqueue `created_at` and all non-authoritative echoes, and pins authenticated/non-reflective invalid-request-id behavior; the manifest records no 0.1 `list_jobs`, while SQL contract 0.1.2, grants, source, and migrations remain unchanged.
 - [x] **S3-R5-RESPONSE · Round-5 response recorded** — registered the 235-line external response byte-for-byte as immutable Tier 4; verdict BLOCKED, architecture and scope accepted, two Contract questions plus three BLOCKER/five HIGH documentation findings gate S3-01, and the board sequences ADR-017 before docs-only remediation and a targeted delta check.
