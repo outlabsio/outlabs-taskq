@@ -25,18 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 specification gate in progress** — ADR-014 closes S3-CQ-01 docs-first; implementation remains untouched |
+| Stage | **Stage 3 contract gate blocked** — S3-CQ-02 must be adjudicated docs-first; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.1 + Function Manifest 0.1.2 (+ ADR-012..014) |
-| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
+| Next review | Held until S3-CQ-02 closes, then Stage-3 round-5 contract/design boundary |
 
 ## Now
 
+- [ ] S3-CQ-02 adjudicate the active HTTP queue-profile read route with no SQL-safe backing; S3-00 remains closed
+
+
+## Next — after S3-CQ-02
+
 - [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
-
-
-## Next — after S3-00-SPEC
-
 - [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
 
 ## Later
@@ -54,6 +55,27 @@
 **Resolution:** accepted ADR-014 and additive Protocol v1 document revision 1.0.1. The canonical route is `POST /taskq/v1/workers/heartbeat`; every distinct declared queue requires `run`; `worker_id` remains advisory while the authenticated subject is the actor; the two typed success outcomes are `continue | shutdown_requested` on HTTP 200. Worker presence extends no lease and carries no fence. H-13 generation and SQL/HTTP parity include the command. SQL contract 0.1.2 and the migration chain are unchanged.
 
 Resolved history: ADR-014 resolves S3-CQ-01 as Protocol v1 document revision 1.0.1; ADR-013 resolves S2-CQ-01 as contract 0.1.2; ADR-012 resolves round-3 CQ-01/CQ-02.
+
+### S3-CQ-02 — Active queue-profile read route has no SQL-safe backing
+
+**Blocking evidence:** the adopted Tier-0 Protocol v1 base declares
+`GET /taskq/v1/queues/{queue}` as an active `read` command backed by a “safe queue projection.”
+Function Manifest 0.1.2 has no queue-profile read function, and migration 0001 exposes exactly three
+observer views: `queue_stats`, `dead_jobs`, and `worker_status`. The observer role has no base-table
+`SELECT`; ADR-010/011 forbid broadening the ordinary facade credential or falling back to its
+separate operator pool. `taskq.ensure_queue` is operator-only and mutating, so it cannot honestly
+serve a GET. Unlike `list_jobs`, this route is not marked deferred by H-08 or another capability.
+
+**Recommended adjudication:** accept ADR-015 plus additive Protocol v1 document revision 1.0.2 that
+marks queue-profile GET unavailable in 0.1 (`TQ501`, capability inactive) and defers its exact safe
+projection plus optimistic-concurrency contract to the already-deferred H-11 interactive-admin
+slice. `PUT /taskq/v1/queues/{queue}` remains the bootstrap/admin command and returns its canonical
+profile. This closes Stage 3 without changing SQL contract 0.1.2 or adding migration 0004. The
+alternative is a docs-first Function Manifest 0.1.3 addition for an observer-safe
+`get_queue_profile(text)` plus immutable migration and PG16/PG18 fresh/upgrade evidence.
+
+**Decision needed:** approve the narrow H-11 deferral, or require the 0.1.3 SQL read primitive. Do
+not resume S3-00 until the Tier-0 route/backing contradiction is closed.
 
 ## Round-4 finding dispositions
 
