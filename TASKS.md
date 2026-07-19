@@ -25,13 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 paused at enablement** — the disabled production deploy is healthy; S4-CQ-01 must choose the actual production database before provisioning or canary traffic |
+| Stage | **S4-03 same-cluster preflight open** — S4-CQ-01 approved the actual Coolify PostgreSQL target; enablement remains paused until its complete disposable-database proof is recorded |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
+- [ ] S4-03B actual-cluster disposable-database preflight: server/ceiling/connection/TLS, role authority, migrate/verify/idempotency, IAM/profile convergence, backup/durability record, and database-only teardown
 - [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
@@ -69,8 +70,14 @@ application-data migration and preserves the one-database embedded-host topology
 mandatory, authorize and spec either the host data migration or a separate taskq DSN before source
 or production changes.
 
-**Decision needed:** approve the actual-database amendment and repeated in-place preflight, or choose
-the Neon host-migration/taskq-only-DSN alternative.
+**Resolution:** approved for the actual Coolify-internal PostgreSQL service. The Tier-3 specification
+records the deployed `staging-prep` reality and stale-default-branch audit, the Postgres-backed legacy
+path, no-WhatsApp boundary, deployed gate counts, mutual-exclusion/R6-06 analysis, and superseded
+Neon-specific facts. Before enablement, a disposable database on the same cluster must reproduce the
+complete S4-01 role/migration/verify/IAM/profile proof, record connection/TLS plus backup/durability
+posture, and be removed by dropping only that database. The Neon mechanics remain evidence; its
+pooler/TLS-proxy/901 facts are non-applicable. Stage 4 also owns post-acceptance reconciliation of
+`main` and the production line.
 
 ### S3-CQ-01 — HTTP worker presence is absent from Protocol v1
 
@@ -213,6 +220,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-CQ-01 · Actual production database adjudicated docs-first** — approved the Coolify-internal PostgreSQL service for first-host dogfood rather than introducing a host data migration or second taskq DSN. The living Stage-4 specification now records the real `staging-prep`/`d1b00fe` production line, 53/53 plus five-skip host gate, interim Postgres `outbound_tasks` legacy path, removed WhatsApp boundary, stale S4-00 inventory, exact no-dual-execution/R6-06 posture, and superseded Neon-only facts. A complete same-cluster disposable-database proof plus backup/durability record gates enablement, only that database may be dropped, and post-Stage-4 branch reconciliation is explicit. No source, SQL, migration, Tier-0, ADR, or Tier-4 file changed.
 
 - [x] **S4-03A · Disabled production deployment** — reconciled the accepted three-host-commit taskq slice onto Coolify's actual `staging-prep` production line while preserving its newer Postgres-backed legacy publisher and removed broker/domain code; the merged host passes 53/53 with five pre-existing infrastructure skips, Ruff, 61-file MyPy, lock, offline Alembic through `20260616_0005`, and image build. The first guarded candidate failed safely before replacement because the production image does not ship `uv`; Coolify retained the healthy old container, the pre-deploy command was corrected to `alembic upgrade head`, and a regression note was added. A second guarded candidate exposed OutLabs Auth a24's required Redis namespace; host commit `d1b00fe` adds the explicit setting/pass-through/test, Coolify now persists `OUTLABS_AUTH_REDIS_KEY_PREFIX=outlabs-auth:production:outlabs-api` and `OUTLABS_AUTH_AUTO_MIGRATE=false`, and the rolling deployment completed healthy on its first health attempt. Production evidence is health 200, application migration head `20260616_0005`, taskq meta 404, unauthenticated enqueue 401, and no `taskq` schema. S4-CQ-01 blocks enablement; no taskq production migration, role, IAM, queue, job, worker, or canary invocation occurred.
 

@@ -1,9 +1,10 @@
 # taskq — Stage 4 outlabsAPI Dogfood Specification
 
-> **Status:** Frozen by S4-00 — 2026-07-19
+> **Status:** Frozen by S4-00 — 2026-07-19; production-reality amendment approved by S4-CQ-01
 > **Tier:** 3 implementation design; subordinate to Protocol v1 document revision 1.0.4,
 > Function Manifest 0.1.2, and ADR-001..017
-> **Host baseline:** `outlabsAPI` at `a0019cd`
+> **Host baseline:** deployed `outlabsAPI` production line at `d1b00fe`; S4-00's `a0019cd`
+> inventory is retained as the stale-default-branch provenance that S4-CQ-01 corrected
 > **Library baseline:** `outlabs-taskq` at `8a13262` (accepted Stage-3 source at `b6e29ca`)
 > **Scope:** plan, integration seams, evidence, rollback, and task decomposition only. S4-00 changes no
 > host source, SQL contract, migration, deployment, or production state.
@@ -31,27 +32,31 @@ HTTP route, or wire field. A discovered contract defect triggers the normal STOP
 
 ## 2. Verified host reality
 
-S4-00 inspected the clean host rather than designing from the older adoption sketch:
+S4-00 inspected clean default branch `main` at `a0019cd`, but production had already diverged onto
+Coolify's `staging-prep` line in mid-June. Round 6 therefore audited a stale branch accurately rather
+than the deployed host. S4-CQ-01 corrects the living design without rewriting that historical review:
 
-- `outlabsAPI` pins `outlabs-auth==0.1.0a20`; taskq's adapter is source-audited and packaged against
-  exact `0.1.0a24`.
-- The complete host collection contains 47 tests: 44 pass and three opt-in infrastructure tests
-  skip. Loading the exact a24 package ahead of the a20 installation confirmed source compatibility,
-  but the real locked resolution also upgraded FastAPI from 0.135.1 to 0.139.2 and exposed two tests
-  coupled to router internals. S4-01 rewrote those tests against the application OpenAPI path set and
-  proved them under both FastAPI versions; the exact-a24 locked host then passed the same collection.
-- Production starts one Uvicorn process from the root Dockerfile. There is an existing host lifespan
-  that starts authentication and checks PostgreSQL, Redis, and the legacy broker.
-- `POST /tools/{tool_name}/runs/queued` currently schedules a background publish and returns no
-  durable id. The worker invokes the shared tool registry and discards successful result data.
+- Production now runs reconciled commit `d1b00fe` from `staging-prep`. The deployed line collects 58
+  tests: 53 pass and five opt-in infrastructure tests skip; Ruff is clean and MyPy covers 61 files.
+  The accepted taskq integration and its 18 tests are byte-identical to the accepted default-branch
+  slice. After Stage 4, `main` and the production lineage must become one authoritative line, and
+  future host gates inspect the deployed line.
+- The host locks exact `outlabs-auth==0.1.0a24` and immutable `outlabs-taskq==0.1.0a1`; the earlier
+  a20/default-branch overlay evidence remains provenance, not the current production dependency fact.
+- Production starts one Uvicorn process from the root Dockerfile. The host lifespan starts
+  authentication and checks PostgreSQL and Redis; no message broker or WhatsApp domain remains.
+- The legacy queued-tools path is the interim Postgres-backed `outbound_tasks` queue created by host
+  migration `20260616_0005`. `POST /tools/{tool_name}/runs/queued` schedules an insert through
+  `enqueue_tool_task`; a separate polling worker invokes the shared registry and discards successful
+  result data. Taskq strangles this path for allowlisted tools only.
 - The registered `umami` and `aerolineas` tools are asynchronous, read-only HTTP operations. Neither
   is CPU/browser/render work. The synchronous `/tools/{tool_name}/runs` route remains unchanged.
-- The production database is managed PostgreSQL behind a Neon DSN. Session behavior, role-creation
-  authority, connection ceiling, autosuspend cost, and migration credentials must be demonstrated on
-  a disposable preview branch before production.
-- The taskq repository has no release workflow or configured remote. A local editable/path dependency
-  is therefore forbidden as production provenance; S4-01 must create and pin an immutable alpha
-  artifact before host integration.
+- The live application DSN targets Coolify's internal PostgreSQL service, not Neon. Before taskq
+  enablement, the complete role/migration/IAM/profile drill must run in a disposable database on
+  this same cluster and record server, connection, TLS, role-authority, backup, and durability facts.
+- S4-01's deleted Neon-branch evidence is superseded only for Neon-specific production claims:
+  provider/pooler class, TLS proxy behavior, and ceiling 901 are non-applicable. Its immutable
+  migration, role, IAM, and queue-profile mechanics remain the rehearsal to reproduce in place.
 
 ## 3. Adopted decisions
 
@@ -96,8 +101,8 @@ Canary order is fixed:
 
 1. deploy cycle 1: `umami` only;
 2. deploy cycle 2: add `aerolineas` after cycle-1 evidence is green; and
-3. external-effect notification/contact/newsletter/analytics/WhatsApp lanes remain on their current
-   paths throughout Stage 4.
+3. external-effect notification/contact/newsletter/analytics lanes remain on the existing
+   `outbound_tasks` path throughout Stage 4; the removed WhatsApp lane does not exist.
 
 This is one low-consequence lane, which satisfies the Build Plan. Expanding to notifications is a new
 board task after acceptance, not a quiet addition to the dogfood slice.
@@ -113,7 +118,8 @@ TASKQ_TOOLS_ALLOWLIST=           # comma-separated canonical registered names
 TASKQ_DOGFOOD_PROBE_ENABLED=false
 ```
 
-When taskq is disabled or a tool is outside the allowlist, the existing legacy path is used. When
+When taskq is disabled or a tool is outside the allowlist, the existing Postgres-backed
+`outbound_tasks` path is used. When
 `TASKQ_TOOLS_MODE=taskq` and the tool is allowlisted, only taskq receives the job. Dual publishing,
 shadow execution, best-effort fallback after an ambiguous enqueue response, and catch-and-publish to
 the legacy system are forbidden because each can execute a tool twice.
@@ -121,10 +127,11 @@ the legacy system are forbidden because each can execute a tool twice.
 A typed taskq error is returned to the caller. The operator may change the feature flag and retry with
 an idempotency key; application code never guesses whether a failed enqueue committed.
 
-That idempotency key has no meaning on the legacy path: changing modes after an ambiguous taskq
-enqueue and then retrying can execute the read-only tool twice. Stage 4 accepts that operator-owned
-residual only for the explicitly read-only lanes; it is another reason §9 forbids any side-effecting
-lane without its own downstream idempotency proof.
+That idempotency key has no meaning on the `outbound_tasks` path: changing modes after an ambiguous
+taskq enqueue and then retrying can place one row in each Postgres queue and execute the read-only
+tool twice. This is the unchanged R6-06 cross-path replay residual. Stage 4 accepts it only as an
+operator-owned recovery risk for the explicitly read-only lanes; application code never publishes
+to both tables, and §9 forbids any side-effecting lane without downstream idempotency proof.
 
 ### 3.4 HTTP 202 and result readback (R2-18)
 
@@ -185,10 +192,11 @@ before entering this queue.
 
 Provisioning is explicit and pre-deploy; application startup performs no migration or IAM mutation.
 
-### 4.1 Preview-branch capability drill
+### 4.1 Managed-database capability drills
 
-Before host source wiring, S4-01 creates a disposable branch of the real managed PostgreSQL project
-and proves, with the exact intended credentials:
+S4-01 used a disposable Neon branch to prove the mechanics below. S4-CQ-01 supersedes its
+provider-specific facts and requires the same proof in a disposable database on the actual Coolify
+PostgreSQL cluster before enablement, with the exact intended credentials:
 
 1. OutLabs a20→a24 migration/current/seed behavior;
 2. `taskq migrate` fresh installation and `taskq verify`;
@@ -196,8 +204,15 @@ and proves, with the exact intended credentials:
 4. membership of the runtime login in producer, runner, observer, and housekeeper capabilities;
 5. an operator-only pre-deploy credential for `ensure_queue`, never present in the app pool;
 6. taskq IAM provisioning in `report` mode, then `apply`, then idempotent report;
-7. actual server version, connection ceiling, DSN pooler class, and SSL behavior; and
-8. teardown of the preview branch with no production mutation.
+7. actual server version, measured `max_connections`, connection class, and TLS behavior;
+8. the internal service's backup, restore, and durable-volume posture stated without invention; and
+9. teardown by dropping only the disposable database after proving the production database stayed
+   untouched.
+
+Because roles are cluster-wide, the drill records pre-existing safe taskq roles and removes only
+objects proven to have been created by the drill; it never drops a shared role by assumption. The
+immutable migrations and `verify()` run twice, IAM runs report → apply → idempotent report, and the
+`tools` queue profile returns `created` → `unchanged`.
 
 If the runtime credential cannot create roles, that is expected least privilege: the migration uses
 the managed owner/admin credential. If the managed service cannot support the contract even with its
@@ -312,10 +327,12 @@ worker presence, and zero manual DML. The probe flag is disabled after the drill
 ### 7.1 Deployment cycle 1
 
 1. Finish S4-01 preview migration/IAM/artifact proof.
-2. Deploy S4-02 integration with taskq enabled, tools mode still `legacy`, allowlist empty.
-3. Verify runtime readiness, pools, housekeeper, queue profile, IAM, and canonical meta/job reads.
-4. Set tools mode `taskq` with allowlist `umami`.
-5. Run keyed created/existed, success-result, terminal-failure, auth-denial, and concurrency probes.
+2. Deploy S4-02 integration disabled, adjudicate S4-CQ-01, and complete the same-cluster disposable
+   database preflight.
+3. Enable taskq with tools mode still `legacy` and allowlist empty.
+4. Verify runtime readiness, pools, housekeeper, queue profile, IAM, and canonical meta/job reads.
+5. Set tools mode `taskq` with allowlist `umami`.
+6. Run keyed created/existed, success-result, terminal-failure, auth-denial, and concurrency probes.
 
 ### 7.2 Deployment cycle 2
 
@@ -351,11 +368,13 @@ other legacy queue is removed in Stage 4.
 ### S4-01 — dependency, auth, and managed-database preflight
 
 - locked exact a24 plus immutable taskq alpha resolve without overrides;
-- existing 47-test host collection, Ruff, type check, Docker build, and import boundaries pass;
+- the deployed-line 58-test collection (53 pass, five explicit infrastructure skips), Ruff, type
+  check, Docker build, and import boundaries pass;
 - the two application-path tests pass under both FastAPI 0.135.1 and the locked 0.139.2 resolution;
-- preview-branch OutLabs upgrade and taskq fresh migrate/verify/provision pass;
-- role membership, pooler class, server version, connection ceiling, and SSL are recorded without
-  credentials; and
+- the original Neon preview evidence remains as superseded rehearsal, while the actual-cluster
+  disposable database passes taskq fresh migrate/verify/provision and exact-a24 IAM/profile flows;
+- role membership, connection class, server version, measured connection ceiling, SSL, and
+  backup/durability posture are recorded without credentials; and
 - production pre-deploy commands are idempotent and runtime auto-migration remains off; and
 - the live platform Stop Grace Period is recorded at 35 seconds, with practical drain proof deferred
   to the S4-AUDIT normal-deploy transcript.
@@ -437,8 +456,8 @@ Stop and record before proceeding if:
 ## 10. Explicit non-goals
 
 - Changing taskq SQL, wire contracts, retry budgets, or authorization grammar
-- Migrating notification, contact, newsletter, analytics-event, or WhatsApp lanes
-- Removing the legacy broker or any worker before Stage-4 acceptance
+- Migrating notification, contact, newsletter, or analytics-event lanes
+- Removing the legacy `outbound_tasks` producer/worker before Stage-4 acceptance
 - Side-effecting, CPU-heavy, browser, rendering, or batch handlers in the embedded worker
 - Multi-process API execution, autoscaling, or a dedicated taskq worker fleet
 - Proving managed-database LISTEN support or database autosuspend compatibility
