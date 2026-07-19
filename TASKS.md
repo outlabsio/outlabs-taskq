@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **S4-R6-DOC open** — S4-01 dependency, artifact, managed-database, and platform preflight is complete |
+| Stage | **S4-02 open** — round-6 documentation closure is complete; disabled-by-default host integration is next |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 44/44 regular with 3 opt-in skips |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | S4-R6-DOC gates disabled-by-default host integration at S4-02 |
+| Next review | S4-02 acceptance gates the allowlisted production canary at S4-03 |
 
 ## Now
 
-- [ ] S4-R6-DOC specification corrections and acceptance vectors for R6-02..R6-15 before S4-02
-
-
-## Next — after round-6 documentation closure
-
 - [ ] S4-02 disabled-by-default host integration plus local/live acceptance harness
+
+
+## Next — after disabled-by-default host integration
+
 - [ ] S4-03 allowlisted tools canary and two normal deploy cycles
 - [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance
 
@@ -189,6 +188,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S4-R6-DOC · Round-6 documentation closure** — amended the living Stage-4 specification for every R6-02..R6-15 finding without touching source, SQL, migrations, contracts, ADRs, or immutable review files. The handler now names real `NonRetryable`/`Retry` results and sanitized durable errors; keyed replay is limited to the active deduplication window; queued credentials are forbidden; cross-path replay risk is explicit and read-only-bounded; probe-registry and rollback-drain observables are exact; the cycle-2 failure drill is S4-AUDIT-owned; production enablement keys are complete; and the S4-02/S4-03/AUDIT rows name health, classification, payload secrecy, independent invocation, responsiveness, depth, and platform-grace oracles. S4-02 is open.
 - [x] **S4-01B · Immutable dependency and managed-platform preflight** — published `outlabs-taskq==0.1.0a1` as an immutable GitHub release wheel (`sha256:01ac3129866a8db34281688d65a95e9f30437b52739cec75c287c69e4d11a6ab`) after the managed drill exposed and pinned the auth CLI's display-redacted-password defect. Host commit `ef084ab` locks that exact wheel and `outlabs-auth==0.1.0a24`, rewrites the two router-internals tests against application OpenAPI, and passes them under FastAPI 0.135.1 and 0.139.2; the locked host passes 44/44 regular tests with three opt-in infrastructure skips, Ruff, MyPy, Docker build, and import checks. A disposable Neon PG18.4 branch proved the a20→a24 auth upgrade, taskq 0001→0003 migrate/verify/idempotency, separated runtime/operator membership, exact IAM reconciliation, queue-profile idempotency, direct unpooled transport, TLS observation, and `max_connections=901`; the branch was deleted and production data was untouched. Host commit `90fa63d` records the live Coolify `outlabs API` application reloaded with a 35-second Stop Grace Period, exceeding the image's 30-second ASGI grace and 20-second soft stop. S4-01 is complete; S4-R6-DOC opens before any host integration.
 - [x] **S4-01A · Managed-auth artifact correction** — the real password-authenticated managed preflight found that `taskq auth sync-permissions` passed SQLAlchemy's display-redacted `***` URL into OutLabs Auth. The CLI now renders its owned asyncpg DSN with `hide_password=False`, a special-character regression proves the driver/password/query are preserved without logging the value, and the package advances to `0.1.0a1` so the already-published a0 remains immutable rather than being replaced. No SQL, migration, contract, ADR, facade, worker, or permission semantics changed.
 - [x] **S4-00-R6 · Round-6 response recorded** — registered the external response byte-for-byte as immutable Tier 4. Its READY verdict opens S4-01 with no Contract questions, BLOCKERs, HIGHs, or preconditions; the exact a24 resolution/FastAPI test repair and platform-grace check belong to S4-01, while seven remaining MEDIUM and eight LOW wording/vector findings are board-owned before S4-02. The reviewer independently reproduced 448/448 taskq tests with one opt-in skip, the host's 44/44 regular tests with three gated infrastructure skips, the known two-test resolver failure, source inventory, profile/wire producibility, and clean review scope. Neither repository source, dependency lock, SQL, migration, contract, ADR, or prior Tier-4 file changed.

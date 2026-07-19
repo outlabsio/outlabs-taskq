@@ -79,7 +79,8 @@ dogfood gate.
 
 ### 3.2 One queue, one task, staged allowlist
 
-The Stage-4 queue is exactly `tools`. The task registry exposes one canonical task:
+The Stage-4 queue is exactly `tools`. The task registry exposes one canonical host task, plus the
+§6 probe task only while its dedicated flag is enabled:
 
 ```text
 job type: outlabs.tools.run
@@ -120,6 +121,11 @@ the legacy system are forbidden because each can execute a tool twice.
 A typed taskq error is returned to the caller. The operator may change the feature flag and retry with
 an idempotency key; application code never guesses whether a failed enqueue committed.
 
+That idempotency key has no meaning on the legacy path: changing modes after an ambiguous taskq
+enqueue and then retrying can execute the read-only tool twice. Stage 4 accepts that operator-owned
+residual only for the explicitly read-only lanes; it is another reason §9 forbids any side-effecting
+lane without its own downstream idempotency proof.
+
 ### 3.4 HTTP 202 and result readback (R2-18)
 
 The queued route retains its existing path and authentication dependency, but its success response is
@@ -136,8 +142,9 @@ frozen as HTTP 202:
 The route accepts optional `Idempotency-Key` using a bounded safe grammar. When absent, the server
 mints a UUID for that request and echoes it in the response header; this preserves current unkeyed
 behavior but cannot make a lost response replay-safe. Clients requiring replay safety must provide a
-stable key. Repeating a keyed request must return `existed` and the same job id without a second tool
-execution.
+stable key. Concurrent or repeated keyed requests converge to `existed` and the same job id only
+while the original job is active (`blocked`, `queued`, or `running`). After settlement, the active
+deduplication window has ended: replaying the same key creates a new job and a new execution.
 
 The canonical mounted taskq job-detail route is the status/result surface—no host copy of the taskq
 state model is introduced. A caller needs `taskq_tools:read` or global `taskq:read`. The existing
@@ -157,10 +164,18 @@ Terminal mapping is the taskq projection:
 The handler is async and never declares a sync executor. It maps outcomes deliberately:
 
 - successful `ToolResult` → `Complete(result=...)`;
-- a returned `ToolResult(success=false)` → terminal non-retryable `Fail` with a bounded safe reason;
-- missing tool or invalid parameters → terminal non-retryable `Fail`;
-- an unexpected transport/runtime exception → retryable `Fail`; and
+- a returned `ToolResult(success=false)` → `NonRetryable(error=...)`;
+- missing tool or invalid parameters → `NonRetryable(error=...)`;
+- a retryable transport fault may raise or return `Retry(error=...)`; and
 - cancellation/shutdown → the unchanged worker cancellation/release contract.
+
+Every durable error is a bounded sanitized classification plus the canonical tool name; the handler
+never stores a raw upstream response, authentication body, credential, exception string, or caller
+input. The S4-02 host change removes the existing raw authentication-body interpolation from the
+`umami` tool and pins the stored projection with a forced-failure vector. The queued route rejects
+`token` and any other credential-bearing parameter before enqueue; no caller bearer token may enter
+the durable payload. The existing module-global aerolineas token cache is a pre-existing host defect
+owned by a later follow-up, not permission to persist or share a caller token in Stage 4.
 
 Queue retries are not used to pretend arbitrary external effects are exactly once. The chosen tools
 are read-only; any future side-effecting handler must supply its own downstream idempotency proof
@@ -248,6 +263,8 @@ embedded_worker_pool_max=2
 expected_asgi_processes=1
 soft_stop_timeout=20s
 asgi_graceful_timeout=30s
+expected_environment="production"
+allow_production=true
 ```
 
 The deployment platform's application Stop Grace Period is configured to **35 seconds**, at least
@@ -306,14 +323,16 @@ worker presence, and zero manual DML. The probe flag is disabled after the drill
 2. Prove old/new overlap yields no duplicate execution and old process drains within 20 seconds.
 3. Add `aerolineas` to the allowlist only after the first cycle is green.
 4. Repeat HTTP 202→canonical GET result and keyed replay evidence.
-5. Execute the controlled process-failure drill.
+5. Execute the controlled process-failure drill; S4-AUDIT owns this step and its evidence even though
+   it is scheduled during deployment cycle 2.
 
 ### 7.3 Rollback rehearsal
 
 Rollback is a producer switch, not a schema downgrade:
 
 1. set `TASKQ_TOOLS_MODE=legacy` so new allowlisted requests use only the legacy path;
-2. keep the embedded worker enabled until queued/running taskq work reaches zero;
+2. keep the embedded worker enabled until queue `tools` reports
+   `ready + scheduled + blocked + running = 0`;
 3. soft-stop and disable taskq runtime after the drain;
 4. leave taskq migrations, roles, IAM catalog, and durable job history intact;
 5. prove the legacy queued endpoint still functions; and
@@ -344,10 +363,21 @@ other legacy queue is removed in Stage 4.
 ### S4-02 — disabled-by-default host integration
 
 - strict settings reject unknown mode, empty required ceiling, multi-process mismatch, bad allowlist,
-  inverted grace, or production enablement without explicit acknowledgement;
-- unit tests prove mutually exclusive producer selection and no fallback after ambiguous enqueue;
+  inverted grace, missing `expected_environment="production"`, or production enablement without
+  `allow_production=true`;
+- unit tests prove mutually exclusive producer selection, one mode/allowlist snapshot per request,
+  and no fallback after ambiguous enqueue using a fault-injection seam plus legacy-publisher spy;
 - request/response models prove bounded params, stable job type, exact 202 body, keyed replay, and
   fence/credential-safe representations;
+- the registry contains only `outlabs.tools.run` unless the controlled probe flag is enabled, when
+  exactly the private §6 probe is additionally registered;
+- active-window keyed requests converge while post-settlement replay creates a new job;
+- settlement vectors prove successful, terminal, retryable-transport, and cancellation outcomes:
+  every terminal row uses one attempt and the retryable transport row schedules a retry;
+- forced tool failures store only sanitized classification/tool name, never raw credential,
+  response-body, exception, or request text; queued credential-bearing parameters are rejected or
+  proven absent from the stored payload;
+- health vectors prove disabled → 200, enabled-but-not-ready → 503, and backlog alone → 200;
 - lifespan success/failure/cancellation tests return every pool/task/listener/session to baseline;
 - canonical CORS/OpenAPI/job-result projections are exact; and
 - the diff contains no taskq SQL/migration/contract change and no unrelated host-lane migration.
@@ -356,10 +386,14 @@ other legacy queue is removed in Stage 4.
 
 - live route→enqueue→embedded claim→handler→settle→authorized GET result against real PostgreSQL;
 - unauthorized/missing/wrong-queue reads preserve hiding and leave the job untouched;
-- keyed concurrent producer requests converge to one job and one tool invocation;
-- worker response-loss replay invokes the tool once and converges;
-- queue depth refusal is typed and never falls back;
-- host requests remain responsive while the embedded worker is active;
+- keyed concurrent producer requests converge to one job and one tool invocation, proved by taskq
+  attempt/event-ledger arithmetic plus an independent target-service access log or local counting
+  endpoint;
+- worker response-loss replay invokes the tool once and converges, proved by the same independent
+  ledger-plus-external-counter pair;
+- queue depth refusal is typed and never falls back, proved against an operator-created scratch queue
+  with a deliberately tiny `max_depth` (or by the accepted harness-level equivalent for this row);
+- health and synchronous-tool endpoints each answer within five seconds while an embedded job runs;
 - shutdown releases/drains inside platform grace; and
 - poll-only recovery works after database disconnect without correctness sleeps.
 
@@ -369,9 +403,10 @@ The audit packet contains, for both normal deploy cycles and the forced failure:
 
 - immutable host/library commits and artifact hashes;
 - redacted configuration manifest, queue profile, IAM report, server/pooler facts, and connection
-  arithmetic;
+  arithmetic, including the live 35-second platform Stop Grace Period;
 - job ids, typed outcomes, attempt/event conservation, worker ids, and timestamps;
-- before/after resource ledger and health/readiness observations;
+- before/after resource ledger and health/readiness observations, including a normal-deploy drain
+  transcript completed inside the configured platform grace;
 - canonical 202→GET result examples with secrets, payloads, and fences absent;
 - rollback and re-enable transcript with zero manual DML;
 - confirmation that only the selected tools changed producer; and
