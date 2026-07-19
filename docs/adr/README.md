@@ -22,5 +22,6 @@
 | [014](./ADR-014-http-worker-presence.md) | Canonical HTTP worker-presence command | S3-CQ-01 |
 | [015](./ADR-015-defer-queue-profile-read.md) | Defer queue-profile read to the designed read-model slice | S3-CQ-02 |
 | [016](./ADR-016-final-http-wire-normalization.md) | Final request-id, queue-ensure, and worker-list wire normalization | S3-CQ-03 |
+| [017](./ADR-017-final-manifest-backed-wire-corrections.md) | Final manifest-backed list, enqueue, and request-id wire corrections | R5-CQ-A, R5-CQ-B, R5-09 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

@@ -510,7 +510,7 @@ END $$;
 
 ## 7. Explicitly absent from the 0.1 migration
 
-`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, `list_jobs` beyond the operator-minimal form, and every 0.2/0.3 composite field. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, **every form of `list_jobs`**, and every 0.2/0.3 composite field. No `list_jobs` function or safe list projection exists in SQL contract 0.1.2; ADR-017 defers the HTTP operation to H-08's designed read-model slice. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
 
 ## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
 
@@ -523,6 +523,9 @@ Resolved when migration 0001 + the harness first met live PostgreSQL (42/42 cont
 5. **Queue/worker-level operator verbs (pause/resume/shutdown-request/set-limit) emit no `job_events` row** — `job_events.job_id` is NOT NULL; their audit is the typed result + caller logging (facade actor / CLI).
 6. **Verb-aware replay includes the reaper:** an attempt settled as `expired` answers any worker settle with `settle_conflict`.
 7. 0.1 single-`enqueue` rejects `p_depends_on`/`p_workflow_id` with `TQ501` (capability gate); bulk specs carrying dependency fields are `TQ422` with the input index.
+8. **No operator-minimal `list_jobs` exists in 0.1.** ADR-017 corrects the adopted Protocol
+   drafting error: SQL contract 0.1.2 contains neither a `list_jobs` function nor a safe general-list
+   projection. Its reserved HTTP path is a typed negative capability only until H-08 lands.
 
 ## 9. Contract patch 0.1.1 — ADR-012 (2026-07-18)
 

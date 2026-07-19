@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, and ADR-016 as additive protocol document revision **1.0.3**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, and ADR-017 as additive protocol document revision **1.0.4**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -15,7 +15,7 @@
 | H-05 bulk convergence | Closed by spec v1.6 §5.2 (one-result-per-input, later-snapshot resolution, `TQ500` atomic rollback) + manifest body. |
 | H-06 error envelope + native normalization | Accepted: §4 registry is closed; the manifest enumerates every public raise; facade normalizes any unregistered SQLSTATE to `TQ500` and logs the original privately. |
 | H-07 job-detail projection | **Closed — minimal safe projection frozen for 0.1:** `id, queue, job_type, status, outcome, priority, attempt_count, failure_count, max_attempts, created_at, scheduled_at, started_at, finished_at, updated_at` always; `error` (≤2KB), `result` (≤8KB), `progress` (≤2KB) only via explicit `include=` flags gated by queue `read`; `payload` (≤64KB) via `include=payload`, same gate; **never** headers, fences, or worker internals. Redaction hook point reserved per field. |
-| H-08 list cursors/indexes | Deferred as drafted: 0.1 read surface is get-by-id + per-queue stats; the general list route stays operator-minimal until the keyset + EXPLAIN evidence (B9) lands. |
+| H-08 list cursors/indexes | **Deferred out by ADR-017:** 0.1 read surface is get-by-id + per-queue stats; no general list function or successful HTTP list operation exists. Reactivation requires Growth §4 / R2-16 to freeze the observer projection, redaction, authorization, keyset cursor, indexes, and bounded EXPLAIN evidence. |
 | H-09 size ceilings | **Closed — published limits (also in `/meta.limits`):** payload ≤64KB, progress ≤2KB, result ≤8KB, stored error ≤2KB, bulk ≤1000 items and ≤4MB body, claim batch ≤50, `wait_seconds` ≤30, job-type filter ≤20 entries, headers ≤8KB. Oversize → `TQ422`. |
 | H-10 long-poll lifecycle | Accepted as drafted: disconnect cancels the waiter, never a committed claim; shutdown drains hub subscribers before LISTEN/pool close (tested in T6). |
 | H-11 profile read + If-Match | Deferred by ADR-015 (queues are bootstrap/migration-owned in 0.1). Reactivation requires the Growth §4 / R2-16 exact observer projection, redaction, authorization, bounded-plan, and optimistic-concurrency design. |
@@ -26,7 +26,8 @@
 
 1. Wherever the base says claim outcomes are inferred, H-01's typed `claim_batch` is authoritative.
 2. The settlement tables gain the `settle_conflict` outcome per H-03 (409, `retryable=false`).
-3. The base's §3.6 list-jobs row is downgraded to "operator-minimal, pre-H-08" for 0.1.
+3. The base's §3.6 list-jobs row was initially described as "operator-minimal, pre-H-08" for
+   0.1. **Historical note:** ADR-017 / amendment 11 supersedes that phrase; it grants no surface.
 4. `GET /taskq/v1/meta` additionally reports the H-09 limits verbatim.
 5. **ADR-012 diagnostic exception to H-09:** payload, headers, progress, result, and request/body oversize remain `TQ422`. Persisted job/attempt errors and cancel reasons are instead byte-safely truncated to 2,048 UTF-8 bytes, and event messages to 500 UTF-8 bytes, because diagnostic text must not prevent settlement.
 6. **ADR-012 null boundary:** omission alone invokes a SQL default. Explicit `NULL` for an argument whose documented domain is non-null is invalid and raises `TQ422`; optional nullable fields are unchanged.
@@ -34,6 +35,10 @@
 8. **ADR-014 HTTP worker presence:** protocol document revision 1.0.1 adds the canonical worker-presence command in §2.1. It is additive, changes no SQL identity or migration, and leaves the wire-major header at `1`.
 9. **ADR-015 queue-profile read deferral:** protocol document revision 1.0.2 moves the adopted base's `GET /taskq/v1/queues/{queue}` row from the active 0.1 surface to §2.2. The Function Manifest wins for 0.1 SQL specifics: no safe observer projection exists, so the route cannot be implemented honestly. This changes no SQL identity or migration and leaves the wire-major header at `1`.
 10. **ADR-016 final HTTP wire normalization:** protocol document revision 1.0.3 defines `Taskq-Request-Id`, removes the nonexistent 0.1 queue-profile version, and keeps worker list declared behind a typed capability gate as specified in §2.3. This changes no SQL identity or migration and leaves the wire-major header at `1`.
+11. **ADR-017 manifest-backed wire corrections:** protocol document revision 1.0.4 defers the
+    unbacked general job-list command, removes the unproducible enqueue `created_at`, pins the exact
+    enqueue response fields, and completes invalid-request-id behavior as specified in §2.4. This
+    changes no SQL identity or migration and leaves the wire-major header at `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -104,10 +109,13 @@ observer credential nor the ordinary facade pool gains base-table or operator ac
 #### Request correlation
 
 The optional inbound correlation header is `Taskq-Request-Id`. It must be 1–128 ASCII characters
-matching `[A-Za-z0-9._:-]+`; invalid input returns `TQ422`. When absent, the server generates a
-lowercase UUID string. The selected value is returned both as the JSON envelope's `request_id` and
-the response `Taskq-Request-Id` header. It may enter only bounded diagnostic fields and structured
-logs and is never persisted unbounded.
+matching `[A-Za-z0-9._:-]+`. When absent, the server generates a lowercase UUID string. An invalid
+supplied value is treated as absent for correlation selection: the server mints a lowercase UUID,
+authenticates the request, then returns `TQ422`; bad credentials still return the authentication
+error. The minted value appears in the envelope and response header, and the invalid supplied bytes
+appear nowhere in the response or diagnostics. The selected value is returned both as the JSON
+envelope's `request_id` and the response `Taskq-Request-Id` header. It may enter only bounded
+diagnostic fields and structured logs and is never persisted unbounded.
 
 #### Queue ensure correction
 
@@ -131,9 +139,37 @@ command and backing view but lacks a public-safe projection, so it stays declare
 gate. The reusable rule is “undesigned command: defer out; settled command awaiting safe
 projection: declare and gate.” SQL contract 0.1.2 and migrations 0001–0003 remain unchanged.
 
+### 2.4 Final manifest-backed corrections (document revision 1.0.4)
+
+#### Deferred general job list
+
+| Reserved route | 0.1 status | Reactivation gate |
+|---|---|---|
+| `GET /taskq/v1/jobs` | deferred; `TQ501` capability inactive; no successful response model | H-08 through Growth §4 / R2-16: exact observer-granted projection, redaction, queue authorization, keyset cursor, supporting indexes, and bounded EXPLAIN evidence |
+
+The adopted base's §3.6 row and amendment 3's historical “operator-minimal” phrase do not define an
+active or gated success surface. The 0.1 Function Manifest contains no `list_jobs`; no facade may
+assemble a list from base tables, unsafe views, repeated detail calls, or operator credentials.
+H-13 excludes the route from its generated command table, OpenAPI operation set, official clients,
+and success parity vectors. A hidden reserved-path responder supplies the negative `TQ501` vector.
+
+#### Exact single-enqueue response
+
+For `POST /taskq/v1/queues/{queue}/jobs`, the response field set is exact:
+
+- envelope `outcome`: `created | existed`;
+- envelope `data`: exactly `{"job_id": <uuid>}`; and
+- queue identity: implied by the canonical path, not repeated in `data`.
+
+There is no `created_at` and there are no request echoes. Payload, headers, schedule, priority,
+job type, idempotency key, and other requested values cannot be presented as durable truth,
+especially when the outcome is `existed`. Authorized job detail is the sole HTTP source for the
+stored timestamp and current row projection. H-13's independent catalog oracle asserts this exact
+field set.
+
 ## 3. Stage-0 exit status (ADR-005 checklist)
 
-- Draft §1 decisions: accepted (10/10). Holes: H-01..H-07, H-09, H-10, H-13 closed above; H-08/H-11/H-12 explicitly deferred with capability gates.
+- Draft §1 decisions: accepted (10/10). Holes: H-01..H-07, H-09, H-10, H-13 closed above; H-08/H-11/H-12 explicitly deferred with typed negative capabilities.
 - Exact SQL signatures/composites/grants/SQLSTATEs per command: the 0.1 Function Manifest (same pass).
 - Parity suite, OpenAPI fence-redaction, and compatibility-window tests: harness T6/T8 obligations, pre-wired in the manifest's per-function test ids.
 - Legacy Diverse/QDarte paths remain host adapters with a removal milestone; they define no second protocol.

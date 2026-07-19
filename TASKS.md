@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 blocked by round 5** — two Contract questions and docs-only remediation must close before S3-01 |
+| Stage | **Stage 3 blocked by round 5 docs remediation** — ADR-017 closes both Contract questions; R5-01..08/09/11/16 remain before S3-01 |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
-| Contracts | Protocol v1 document revision 1.0.3 + Function Manifest 0.1.2 (+ ADR-012..016) |
+| Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | Targeted round-5 delta check after ADR-017 and documentation remediation; no full round 6 required |
 
 ## Now
 
-- [ ] S3-R5-CQ adjudicate R5-CQ-A/B docs-first through ADR-017 + Protocol v1.0.4; remediation remains closed until approval
-
-
-## Next — after S3-R5-CQ
-
 - [ ] S3-R5-DOC amend the Stage-3 specification and Authorization/Harness docs for R5-01..08 plus acceptance-oracle findings R5-09/R5-11/R5-16; no source or SQL change
+
+
+## Next — after S3-R5-DOC
+
 - [ ] S3-R5-DELTA prove response byte preservation, contract/spec deltas, unchanged source/SQL, green suite, and reviewer-targeted disposition; then decide whether S3-01 opens
 - [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
 - [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
@@ -135,6 +134,12 @@ migration change.
 **Decision needed:** approve the recommended deferral or select a contract-backed 0.1 disposition.
 Do not amend Tier 3 or start S3-01 first.
 
+**Resolution:** accepted ADR-017 and additive Protocol v1 document revision 1.0.4. The general list
+route is deferred out with a hidden typed `TQ501` responder, no success model or generated client /
+OpenAPI operation, and an H-08 Growth §4/R2-16 reactivation gate. Protocol H-08 and amendment 3 plus
+Manifest §7/errata now agree that no `list_jobs` exists in 0.1. SQL contract 0.1.2 and migrations are
+unchanged.
+
 ### R5-CQ-B — Enqueue `created_at` has no contract-backed source
 
 **Blocking evidence:** the adopted Protocol base promises `created_at` in the single-enqueue
@@ -151,6 +156,12 @@ asserts exact response-field sets per command. No SQL or migration change.
 
 **Decision needed:** approve the manifest-backed response or authorize a different Tier-0 source.
 Do not add an observer lookup or client-clock field in Tier 3.
+
+**Resolution:** accepted ADR-017 and additive Protocol v1 document revision 1.0.4. Single enqueue
+returns exact envelope outcome `created | existed` and authoritative `data.job_id` only; queue is
+implied by the path, `created_at` and request echoes are absent, and authorized job detail owns stored
+timestamps/state. The same amendment completes invalid request-id mint/reject ordering. SQL contract
+0.1.2 and migrations are unchanged.
 
 ## Round-5 finding dispositions
 
@@ -170,6 +181,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-R5-CQ · Round-5 Contract questions adjudicated** — accepted ADR-017 / Protocol document revision 1.0.4 defers the SQL-unbacked general list behind a hidden `TQ501`, corrects every surviving operator-minimal statement, removes the unproducible enqueue `created_at` and all non-authoritative echoes, and pins authenticated/non-reflective invalid-request-id behavior; the manifest records no 0.1 `list_jobs`, while SQL contract 0.1.2, grants, source, and migrations remain unchanged.
 - [x] **S3-R5-RESPONSE · Round-5 response recorded** — registered the 235-line external response byte-for-byte as immutable Tier 4; verdict BLOCKED, architecture and scope accepted, two Contract questions plus three BLOCKER/five HIGH documentation findings gate S3-01, and the board sequences ADR-017 before docs-only remediation and a targeted delta check.
 - [x] **S3-00-R5 · Round-5 design gate assembled** — the immutable Tier-4 request pins the Stage-2 baseline through S3-00 and requires an independently derived Protocol-v1.0.3 route/backing/action/outcome catalog, ADR-014..016 governance audit, H-13/capability feasibility, fence/client/retry security, authorization and credential split, long-poll/lifespan/R2-11 races, OutLabs source validation, packaging/CI/benchmark honesty, scope proof, and an explicit S3-01 verdict; no implementation landed.
 - [x] **S3-00-SPEC · Stage-3 integration contracts frozen** — the Tier-3 specification fixes capability-sized transport boundaries, H-13-generated active/gated/deferred HTTP surfaces, exact envelopes/client replay and ownership, authoritative queue authorization with separate operator credentials, connection-free long polling, composable housekeeper/embedded runtime and process budgets, OutLabs catalog/provisioning, and the S3-01..04/AUDIT acceptance matrix; no integration code or SQL change landed.
