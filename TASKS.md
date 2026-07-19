@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **S4-02 acceptance gate** — disabled-by-default host integration is complete; S4-03 remains closed pending independent verification |
+| Stage | **S4-03 open** — disabled-by-default host integration is independently accepted; the allowlisted production canary is next |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 62/62 regular with 3 pre-existing opt-in skips; MyPy 111 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Independent S4-02 acceptance gates the allowlisted production canary at S4-03 |
+| Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
-- [ ] S4-02-ACCEPT independently verify host `7df6b7f`, the scratch-DB harness, boundaries, and no-deploy posture before S4-03
+- [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
-## Next — after independent S4-02 acceptance
+## Next — after the production canary
 
-- [ ] S4-03 allowlisted tools canary and two normal deploy cycles
 - [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance
 
 ## Later
@@ -188,6 +187,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S4-02-ACCEPT · Disabled host integration independently accepted** — the reviewer reproduced host 62/62 with three pre-existing infrastructure skips, taskq 449/449 with one opt-in skip, Ruff, 111-file MyPy including Alembic, the offline full-upgrade compile, live `alembic current` at `20260313_0004`, the exact Docker image digest, and the live scratch-database active-window/post-settlement harness with a raw-table oracle. Source inspection accepted the real `NonRetryable`/`Retry` mapping, classification-only durable errors, recursive credential rejection, single-snapshot producer policy, flag-only private probe, exact 202/no-fallback behavior, health/CORS/OpenAPI vectors, and unchanged contracts. Both worktrees were clean; taskq matched origin and the host remained deliberately three commits ahead/unpushed with nothing deployed. S4-03 is open, but its first host push is an explicit production deployment action.
 - [x] **S4-02 · Disabled-by-default outlabsAPI integration** — host commit `7df6b7f` adds a frozen fail-fast Stage-4 policy, exactly one canonical tools task plus the flag-only private probe, the poll-only single-process embedded runtime, host-first composed lifespan, authorized lifespan-free `/taskq` mount without operator transport, generated OpenAPI composition, exact CORS headers, and backlog-independent health readiness. The existing queued route samples mode/allowlist once, validates bounded credential-free params, awaits taskq enqueue only for enabled allowlisted requests, returns exact 202/readback fields, and never falls back after an ambiguous error; disabled/non-allowlisted requests remain legacy-only. Handler outcomes use real `NonRetryable`/`Retry` types with classification-only durable errors, and the raw Umami auth-body leak is removed. The pre-existing Alembic ghost import is deleted, MyPy now covers `alembic`, and an offline full-upgrade test permanently imports the migration environment. Host verification is 62/62 with the same three infrastructure skips, Ruff clean, MyPy clean across 111 files, lock exact, Docker image green, and `alembic current` at `20260313_0004`. The live local harness independently observed active-key convergence, post-settlement new execution, and two raw one-attempt succeeded rows through the actual embedded worker. No host deployment, production mutation, taskq SQL/migration/contract/ADR/source change, or unrelated lane migration occurred; independent acceptance is required before S4-03.
 - [x] **S4-01-ACCEPT · Stage-4 preflight independently accepted** — external verification reproduced taskq 449/449 with one opt-in skip, the host's 44/44 regular tests with three gated skips, Ruff, configured-scope MyPy, the immutable a1 release/tag/hash/host lock chain, both FastAPI router-surface lanes, the scoped credential-rendering fix, byte-identical round-6 record, and every R6-02..R6-15 living-spec closure. Managed-role/IAM/profile evidence and the persistence-verified 35-second Coolify setting were accepted; independent Neon deletion verification was unavailable because the review credential lacked the organization, with provider auto-expiry and S4-AUDIT final-state evidence retained as backstops. The review also reproduced a pre-existing `alembic/env.py` ghost import that makes `alembic current`/`upgrade` fail before database access; S4-02 owns its removal and a permanent import/CI guard. No Contract question was raised, and S4-02 remains open.
 - [x] **S4-R6-DOC · Round-6 documentation closure** — amended the living Stage-4 specification for every R6-02..R6-15 finding without touching source, SQL, migrations, contracts, ADRs, or immutable review files. The handler now names real `NonRetryable`/`Retry` results and sanitized durable errors; keyed replay is limited to the active deduplication window; queued credentials are forbidden; cross-path replay risk is explicit and read-only-bounded; probe-registry and rollback-drain observables are exact; the cycle-2 failure drill is S4-AUDIT-owned; production enablement keys are complete; and the S4-02/S4-03/AUDIT rows name health, classification, payload secrecy, independent invocation, responsiveness, depth, and platform-grace oracles. S4-02 is open.
