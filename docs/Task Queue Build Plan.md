@@ -80,6 +80,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **S3-00 specification frozen:** the [Stage 3 FastAPI and Authorization Specification](./Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) fixes capability-sized transports, H-13 generation, active/gated/deferred routes, exact envelopes and client retry/ownership, authoritative queue authorization, separate operator credentials, notification-hint long polling, composable runtime/housekeeper/embedded topology, process budgets, OutLabs adapter/provisioning, and the S3-01..04/AUDIT evidence matrix. Implementation remains closed pending round-5 review.
 
+**Round-5 gate ready:** the immutable [request](./design-review-5/REQUEST.md) pins the Stage-2 baseline through the S3-00 specification and requires an independent final Protocol-v1.0.3 catalog, H-13/capability audit, fence/client/retry review, authorization and credential matrix, long-poll/lifespan/R2-11 races, OutLabs source reality check, packaging/CI/benchmark assessment, and an explicit decision on whether S3-01 may open. No integration implementation landed with the packet.
+
 ## Stage 4 — outlabsAPI dogfood (first host)
 
 One or two low-consequence lanes (tools, notifications) on the embedded runtime; durable run rows replace fire-and-forget; `GET job` result read backs the 202 flow (R2-18 gate). Prereq: outlabsAPI upgrades outlabs-auth to a supported a24+ range (R2-17) or starts on the static adapter. Exit: two normal deploy cycles + one forced failure recovered with zero manual table edits; rollback rehearsed; legacy-broker retirement begins lane-by-lane.
