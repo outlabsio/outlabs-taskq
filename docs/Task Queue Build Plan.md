@@ -130,6 +130,8 @@ One or two low-consequence lanes (tools, notifications) on the embedded runtime;
 
 **S4-CQ-03 opened before production rotation:** an executed scratch proof shows that `SET ROLE taskq_owner` cannot run immutable migration 0001 because the correctly unprivileged owner role cannot perform required capability-role hardening. Granting CREATEROLE/admin membership would contradict the reserved-role manifest. The recommended correction is to run taskq migrate/verify directly with the owner/admin login while immutable SQL assigns objects to `taskq_owner` and `verify()` proves ownership; runtime/operator boundaries remain unchanged. Production stays paused pending adjudication.
 
+**S4-CQ-03 approved:** taskq migrate/verify run directly as the PostgreSQL owner/admin without `SET ROLE`; immutable SQL assigns objects to the unprivileged `taskq_owner`, and `verify()` proves the ownership/grant catalog. No contract, role attribute, SQL, migration, runtime, or operator-boundary change is needed. The restricted-runtime real-boot proof and guarded rotation resume.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

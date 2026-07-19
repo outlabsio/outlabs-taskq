@@ -25,7 +25,7 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 paused at S4-CQ-03** — restricted-runtime harness work may continue locally, but production rotation/provisioning waits on the owner-vs-`SET ROLE taskq_owner` migration contradiction |
+| Stage | **S4-03 credential rotation open** — S4-CQ-03 approved direct owner/admin execution for taskq migration/verification; disposable real-boot proof now gates the production DSN rotation |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
@@ -66,6 +66,12 @@ and operator login boundaries unchanged. This is the smallest correction and mat
 ADR-010, the Function Manifest, and the already executed S4-01/S4-03B migration evidence. Making
 `taskq_owner` capable of managing roles would require a new contract/ADR/migration design and is not
 recommended.
+
+**Resolution:** approved. `taskq migrate` and `taskq verify` execute directly as the PostgreSQL
+owner/admin without `SET ROLE`. The immutable migration remains responsible for assigning every
+object to `taskq_owner`, and `verify()` remains the independent ownership/grant oracle. No role
+attribute, SQL, migration, manifest, ADR, runtime, or operator-boundary change is authorized or
+needed. The restricted-login real-boot proof and rotation may resume.
 
 ### S4-CQ-02 — The production app pool is PostgreSQL superuser
 
