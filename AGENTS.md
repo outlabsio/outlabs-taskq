@@ -1,6 +1,6 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library with Stages 1–3 implemented and Stage-3 completion evidence green.
+Postgres-native task queue library with Stages 1–3 independently accepted; Stage 4 is at its specification gate.
 
 **Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 
