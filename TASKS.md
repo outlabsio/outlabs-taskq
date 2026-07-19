@@ -25,13 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 paused at S4-CQ-02** — the actual-cluster preflight is complete and clean, but the deployed app pool uses PostgreSQL superuser and cannot satisfy the operator-credential separation contract |
+| Stage | **S4-03 credential rotation open** — S4-CQ-02 approved a dedicated non-superuser app/worker login; its disposable real-boot proof and rollback-ready rotation gate production taskq provisioning |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
+- [ ] S4-03C restricted-runtime proof and rotation: exact host/taskq grants, real API/auth/legacy-worker boot, negative capability vectors, rollback-ready production DSN rotation, and disabled-posture verification
 - [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
@@ -67,6 +68,17 @@ the exact public/outlabs-auth runtime grants on a disposable database; after rot
 health and the disabled taskq posture before production taskq migration. Keeping the superuser app
 pool would require explicitly reopening the accepted privilege-separation design and is not
 recommended.
+
+**Resolution:** approved. Before rotation, a disposable same-cluster database must boot the real
+application and worker under the proposed login, pass startup, one authenticated request, and a
+legacy `outbound_tasks` operation, and prove denial of operator `SET ROLE`/`ensure_queue`,
+CREATEROLE, CREATEDB, and RLS bypass. The prior owner DSN remains available outside the running app
+for immediate env-flip rollback. The deploy record names every credential: host Alembic and Auth
+migrations use the owner; taskq migrate/verify use the owner with taskq-owner authority; queue
+ensure and IAM use an operator-only login; the app and workers use only the restricted runtime.
+Sequence is grants proof → rotate → healthy disabled posture → production taskq provisioning →
+legacy-mode enablement. Restore/PITR rehearsal stays an explicit host backlog item, and the audit
+packet records the rotation as a host-security improvement.
 
 ### S4-CQ-01 — The live production database is not the frozen Neon target
 
