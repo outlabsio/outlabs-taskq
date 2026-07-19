@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 contract gate blocked** — S3-CQ-02 must be adjudicated docs-first; implementation remains untouched |
+| Stage | **Stage 3 specification gate in progress** — ADR-015 closes S3-CQ-02 docs-first; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
-| Contracts | Protocol v1 document revision 1.0.1 + Function Manifest 0.1.2 (+ ADR-012..014) |
-| Next review | Held until S3-CQ-02 closes, then Stage-3 round-5 contract/design boundary |
+| Contracts | Protocol v1 document revision 1.0.2 + Function Manifest 0.1.2 (+ ADR-012..015) |
+| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
 
 ## Now
 
-- [ ] S3-CQ-02 adjudicate the active HTTP queue-profile read route with no SQL-safe backing; S3-00 remains closed
-
-
-## Next — after S3-CQ-02
-
 - [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
+
+
+## Next — after S3-00-SPEC
+
 - [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
 
 ## Later
@@ -74,8 +73,12 @@ profile. This closes Stage 3 without changing SQL contract 0.1.2 or adding migra
 alternative is a docs-first Function Manifest 0.1.3 addition for an observer-safe
 `get_queue_profile(text)` plus immutable migration and PG16/PG18 fresh/upgrade evidence.
 
-**Decision needed:** approve the narrow H-11 deferral, or require the 0.1.3 SQL read primitive. Do
-not resume S3-00 until the Tier-0 route/backing contradiction is closed.
+**Resolution:** accepted ADR-015 and additive Protocol v1 document revision 1.0.2. The queue-profile
+GET moves visibly into the deferred-routes section, returns `TQ501` while inactive, and is excluded
+from H-13's active generated client/OpenAPI/conformance surface. H-11 must reactivate it through the
+Growth §4 / R2-16 exact observer projection and read-model design. Observers retain queue stats;
+administrators receive canonical profiles from idempotent ensure. SQL contract 0.1.2 and migrations
+0001–0003 are unchanged; there is no migration 0004.
 
 ## Round-4 finding dispositions
 
@@ -87,6 +90,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-CQ-02 · Queue-profile read contradiction adjudicated docs-first** — accepted ADR-015 and Protocol v1 document revision 1.0.2 visibly defer the unbacked GET route to H-11's Growth §4/R2-16 read-model design, exclude it from H-13's active generated surface, pin `TQ501`, retain stats/admin-ensure as the honest interim posture, and leave SQL contract 0.1.2 plus migrations 0001–0003 unchanged.
 - [x] **S3-CQ-01 · HTTP worker presence adjudicated docs-first** — accepted ADR-014 and Protocol v1 document revision 1.0.1 define the canonical route, all-declared-queue `run` authorization, advisory label/authenticated actor split, typed 200 outcomes, presence/job-heartbeat non-confusion rule, shared-fleet honesty edge, and H-13 generation/parity obligation without changing SQL contract 0.1.2 or adding a migration.
 - [x] **S2-06-AUDIT · Stage 2D permanent completion evidence** — repeated cancellation, followup, drain-cap, and task-ledger probes return transports and asyncio resources to baseline; CI collects the consumer suite on Python 3.12/3.13 and imports testing without pytest; wheel/sdist × core/HTTP/OutLabs artifact smokes exercise the installed fake/assertion surface. The identical full suite is 366/366 with one opt-in skip on PostgreSQL 18.3 and 16.14, the PG18 million-row gate is 2/2, the clean Python-3.13 no-DB lane is 219/219, Ruff/format are clean, and the exact slice changes no SQL migration, Tier-0/Tier-4, HTTP, OutLabs, listener, CLI, or Stage-3 source.
 - [x] **S2-06B · Consumer work, assertion, inline, and drain helpers** — added shared-supervisor synthetic and caller-transaction PostgreSQL `work`, fixed-text safe `require_enqueued`, immediate inline execution with record-only/opt-in bounded followups and cancellation-safe restoration, and sequential real/fake drains that reject unbounded or runaway work; SQL runner adapters now accept an optional borrowed connection without changing transport ownership.

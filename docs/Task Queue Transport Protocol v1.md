@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, and ADR-014 as additive protocol document revision **1.0.1**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, and ADR-015 as additive protocol document revision **1.0.2**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -18,7 +18,7 @@
 | H-08 list cursors/indexes | Deferred as drafted: 0.1 read surface is get-by-id + per-queue stats; the general list route stays operator-minimal until the keyset + EXPLAIN evidence (B9) lands. |
 | H-09 size ceilings | **Closed — published limits (also in `/meta.limits`):** payload ≤64KB, progress ≤2KB, result ≤8KB, stored error ≤2KB, bulk ≤1000 items and ≤4MB body, claim batch ≤50, `wait_seconds` ≤30, job-type filter ≤20 entries, headers ≤8KB. Oversize → `TQ422`. |
 | H-10 long-poll lifecycle | Accepted as drafted: disconnect cancels the waiter, never a committed claim; shutdown drains hub subscribers before LISTEN/pool close (tested in T6). |
-| H-11 profile If-Match | Deferred (queues are bootstrap/migration-owned in 0.1). |
+| H-11 profile read + If-Match | Deferred by ADR-015 (queues are bootstrap/migration-owned in 0.1). Reactivation requires the Growth §4 / R2-16 exact observer projection, redaction, authorization, bounded-plan, and optimistic-concurrency design. |
 | H-12 0.2/0.3 commands | Deferred; inactive fields rejected with `TQ501`, never ignored. |
 | H-13 single generation source | **Closed:** one Python protocol manifest (models + command table) generates the OpenAPI schema, sync + async HTTP clients, and the SQL/HTTP parity test vectors. Hand-copied route tables are banned — this document and the manifest are the only human-maintained sources. |
 
@@ -32,6 +32,7 @@
 6. **ADR-012 null boundary:** omission alone invokes a SQL default. Explicit `NULL` for an argument whose documented domain is non-null is invalid and raises `TQ422`; optional nullable fields are unchanged.
 7. **ADR-013 effective lease projection:** `taskq.claimed_job` appends non-null `lease_seconds` after `step_key`. It is the exact duration selected by `claim_jobs` and used for the job lease and attempt row. Workers schedule `min(lease_seconds/3, 30s)` heartbeats from this duration on a monotonic timer and never derive it by subtracting local wall time from `lease_expires_at`. This is additive under H-02; protocol major remains v1.
 8. **ADR-014 HTTP worker presence:** protocol document revision 1.0.1 adds the canonical worker-presence command in §2.1. It is additive, changes no SQL identity or migration, and leaves the wire-major header at `1`.
+9. **ADR-015 queue-profile read deferral:** protocol document revision 1.0.2 moves the adopted base's `GET /taskq/v1/queues/{queue}` row from the active 0.1 surface to §2.2. The Function Manifest wins for 0.1 SQL specifics: no safe observer projection exists, so the route cannot be implemented honestly. This changes no SQL identity or migration and leaves the wire-major header at `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -76,6 +77,26 @@ The two commands must not be combined.
 
 H-13 includes this route in the single generated command source, OpenAPI, sync and async clients,
 conformance vectors, and SQL-versus-HTTP parity vectors. The SQL contract remains 0.1.2.
+
+### 2.2 Deferred routes (document revision 1.0.2)
+
+| Reserved route | 0.1 status | Reactivation gate |
+|---|---|---|
+| `GET /taskq/v1/queues/{queue}` | deferred; `TQ501` capability inactive; no successful response model | H-11 through Growth §4 / R2-16: exact observer-granted projection, field/redaction contract, queue authorization, bounded query plan, optimistic concurrency where applicable, and a new contract amendment |
+
+This is an explicit correction to the adopted base's §3.1 active row. The Tier-0 Function Manifest
+is senior for 0.1 SQL specifics and contains no safe queue-profile projection; the Protocol row was
+a drafting error, not evidence that the Manifest should grow a one-off function.
+
+H-13 excludes this deferred command from the active generated command table, OpenAPI operation
+set, sync/async client methods, and SQL/HTTP conformance vectors. One negative capability vector
+pins `TQ501`; no official consumer can bind to an accidental response shape.
+
+The interim posture is honest: `get_queue_stats` supplies observer-safe operational state, while an
+administrator declares a canonical profile through idempotent `PUT /taskq/v1/queues/{queue}` /
+`taskq.ensure_queue` and receives that canonical profile in the command response. Neither the
+observer credential nor the ordinary facade pool gains base-table or operator access. SQL contract
+0.1.2 and migrations 0001–0003 remain unchanged; there is no migration 0004.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

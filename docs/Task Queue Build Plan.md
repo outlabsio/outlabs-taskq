@@ -70,6 +70,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Stage-3 contract question resolved docs-first:** ADR-014 and Protocol v1 document revision 1.0.1 add canonical `POST /taskq/v1/workers/heartbeat`, all-declared-queue `run` authorization, advisory worker-label semantics, and typed `continue | shutdown_requested` 200 outcomes. Presence extends no job lease and carries no fence. SQL contract 0.1.2 and the migration chain do not change; S3-00 specification work is open while integration implementation remains closed.
 
+**Stage-3 route/backing contradiction resolved docs-first:** ADR-015 and Protocol v1 document revision 1.0.2 explicitly defer queue-profile GET to H-11's Growth §4 / R2-16 read-model design. The active H-13-generated surface excludes it and a negative vector pins `TQ501`; observers retain operational queue stats while administrators receive canonical profiles from idempotent ensure. SQL contract 0.1.2 and migrations 0001–0003 remain unchanged. S3-00 is open; implementation remains closed.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.
