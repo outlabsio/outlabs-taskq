@@ -19,5 +19,6 @@
 | [011](./ADR-011-housekeeper-role-credentials.md) | Housekeeper role, deployment credentials, version-aware maintenance (amends 010) | R2-04, R2-05 |
 | [012](./ADR-012-null-boundaries-byte-safe-diagnostics.md) | Explicit-null boundaries and byte-safe stored diagnostics | R3 CQ-01, CQ-02 |
 | [013](./ADR-013-effective-lease-in-claim-projection.md) | Effective lease duration in the claim projection | S2-CQ-01 |
+| [014](./ADR-014-http-worker-presence.md) | Canonical HTTP worker-presence command | S3-CQ-01 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

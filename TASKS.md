@@ -25,19 +25,19 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 contract gate blocked** — S3-CQ-01 must be adjudicated docs-first; Stage-3 implementation remains untouched |
+| Stage | **Stage 3 specification gate in progress** — ADR-014 closes S3-CQ-01 docs-first; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
-| Contracts | Protocol v1 + Function Manifest 0.1.2 (+ ADR-012/013) |
-| Next review | Held until S3-CQ-01 closes, then Stage-3 round-5 contract/design boundary |
+| Contracts | Protocol v1 document revision 1.0.1 + Function Manifest 0.1.2 (+ ADR-012..014) |
+| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
 
 ## Now
 
-- [ ] S3-CQ-01 adjudicate the missing HTTP worker-presence command in Protocol v1; S3-00 remains closed
+- [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
 
 
-## Next — after S2-06
+## Next — after S3-00-SPEC
 
-- [ ] S3-00 freeze the FastAPI + OutLabs authorization integration specification and assemble the round-5 review gate after S3-CQ-01 closes; do not implement integrations before acceptance
+- [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
 
 ## Later
 
@@ -51,9 +51,9 @@
 
 **Recommended adjudication:** accept ADR-014 plus an additive Protocol-v1 revision defining `POST /taskq/v1/workers/heartbeat`: body `worker_id`, non-empty distinct `queues`, and bounded safe presence fields; authenticate first, authorize `run` for every distinct declared queue, treat `worker_id` as an advisory validated label while actor remains the authenticated subject, call `worker_heartbeat`, and return HTTP 200 with typed `continue | shutdown_requested`. The route must never accept actor, credentials, attempts, payloads, or fences. Add it to the H-13 generated HTTP-client/conformance surface. SQL contract 0.1.2 and the Function Manifest remain unchanged; the adjudication must state the required additive protocol-document version marker before S3-00 resumes.
 
-**Decision needed:** approve the recommendation, or choose a different canonical route/auth/wire shape through ADR-014. Do not resume S3-00 until the Tier-0 amendment lands.
+**Resolution:** accepted ADR-014 and additive Protocol v1 document revision 1.0.1. The canonical route is `POST /taskq/v1/workers/heartbeat`; every distinct declared queue requires `run`; `worker_id` remains advisory while the authenticated subject is the actor; the two typed success outcomes are `continue | shutdown_requested` on HTTP 200. Worker presence extends no lease and carries no fence. H-13 generation and SQL/HTTP parity include the command. SQL contract 0.1.2 and the migration chain are unchanged.
 
-Resolved history: ADR-013 resolves S2-CQ-01 as contract 0.1.2; ADR-012 resolves round-3 CQ-01/CQ-02.
+Resolved history: ADR-014 resolves S3-CQ-01 as Protocol v1 document revision 1.0.1; ADR-013 resolves S2-CQ-01 as contract 0.1.2; ADR-012 resolves round-3 CQ-01/CQ-02.
 
 ## Round-4 finding dispositions
 
@@ -65,6 +65,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-CQ-01 · HTTP worker presence adjudicated docs-first** — accepted ADR-014 and Protocol v1 document revision 1.0.1 define the canonical route, all-declared-queue `run` authorization, advisory label/authenticated actor split, typed 200 outcomes, presence/job-heartbeat non-confusion rule, shared-fleet honesty edge, and H-13 generation/parity obligation without changing SQL contract 0.1.2 or adding a migration.
 - [x] **S2-06-AUDIT · Stage 2D permanent completion evidence** — repeated cancellation, followup, drain-cap, and task-ledger probes return transports and asyncio resources to baseline; CI collects the consumer suite on Python 3.12/3.13 and imports testing without pytest; wheel/sdist × core/HTTP/OutLabs artifact smokes exercise the installed fake/assertion surface. The identical full suite is 366/366 with one opt-in skip on PostgreSQL 18.3 and 16.14, the PG18 million-row gate is 2/2, the clean Python-3.13 no-DB lane is 219/219, Ruff/format are clean, and the exact slice changes no SQL migration, Tier-0/Tier-4, HTTP, OutLabs, listener, CLI, or Stage-3 source.
 - [x] **S2-06B · Consumer work, assertion, inline, and drain helpers** — added shared-supervisor synthetic and caller-transaction PostgreSQL `work`, fixed-text safe `require_enqueued`, immediate inline execution with record-only/opt-in bounded followups and cancellation-safe restoration, and sequential real/fake drains that reject unbounded or runaway work; SQL runner adapters now accept an optional borrowed connection without changing transport ownership.
 - [x] **S2-06A · Fake client and replacement boundary** — added a core-isolated, fence-free fake with typed single/bulk enqueue, active-key dedup, FIFO due claim, heartbeat, replay-aware settlement intents, safe nested matchers, loud unsupported-command/closed behavior, and exact non-owning `TaskQ.replace_client` restoration across normal, exceptional, nested, and cancellation exits.

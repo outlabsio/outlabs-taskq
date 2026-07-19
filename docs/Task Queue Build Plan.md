@@ -68,6 +68,8 @@ Typed `Task[In, Out]` registry + stable wire names/aliases; `EnqueueResult`/hand
 
 **Stage 2D and Stage 2 complete:** S2-06-AUDIT repeats cancellation/followup/cap cleanup, collects the consumer suite in both Python lanes, exercises installed testing helpers across wheel/sdist × core/HTTP/OutLabs, and proves the slice contains no integration or SQL-contract change. The identical full suite is **366/366** on PostgreSQL 16.14 and 18.3 with one opt-in skip; the PG18 million-row plan gate is **2/2**, and the clean Python-3.13 no-database lane is **219/219**. Stage 3 remains untouched and opens only through its specification plus round-5 gate.
 
+**Stage-3 contract question resolved docs-first:** ADR-014 and Protocol v1 document revision 1.0.1 add canonical `POST /taskq/v1/workers/heartbeat`, all-declared-queue `run` authorization, advisory worker-label semantics, and typed `continue | shutdown_requested` 200 outcomes. Presence extends no job lease and carries no fence. SQL contract 0.1.2 and the migration chain do not change; S3-00 specification work is open while integration implementation remains closed.
+
 ## Stage 3 — FastAPI + outlabs-auth
 
 `taskq.http` router/runtime/DI per feature 14 + ADR-008 (embedded opt-in, budget printout); sync + async HTTP clients; protocol conformance suite running identical vectors against SQL and HTTP transports; `taskq.outlabs` catalog/authorizer/provisioning per ADR-006 (validated against the real outlabs-auth validator; service-token wildcards, API keys enumerate verbs); facade login = producer+runner+observer+housekeeper, operator pool separate (ADR-011). Gate: the R2 auth matrix (an `emails` token cannot touch `exports`, settle-with-lied-queue rejected) plus lifespan/multi-process budget tests.

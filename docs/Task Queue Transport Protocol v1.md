@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1 and ADR-013 for SQL contract 0.1.2. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, and ADR-014 as additive protocol document revision **1.0.1**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -31,6 +31,51 @@
 5. **ADR-012 diagnostic exception to H-09:** payload, headers, progress, result, and request/body oversize remain `TQ422`. Persisted job/attempt errors and cancel reasons are instead byte-safely truncated to 2,048 UTF-8 bytes, and event messages to 500 UTF-8 bytes, because diagnostic text must not prevent settlement.
 6. **ADR-012 null boundary:** omission alone invokes a SQL default. Explicit `NULL` for an argument whose documented domain is non-null is invalid and raises `TQ422`; optional nullable fields are unchanged.
 7. **ADR-013 effective lease projection:** `taskq.claimed_job` appends non-null `lease_seconds` after `step_key`. It is the exact duration selected by `claim_jobs` and used for the job lease and attempt row. Workers schedule `min(lease_seconds/3, 30s)` heartbeats from this duration on a monotonic timer and never derive it by subtracting local wall time from `lease_expires_at`. This is additive under H-02; protocol major remains v1.
+8. **ADR-014 HTTP worker presence:** protocol document revision 1.0.1 adds the canonical worker-presence command in §2.1. It is additive, changes no SQL identity or migration, and leaves the wire-major header at `1`.
+
+### 2.1 Worker presence (document revision 1.0.1)
+
+Canonical route: `POST /taskq/v1/workers/heartbeat`.
+
+The inbound body is strict (`extra=forbid`) and contains:
+
+| Field | Contract |
+|---|---|
+| `worker_id` | required advisory label, 1–200 characters |
+| `queues` | required non-empty list of distinct canonical queue names (`[a-z0-9_]{1,57}`) |
+| `hostname` | optional string, at most 200 characters |
+| `pid` | optional positive signed 32-bit integer |
+| `version` | optional string, at most 200 characters |
+| `meta` | optional JSON object, at most 8KB serialized; bounded operational scalars only |
+
+`meta` may describe process mode, concurrency, batch, or listener-effective state. It must never
+contain a DSN, credential, payload, headers, progress, result, error, job id, attempt id, or fence.
+The whole request remains subject to H-09's 4MB request-body ceiling.
+
+Processing order is normative:
+
+1. authenticate the request and establish its subject;
+2. validate the complete strict body and distinct queue list;
+3. authorize action `run` against every declared queue, without changing state if any check fails;
+4. invoke `taskq.worker_heartbeat(worker_id, queues, hostname, pid, version, meta)` exactly once.
+
+`worker_id` never supplies the actor. The authenticated subject remains authoritative for
+authorization, audit, rate limiting, and logs. Under a shared fleet credential, one caller can use
+another advisory label and observe that label's targeted shutdown signal. That is benign by design:
+draining is always safe and releases are budget-free. Per-worker credentials use H-04 binding when
+stronger attribution is required.
+
+| SQL value | Envelope `outcome` | HTTP | `data` |
+|---|---|---:|---|
+| `shutdown_requested=false` | `continue` | 200 | `{"shutdown_requested": false}` |
+| `shutdown_requested=true` | `shutdown_requested` | 200 | `{"shutdown_requested": true}` |
+
+This is **worker presence**, not the per-job heartbeat. It extends no lease, carries no job or
+attempt fence, is advisory observability plus drain signalling only, and is never a reclaim input.
+The two commands must not be combined.
+
+H-13 includes this route in the single generated command source, OpenAPI, sync and async clients,
+conformance vectors, and SQL-versus-HTTP parity vectors. The SQL contract remains 0.1.2.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 
