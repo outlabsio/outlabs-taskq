@@ -36,9 +36,10 @@ S4-00 inspected the clean host rather than designing from the older adoption ske
 - `outlabsAPI` pins `outlabs-auth==0.1.0a20`; taskq's adapter is source-audited and packaged against
   exact `0.1.0a24`.
 - The complete host collection contains 47 tests: 44 pass and three opt-in infrastructure tests
-  skip. Loading the exact a24 package ahead of the a20 installation produces the same result and
-  confirms host source compatibility. It does **not** replace the required resolver, lock, migration,
-  and real-schema upgrade proof in S4-01.
+  skip. Loading the exact a24 package ahead of the a20 installation confirmed source compatibility,
+  but the real locked resolution also upgraded FastAPI from 0.135.1 to 0.139.2 and exposed two tests
+  coupled to router internals. S4-01 rewrote those tests against the application OpenAPI path set and
+  proved them under both FastAPI versions; the exact-a24 locked host then passed the same collection.
 - Production starts one Uvicorn process from the root Dockerfile. There is an existing host lifespan
   that starts authentication and checks PostgreSQL, Redis, and the legacy broker.
 - `POST /tools/{tool_name}/runs/queued` currently schedules a background publish and returns no
@@ -60,7 +61,7 @@ The host upgrades to **exact `outlabs-auth==0.1.0a24`** before importing taskq's
 The static adapter is rejected for this host: it would create a second credential policy beside an
 already-mounted EnterpriseRBAC installation and would fail to dogfood the integration Stage 3 built.
 
-S4-01 must, in this order:
+S4-01 completed, in this order:
 
 1. build/publish the next immutable `outlabs-taskq` alpha from the accepted source and record its
    version plus wheel SHA-256;
@@ -71,8 +72,10 @@ S4-01 must, in this order:
    documented pre-deploy procedure; and
 6. keep `OUTLABS_AUTH_AUTO_MIGRATE=false` in deployed processes.
 
-No floating Git dependency, local path, unversioned wheel, dependency override, or compatibility
-range is accepted for the dogfood gate.
+The accepted artifact is `outlabs-taskq==0.1.0a1`, published from `a6967e6`; its wheel SHA-256 is
+`01ac3129866a8db34281688d65a95e9f30437b52739cec75c287c69e4d11a6ab`. No floating Git dependency,
+local path, unversioned wheel, dependency override, or compatibility range is accepted for the
+dogfood gate.
 
 ### 3.2 One queue, one task, staged allowlist
 
@@ -247,6 +250,10 @@ soft_stop_timeout=20s
 asgi_graceful_timeout=30s
 ```
 
+The deployment platform's application Stop Grace Period is configured to **35 seconds**, at least
+the 30-second ASGI graceful timeout and above the 20-second soft stop. S4-AUDIT records the live
+platform value and a normal-deploy transcript proving the process drains inside it.
+
 Production must supply a measured database connection ceiling and a reserve covering the host's own
 SQL/OutLabs pools plus platform headroom. Runtime construction refuses an over-budget estimate. The
 single-process invariant is backed by the Docker command; adding Uvicorn workers requires a budget
@@ -326,10 +333,13 @@ other legacy queue is removed in Stage 4.
 
 - locked exact a24 plus immutable taskq alpha resolve without overrides;
 - existing 47-test host collection, Ruff, type check, Docker build, and import boundaries pass;
+- the two application-path tests pass under both FastAPI 0.135.1 and the locked 0.139.2 resolution;
 - preview-branch OutLabs upgrade and taskq fresh migrate/verify/provision pass;
 - role membership, pooler class, server version, connection ceiling, and SSL are recorded without
   credentials; and
-- production pre-deploy commands are idempotent and runtime auto-migration remains off.
+- production pre-deploy commands are idempotent and runtime auto-migration remains off; and
+- the live platform Stop Grace Period is recorded at 35 seconds, with practical drain proof deferred
+  to the S4-AUDIT normal-deploy transcript.
 
 ### S4-02 — disabled-by-default host integration
 

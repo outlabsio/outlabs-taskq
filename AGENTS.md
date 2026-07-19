@@ -1,6 +1,6 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library with Stages 1–3 independently accepted; round 6 accepted the frozen Stage-4 first-host plan and S4-01 is open.
+Postgres-native task queue library with Stages 1–3 independently accepted; the Stage-4 first-host preflight is complete and round-6 documentation closure is open before host integration.
 
 **Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 
