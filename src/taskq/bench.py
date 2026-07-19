@@ -1,4 +1,4 @@
-"""Implemented B1–B4/B8/B13 benchmark scenarios (Harness §5).
+"""Implemented B1–B4/B8/B11/B13/B14 benchmark scenarios (Harness §5).
 
 This is report-only until a dedicated runner is calibrated and an envelope is
 accepted. Toy runs prove the harness; they are never release baselines.
@@ -35,7 +35,7 @@ from taskq.sql import migrate
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("B1", "B2", "B3", "B4", "B8", "B13")
+SCENARIOS = ("B1", "B2", "B3", "B4", "B8", "B11", "B13", "B14")
 
 
 class _BenchInput(BaseModel):
@@ -768,6 +768,183 @@ async def _b13(
     return runs
 
 
+async def _asgi_client(app: Any) -> tuple[Any, Any]:
+    """Create the shipped generated client over a live in-process ASGI boundary."""
+
+    try:
+        import httpx
+
+        from taskq.http import AsyncTaskqHttpClient
+    except ImportError as exc:  # pragma: no cover - package-smoke guard
+        raise RuntimeError("B11/B14 require the taskq HTTP extra") from exc
+    raw = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://bench")
+    client = AsyncTaskqHttpClient(
+        "http://bench",
+        bearer_token="benchmark-local-only",
+        client=raw,
+        claim_wait_seconds=0,
+        max_retries=0,
+    )
+    return client, raw
+
+
+def _mounted_bench_app(resources: Any) -> Any:
+    try:
+        from fastapi import FastAPI
+
+        from taskq.http import create_taskq_app, no_auth_for_tests
+    except ImportError as exc:  # pragma: no cover - package-smoke guard
+        raise RuntimeError("B11/B14 require the taskq HTTP extra") from exc
+    host = FastAPI()
+    host.mount("/taskq", create_taskq_app(resources, authorizer=no_auth_for_tests()))
+    return host
+
+
+async def _b11(
+    dsn: str,
+    queue: str,
+    scale: Scale,
+    repetitions: int,
+) -> list[dict[str, Any]]:
+    from taskq.http import EmbeddedWorkerOptions, TaskqRuntime, TaskqRuntimeOptions
+
+    async def handler(payload: _BenchInput) -> _BenchOutput:
+        return _BenchOutput(value=payload.value)
+
+    registry = TaskRegistry(
+        [
+            Task(
+                name="bench.noop",
+                queue=queue,
+                input_model=_BenchInput,
+                output_model=_BenchOutput,
+                handler=handler,
+            )
+        ]
+    )
+    runs: list[dict[str, Any]] = []
+    for embedded in (False, True):
+        for _ in range(repetitions):
+            options = TaskqRuntimeOptions(
+                housekeeper_enabled=False,
+                long_poll_listener_enabled=False,
+                request_pool_max=2,
+                embedded_worker=(
+                    EmbeddedWorkerOptions(
+                        queues=(queue,),
+                        acknowledge_process_multiplication=True,
+                        concurrency=1,
+                        batch=1,
+                        listen=False,
+                        poll_interval=0.1,
+                    )
+                    if embedded
+                    else None
+                ),
+                embedded_worker_pool_max=2,
+            )
+            runtime = TaskqRuntime.from_dsn(dsn, registry=registry, options=options)
+            client, raw = await _asgi_client(_mounted_bench_app(runtime.facade_transports))
+            try:
+                await runtime.start()
+                for _ in range(scale.warmup):
+                    await client.get_contract_meta()
+                latencies: list[float] = []
+                started = time.perf_counter()
+                for _ in range(scale.operations):
+                    before = time.perf_counter()
+                    await client.get_contract_meta()
+                    latencies.append(time.perf_counter() - before)
+                duration = time.perf_counter() - started
+                runs.append(
+                    {
+                        "mode": "embedded" if embedded else "facade_only",
+                        "accepted": scale.operations,
+                        "duration_seconds": duration,
+                        "throughput_rows_per_second": scale.operations / duration,
+                        "request_latency": _latency_summary(latencies),
+                        "pool_capacity": options.process_pool_capacity,
+                        "listener_capacity": options.process_listener_capacity,
+                    }
+                )
+            finally:
+                await client.aclose()
+                await raw.aclose()
+                await runtime.stop()
+    return runs
+
+
+async def _b14(
+    dsn: str,
+    producer: asyncpg.Connection,
+    queue: str,
+    scale: Scale,
+    repetitions: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    from taskq.http import ClaimWaitHub, TaskqFacadeTransports
+    from taskq.protocol import EnqueueCommand
+
+    transport = SqlTaskqTransport.from_dsn(_sqlalchemy_dsn(dsn))
+    resources = TaskqFacadeTransports(
+        producer=transport,
+        runner=transport,
+        observer=transport,
+        authorization=transport,
+        claim_wait_hub=ClaimWaitHub(),
+    )
+    client, raw = await _asgi_client(_mounted_bench_app(resources))
+    runs: list[dict[str, Any]] = []
+    try:
+        await client.start()
+        for repetition in range(repetitions):
+            sql_latencies: list[float] = []
+            client_latencies: list[float] = []
+            for index in range(scale.warmup):
+                await client.enqueue(
+                    EnqueueCommand(
+                        queue=queue,
+                        job_type="bench.noop",
+                        payload={},
+                        idempotency_key=f"b14-warmup-{seed}-{repetition}-{index}",
+                    )
+                )
+            started = time.perf_counter()
+            for index in range(scale.operations):
+                before = time.perf_counter()
+                await _enqueue_one(producer, queue, f"b14-sql-{seed}-{repetition}-{index}")
+                sql_latencies.append(time.perf_counter() - before)
+                before = time.perf_counter()
+                await client.enqueue(
+                    EnqueueCommand(
+                        queue=queue,
+                        job_type="bench.noop",
+                        payload={},
+                        idempotency_key=f"b14-http-{seed}-{repetition}-{index}",
+                    )
+                )
+                client_latencies.append(time.perf_counter() - before)
+            duration = time.perf_counter() - started
+            sql = _latency_summary(sql_latencies)
+            client_summary = _latency_summary(client_latencies)
+            runs.append(
+                {
+                    "accepted": scale.operations * 2,
+                    "duration_seconds": duration,
+                    "throughput_rows_per_second": scale.operations * 2 / duration,
+                    "sql_latency": sql,
+                    "client_latency": client_summary,
+                    "facade_overhead_p50_ms": client_summary["p50_ms"] - sql["p50_ms"],
+                    "facade_overhead_p99_ms": client_summary["p99_ms"] - sql["p99_ms"],
+                }
+            )
+    finally:
+        await client.aclose()
+        await raw.aclose()
+        await transport.aclose()
+    return runs
+
+
 async def _run_scenario_in_database(
     scenario: str,
     *,
@@ -806,8 +983,14 @@ async def _run_scenario_in_database(
             runs = await _b4(dsn, admin, queue, scale, repetitions, seed)
         elif scenario == "B8":
             runs = await _b8(dsn, producer, queue, scale, repetitions, seed)
-        else:
+        elif scenario == "B11":
+            runs = await _b11(dsn, queue, scale, repetitions)
+        elif scenario == "B13":
             runs = await _b13(dsn, admin, producer, operator, scale, repetitions, seed)
+        elif scenario == "B14":
+            runs = await _b14(dsn, producer, queue, scale, repetitions, seed)
+        else:  # pragma: no cover - guarded by SCENARIOS
+            raise AssertionError("unreachable benchmark scenario")
         explain_queue = {
             "B3": "bench_b3_0",
             "B13": "bench_b13_0",
@@ -879,9 +1062,29 @@ async def _run_scenario_in_database(
             result["summary"]["poll_only_p50_ms"] = statistics.median(
                 run["wake_latency"]["p50_ms"] for run in runs if run["mode"] == "poll_only"
             )
+        elif scenario == "B11":
+            facade_p99 = statistics.median(
+                run["request_latency"]["p99_ms"] for run in runs if run["mode"] == "facade_only"
+            )
+            embedded_p99 = statistics.median(
+                run["request_latency"]["p99_ms"] for run in runs if run["mode"] == "embedded"
+            )
+            result["summary"]["facade_only_median_p99_ms"] = facade_p99
+            result["summary"]["embedded_median_p99_ms"] = embedded_p99
+            result["summary"]["embedded_overhead_p99_ms"] = embedded_p99 - facade_p99
         elif scenario == "B13":
             result["summary"]["released_claims"] = sum(run["released_claims"] for run in runs)
             result["summary"]["expired_claims"] = sum(run["expired_claims"] for run in runs)
+        elif scenario == "B14":
+            result["summary"]["client_median_p99_ms"] = statistics.median(
+                run["client_latency"]["p99_ms"] for run in runs
+            )
+            result["summary"]["sql_median_p99_ms"] = statistics.median(
+                run["sql_latency"]["p99_ms"] for run in runs
+            )
+            result["summary"]["facade_median_overhead_p99_ms"] = statistics.median(
+                run["facade_overhead_p99_ms"] for run in runs
+            )
     finally:
         await runner.close()
         await producer.close()
@@ -890,7 +1093,7 @@ async def _run_scenario_in_database(
 
     if output is None:
         stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        output = Path("bench/results") / f"{stamp}-{scenario.lower()}-{scale_name}.json"
+        output = Path("taskq-bench-results") / f"{stamp}-{scenario.lower()}-{scale_name}.json"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result, output

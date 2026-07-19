@@ -1,6 +1,6 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library, now in implementation (Stage 1).
+Postgres-native task queue library with Stages 1–3 implemented and Stage-3 completion evidence green.
 
 **Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 
@@ -10,7 +10,7 @@ Postgres-native task queue library, now in implementation (Stage 1).
 |---|---|
 | **Tier map / authority chain (read first)** | `docs/README.md` |
 | **Locked contracts (Tier 0)** | `docs/Task Queue Transport Protocol v1.md`, `docs/Task Queue 0.1 Function Manifest.md` |
-| **Accepted decisions (Tier 1)** | `docs/adr/` (ADR-001..013) |
+| **Accepted decisions (Tier 1)** | `docs/adr/` (ADR-001..017) |
 | What to do next (Tier 2) | `TASKS.md` (task board) + `docs/Task Queue Build Plan.md` (stages) |
 | Destination design (Tier 3) | `docs/Task Queue — Unified Design Spec.md` (v1.6) |
 | Package + auth boundaries | `docs/Task Queue Library Extraction Design Brief.md` |

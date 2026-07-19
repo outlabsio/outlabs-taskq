@@ -1,6 +1,6 @@
 # taskq — Test & Benchmark Harness
 
-> **Status:** Normative design — 2026-07-18; **ADR fold-in applied same day** (design-review 04 merged: T8 migration suite, capability-role fixtures, owner-function time travel, calibrated performance envelope, WAL/EXPLAIN evidence, B12–B13)
+> **Status:** Normative design — 2026-07-18; implementation-accuracy pass 2026-07-19
 > **Companions:** Unified Design Spec §16.3 (validation gates — the WHAT to prove), §17 (25-scenario failure audit = the acceptance checklist), §18/§20 (open constants the harness must inform); [`taskq-borrowed-features/10-test-helpers.md`](./taskq-borrowed-features/10-test-helpers.md) (helpers for *consumers*; this doc is the package's OWN harness)
 > **Why this doc:** the spec mandates gates but never designs the machinery — no CI matrix, no deterministic race technique, no benchmark suite, no regression tracking. Development quality lives or dies here, so the harness is specified like a feature, not left to convention.
 
@@ -11,8 +11,11 @@
 Three artifacts, one repo:
 
 1. **`tests/`** — pytest suites T1–T8 (below), from pure-unit to kill-9 chaos and migration drills, runnable on a laptop with one env var.
-2. **`bench/`** — a named-scenario benchmark suite (B1–B14) with a calibrated, committed performance envelope and a compare gate. Benchmarks are *first-class deliverables*: they discharge the spec's explicitly benchmark-gated decisions (unindexed lease §18.10, claim-cost model §5.3) and put numbers behind "the most robust Postgres queue we can build."
-3. **CI matrix** — GitHub Actions jobs that make the import-isolation rule, the PG16/17/18 spread, and the race gates un-skippable before merge.
+2. **`taskq-bench`** — the installed runner in `src/taskq/bench.py`. It implements B1–B4, B8,
+   B11, B13, and B14; JSON defaults to `taskq-bench-results/`. The other named scenarios remain
+   specified future work, not pretend coverage.
+3. **CI matrix** — GitHub Actions jobs that make Python 3.12/3.13 isolation and artifact checks,
+   the PostgreSQL 16/18 full-suite spread, Stage-3 audit gates, and race gates un-skippable.
 
 Floors inherited from the spec, restated as hard harness assertions: **0 duplicate claims under any profile** (qdarte stress floor: ≥80 claim+settle/s sustained), all §16.3 gates green before any production lane moves.
 
@@ -35,7 +38,9 @@ Consumer-facing helpers (feature 10: fake client, `work`, `require_enqueued`, in
 
 ### 1.1 Infrastructure rules
 
-1. **One env var:** `TASKQ_TEST_DSN`. Absent → PG-marked suites skip (unit always runs). CI supplies service containers; local dev uses `docker compose -f bench/compose.yaml up -d` (pinned PG18 with the spec's recommended settings) or any scratch DB.
+1. **One env var:** `TASKQ_TEST_DSN`. Absent → PG-marked suites skip (unit always runs). CI supplies
+   service containers. Local development uses any disposable PostgreSQL scratch database; the exact
+   working DSN and creation command live in `TASKS.md`'s cold-start section.
 2. **Schema lifecycle:** installer runs once per session into schema `taskq` (asserting idempotent double-install — feature 13); per-test isolation via truncation fixture, not re-install. A `--fresh-schema` flag forces full reinstall for installer-focused tests.
 3. **Roles matter in tests (ADR-010):** suites connect as the exact capability role each call requires (`taskq_producer`/`taskq_runner`/`taskq_observer`/`taskq_operator`) — so grant regressions fail loudly. T2 additionally runs the **privilege/shadow suite** as an untrusted role: direct `UPDATE taskq.jobs` raises, ungranted functions raise, PUBLIC execute is revoked on every function, and shadow-object attacks (attacker-created same-name objects in writable schemas) cannot capture a pinned-`search_path` definer function.
 4. **Sanctioned time travel:** DB `now()` is the only clock, so tests never mock time — the harness installs **test-only owner functions** (`taskq_test.rewind_lease(job_id, by)` etc.) into the **ephemeral test database only**; they are not part of the package migrations and can never exist in production. No fixture issues raw DML, so the no-direct-DML invariant holds even inside the harness.
@@ -72,28 +77,31 @@ Randomized layer: T3-R runs K producers × M workers × mixed ops for N seconds 
 | Job | Matrix | Runs |
 |---|---|---|
 | `lint` | — | ruff + format check |
-| `import-isolation` | py3.12 / py3.13 | `uv pip install .` (NO extras) → `python -c "import taskq, taskq.client, taskq.worker"`; then `.[http]` without outlabs; asserts the extraction brief's forbidden-import rule mechanically |
-| `unit` | py3.12 / py3.13 | T1, no services |
-| `sql-contract` | **PG 16 / 17 / 18** service containers | T2 + installer/verify + capability-detection paths (uuid7 fallback on 16/17) |
+| `import-isolation` | py3.12 / py3.13 | isolated source syncs for core, HTTP, and OutLabs; forbidden imports asserted mechanically |
+| `unit` | py3.12 / py3.13 | explicit DB-free core, worker, CLI, and consumer-testing suites |
+| `sql-contract` | **PG 16 / 18** service containers | identical complete suite, including T2/T6/T8 and capability paths |
 | `races` | PG18 | T3 choreographed + T3-R (30s) + T4 (bounded examples) |
-| `crash` | PG18 | T5 subprocess suite |
-| `facade` | PG18, `[http]` and `[http,outlabs]` variants | T6 (outlabs variant seeds a throwaway SimpleRBAC to run the §8 auth matrix) |
-| `migrations` | PG18 (min-version lane on release) | T8 |
-| `bench-smoke` | PG18 | every B-scenario at toy scale — proves the harness itself, records nothing |
+| `stage3-audit` | PG18 + `[outlabs]` | T6 parity, security, race, resource, auth, and generated-catalog drift |
+| `migrations` | PG18 | installer/verify T8 class |
+| `bench-smoke` | PG18 + `[http]` | every implemented B-scenario at toy scale; artifacts stay temporary |
+| `built-artifacts` | py3.12 / py3.13 | wheel + sdist × core/HTTP/OutLabs, outside checkout |
+| `million-row-plans` | PG18, scheduled/manual | opt-in million-row structural plan gate |
 
-Nightly: T3-R long (10 min), T4 large example budget, T7 mini-soak (1h, heartbeat-heavy profile), full bench run with envelope compare (report-only). Release gate (manual): 24h T7 soak per §16.3.4, full T8 upgrade-path matrix, and the pinned-runner envelope hard gate. Branch protection requires everything through `migrations`.
+The workflow does not currently claim a crash subprocess job, soak lane, PostgreSQL 17 lane, or
+calibrated performance-envelope gate. Those remain explicit future release-hardening work.
 
 ---
 
 ## 5. Benchmark suite (B1–B14)
 
-`bench/` ships a small runner (`uv run taskq-bench run B3 --dsn ... --scale small|full`) — scenarios are code, results are JSON.
+The installed command runs implemented scenarios, for example
+`uv run taskq-bench run B14 --dsn ... --scale toy|small|full`; results are JSON.
 
 | ID | Scenario | Primary metrics | Informs |
 |---|---|---|---|
 | B1 | Single enqueue throughput/latency | enq/s, p50/p99 | client overhead |
 | B2 | Bulk enqueue (1000/call) | rows/s | ingestion lanes |
-| B3 | Claim→settle round trip, empty vs 1M-row backlog | claim p99, e2e p99 | claim-index shape; Solid-Queue ~110µs anchor (§5.3) |
+| B3 | Claim→settle round trip, empty vs 1M-row backlog | claim p99, e2e p99 | claim-index shape (§5.3) |
 | B4 | Mixed sustained load (N workers, M producers, realistic type mix) | jobs/s sustained, e2e p95 | the ≥80/s qdarte floor — must beat it |
 | B5 | **Heartbeat HOT ratio** (long-lease jobs, heartbeat-heavy) | `n_tup_hot_upd/n_tup_upd` (target ≥0.95), index bytes flat | **discharges §18.10** (deliberately-unindexed lease) |
 | B6 | Retry storm (mass failure + backoff) | requeue/s, claim p99 during storm, index growth | backoff engine, §13 index churn model |
@@ -108,7 +116,10 @@ Nightly: T3-R long (10 min), T4 large example budget, T7 mini-soak (1h, heartbea
 
 **Method rules:** each result JSON records scenario, scale, git sha, PG version + settings fingerprint, machine fingerprint, workload manifest + seed, warmup/duration/repetitions; ≥3 runs, report median (throughput) and worst (p99); DB dropped/recreated between scenarios. Beyond latency/throughput, capture **WAL bytes per accepted/settled job**, table/index bytes, live/dead tuples, vacuum activity, lock waits, connections, and client event-loop delay. Representative queries run `EXPLAIN (ANALYZE, BUFFERS, WAL)` and assert **structural** properties — expected index family, no unbounded full scan, bounded rows — never exact planner cost strings.
 
-**Regression gate (calibrated envelope, not prose thresholds):** the pinned dedicated runner is calibrated first and the accepted bounds are committed as `bench/envelopes/performance-envelope.toml`; `taskq-bench compare --against envelope` blocks a release on breach without an approved explanation. CI shared runners and laptops run report-only — development signals, never release evidence, and never committed as baselines. Correctness floors stay absolute regardless of hardware: 0 duplicate claims, 0 cap overshoot, and the no-op claim/settle path sustaining at least the greater of the historical 80 jobs/s floor or 2× the highest measured production peak.
+**Regression posture:** no calibrated envelope is accepted yet. CI shared runners and laptops are
+report-only development signals, never release evidence or baselines. A future pinned-runner slice
+must design and review the compare format before it can become a release gate. Correctness floors
+remain absolute regardless of hardware: 0 duplicate claims and 0 cap overshoot.
 
 **Open-constant duty:** B5→§18.10, B7→§20.1 poison threshold context, B3/B9→§20.6 archive/stats access patterns, B8→§20.7 long-poll sizing, B11→feature 14 defaults. Each spec open question that is empirical gets its number from here, and the spec edit cites the bench run.
 

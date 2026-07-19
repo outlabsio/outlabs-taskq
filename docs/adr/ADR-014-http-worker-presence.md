@@ -8,8 +8,9 @@
 The 0.1.2 Function Manifest has always exposed the runner command
 `taskq.worker_heartbeat(text, text[], text, integer, text, jsonb)`. The completed worker service
 uses that command before its first claim and periodically thereafter to publish advisory process
-presence and receive a targeted shutdown signal. ADR-011 also requires the HTTP facade to invoke
-the same command on behalf of remote workers.
+presence and receive a targeted shutdown signal. The Stage-3 remote-worker transport guarantee
+also requires the HTTP facade to invoke the same command on behalf of remote workers; ADR-011 owns
+the facade credential split, not this worker-presence command.
 
 Protocol v1 defines per-job heartbeat and operator shutdown commands, but omitted the HTTP
 worker-presence command. Route shape, authorization input, outcomes, and HTTP mapping belong to

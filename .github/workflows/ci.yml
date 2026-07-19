@@ -116,6 +116,10 @@ jobs:
 
   built-artifacts:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     services:
       postgres:
         image: postgres:18
@@ -136,7 +140,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
       - name: Build wheel and sdist
         run: uv build
@@ -232,7 +236,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --extra dev
+      - run: uv sync --extra dev --extra outlabs
       - run: uv run pytest tests/ -q
 
   races:
@@ -270,6 +274,36 @@ jobs:
           tests/test_s2_worker_races.py
           tests/test_s2_worker_service_audit.py
           -q
+
+  stage3-audit:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: taskq_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d taskq_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TASKQ_TEST_DSN: postgresql://postgres:postgres@localhost:5432/taskq_ci
+      TASKQ_STRESS_SEED: "424242"
+      HYPOTHESIS_SEED: "24680"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - run: uv sync --extra dev --extra outlabs
+      - name: Run Stage-3 parity, security, race, resource, and generation-drift gates
+        run: uv run pytest tests/test_s3_*.py -q -W error
 
   migrations:
     runs-on: ubuntu-latest
@@ -322,7 +356,7 @@ jobs:
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv sync --extra dev
+      - run: uv sync --extra dev --extra http
       - run: uv run pytest tests/test_bench_smoke.py -q
 
   million-row-plans:

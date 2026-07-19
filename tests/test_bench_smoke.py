@@ -47,7 +47,7 @@ async def test_benchmark_scenario_records_json(
         "0002_contract_0_1_1",
         "0003_contract_0_1_2",
     ]
-    assert len(result["runs"]) == (6 if scenario == "B8" else 3)
+    assert len(result["runs"]) == (6 if scenario in {"B8", "B11"} else 3)
     assert result["summary"]["median_throughput_rows_per_second"] > 0
     assert result["database"]["wal_bytes"] >= 0
     assert result["postgres"]["settings_fingerprint_sha256"]
@@ -70,3 +70,9 @@ async def test_benchmark_scenario_records_json(
         assert result["summary"]["released_claims"] == 0
         assert result["summary"]["expired_claims"] == 0
         assert all(run["conservation_equal"] for run in result["runs"])
+    elif scenario == "B11":
+        assert {run["mode"] for run in result["runs"]} == {"facade_only", "embedded"}
+        assert "embedded_overhead_p99_ms" in result["summary"]
+    elif scenario == "B14":
+        assert result["summary"]["client_median_p99_ms"] >= 0
+        assert "facade_median_overhead_p99_ms" in result["summary"]

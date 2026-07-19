@@ -589,10 +589,10 @@ class JobDetail(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
-    error: str | None
-    result: dict[str, Any] | None
-    progress: dict[str, Any] | None
-    payload: dict[str, Any] | None
+    error: str | None = None
+    result: dict[str, Any] | None = None
+    progress: dict[str, Any] | None = None
+    payload: dict[str, Any] | None = None
 
 
 class QueueStats(BaseModel):

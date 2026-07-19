@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; five review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 2D and all four Stage-3 implementation slices are complete; the Stage-3 audit remains** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, long-poll hub, composable runtime, and explicit OutLabs authorizer/provisioning tools are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; five review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 3 and the Stage-3 completion evidence are green; independent audit acceptance is next, and Stage 4 has not started** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, long-poll hub, composable runtime, and explicit OutLabs authorizer/provisioning tools are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -21,7 +21,7 @@ Start here:
 | [`docs/Task Queue — Unified Design Spec.md`](docs/Task%20Queue%20%E2%80%94%20Unified%20Design%20Spec.md) | Destination design (SQL-first), v1.6 |
 | [`docs/Task Queue Library Extraction Design Brief.md`](docs/Task%20Queue%20Library%20Extraction%20Design%20Brief.md) | Package boundaries + optional outlabs-auth |
 | [`docs/Task Queue Authorization & Queue Permissions.md`](docs/Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md) | Per-queue permissions + outlabs-auth adapter + provisioning DX |
-| [`docs/Task Queue Test & Benchmark Harness.md`](docs/Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Own test suites, CI matrix, benchmark scenarios + regression gates |
+| [`docs/Task Queue Test & Benchmark Harness.md`](docs/Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Own test suites, exact CI matrix, and report-only benchmark scenarios |
 | [`docs/Task Queue Growth, Topology & Live Visibility.md`](docs/Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md) | Retention at scale, optional dedicated queue DB, stats API + SSE (partly proposals) |
 | [`docs/taskq-borrowed-features/`](docs/taskq-borrowed-features/README.md) | Normative product features to implement (01–14) |
 | [`docs/Task Queue Peer Patterns Research.md`](docs/Task%20Queue%20Peer%20Patterns%20Research.md) | Provenance from ten surveyed open-source queue systems (described generically, not named) |

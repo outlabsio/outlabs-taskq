@@ -343,9 +343,10 @@ the external paths remain the canonical `/taskq/v1/...`. Mounting a bare generat
 unsupported. Host compatibility aliases are separate adapters that call the same generated handlers
 and never define a second model or outcome table.
 
-The sub-application uses a custom `TaskqRoute` to own parsing, validation, dependency, handler, and
-response exceptions for matched commands, with input echo suppressed. Sub-application exception
-handlers/middleware own unmatched 404, method-mismatch 405, and uncaught 500 normalization. Thus
+The sub-application registers generated opaque endpoints while its dispatcher owns raw-body
+parsing, validation, authorization, command invocation, and response normalization for matched
+commands, with input echo suppressed. Sub-application exception handlers/middleware own unmatched
+404, method-mismatch 405, and uncaught 500 normalization. Thus
 FastAPI's native error bodies never escape the `/taskq` boundary and settlement fences appear
 nowhere in error bodies, headers, or logs. The two deferred reserved GET paths are explicit hidden
 responders, not accidental 404/405 behavior.

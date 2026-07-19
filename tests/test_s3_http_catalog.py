@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -292,9 +293,10 @@ async def test_non_owning_capability_view_close_is_a_noop() -> None:
     assert not underlying.closed
 
 
-def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
-    assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.4"
+def _assert_catalog_matches_hand_derived_oracle(
+    specs: object = HTTP_COMMAND_SPECS,
+) -> None:
+    observed = specs  # keep the oracle independent from the generator implementation
     actual = {
         name.value: (
             spec.method,
@@ -303,13 +305,27 @@ def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
             spec.queue_source.value,
             spec.surface.value,
         )
-        for name, spec in HTTP_COMMAND_SPECS.items()
+        for name, spec in observed.items()
     }
     assert actual == EXPECTED_HTTP_IDENTITIES
     assert {
-        name.value: dict(spec.outcomes) for name, spec in HTTP_COMMAND_SPECS.items()
+        name.value: dict(spec.outcomes) for name, spec in observed.items()
     } == EXPECTED_HTTP_OUTCOMES
-    assert set(HTTP_COMMAND_SPECS) == set(HttpCommandName)
+    assert set(observed) == set(HttpCommandName)
+
+
+def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
+    assert PROTOCOL_MAJOR == 1
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.4"
+    _assert_catalog_matches_hand_derived_oracle()
+
+
+def test_hand_derived_catalog_oracle_rejects_a_deliberate_generator_mutation() -> None:
+    mutated = dict(HTTP_COMMAND_SPECS)
+    enqueue = mutated[HttpCommandName.ENQUEUE]
+    mutated[HttpCommandName.ENQUEUE] = replace(enqueue, path="/taskq/v1/jobs")
+    with pytest.raises(AssertionError):
+        _assert_catalog_matches_hand_derived_oracle(mutated)
 
 
 def test_http_catalog_excludes_db_only_commands_and_has_honest_gates() -> None:
