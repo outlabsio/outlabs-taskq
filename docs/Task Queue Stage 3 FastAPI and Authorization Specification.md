@@ -1,7 +1,7 @@
 # taskq — Stage 3 FastAPI and Authorization Specification
 
-> **Status:** S3-00 implementation specification — frozen 2026-07-18
-> **Authority:** Tier 3. Transport Protocol v1 document revision 1.0.3, Function Manifest 0.1.2, and ADR-001..016 win every conflict.
+> **Status:** S3-00 implementation specification — frozen 2026-07-18; round-5 documentation remediation applied the same day
+> **Authority:** Tier 3. Transport Protocol v1 document revision 1.0.4, Function Manifest 0.1.2, and ADR-001..017 win every conflict.
 > **Depends on:** completed Stage 2A–2D, including the audited worker service, consumer testing surface, and S3-PREP protocol hardening.
 
 ## 1. Purpose and boundary
@@ -15,14 +15,15 @@ Stage 3 adds the optional HTTP and authorization layers around the completed SQL
 - the optional OutLabs authorization adapter, catalog, and explicit provisioning tools; and
 - permanent SQL-versus-HTTP parity, packaging, lifecycle, and security evidence.
 
-The design goal is a one-line small deployment without hiding production topology. A host can mount
-the router with a simple static authorizer, or supply the OutLabs adapter and per-queue permissions.
+The design goal is a one-line small deployment without hiding production topology. A host mounts
+the isolated Taskq sub-application with a simple static authorizer, or supplies the OutLabs adapter
+and per-queue permissions.
 An embedded worker is always opt-in; a dedicated worker remains the default for multi-process or
 autoscaled deployments.
 
 This specification adds no SQL function, migration, role, grant, table, composite, outcome, route,
 or permission action. SQL contract stays 0.1.2; Protocol wire major stays 1 and document revision
-stays 1.0.3. It does not implement Stage-4 host adoption, 0.2/0.3 capabilities, an admin UI, SSE,
+is 1.0.4. It does not implement Stage-4 host adoption, 0.2/0.3 capabilities, an admin UI, SSE,
 general job listing, queue-detail reads, or a public tick/janitor route.
 
 ## 2. Package and import boundary
@@ -86,7 +87,8 @@ underlying transport are non-owning. Existing callers typed against `TaskqTransp
 `taskq.protocol` remains the only Python source for closed command names, value models, SQL
 identities, capability roles, outcomes, TQ errors, and replay rules. Stage 3 extends that source with
 immutable HTTP metadata: method, canonical path, action, queue source, active/gated/deferred state,
-request/result adapters, and status mapping.
+request/result adapters, status mapping, and a closed per-command retry classification sufficient to
+distinguish never-retry, keyed enqueue, safe idempotent command, and worker-owned fenced settlement.
 
 That one source generates or drives:
 
@@ -95,35 +97,41 @@ That one source generates or drives:
 - request/response adapters and envelope decoders;
 - protocol-header and capability negotiation;
 - SQL-reference versus HTTP parity vectors; and
-- a catalog test independently derived from the Tier-0 Protocol and Function Manifest.
+- a deterministic generated artifact compared with a catalog oracle hand-derived independently from
+  the Tier-0 Protocol and Function Manifest.
 
 Hand-copied route dictionaries, per-client status tables, duplicate TQ registries, and handwritten
-OpenAPI response unions are forbidden. Generation is deterministic and has a checked-in or
-test-compared normalized output so drift is reviewable.
+OpenAPI response unions are forbidden. The independent oracle never imports generated metadata for
+expected values. Generation is deterministic and has a checked-in or test-compared normalized
+output so drift is reviewable.
 
 ### 4.2 Active, gated, and excluded 0.1 surface
 
-The canonical paths and mappings come from Protocol v1.0.3. The generated active surface is:
+The canonical paths and mappings come from Protocol document revision 1.0.4. The generated active
+surface is:
 
 | Area | Commands/routes |
 |---|---|
 | Meta | `GET /taskq/v1/meta` |
-| Queue bootstrap | `PUT /taskq/v1/queues/{queue}`; no version/ETag in 0.1 |
 | Producer | single and batch enqueue under `/taskq/v1/queues/{queue}/jobs` |
 | Runner | queue claim; job heartbeat; complete, fail, release, snooze, cancel-running; worker-presence heartbeat |
 | Reads | job detail; per-queue and global queue stats; `/taskq/metrics` |
-| Operator | pause/resume, cancel/redrive/expire, purge, run-now, reprioritize, concurrency limit, worker shutdown request, worker lease expiry |
+| Operator | queue ensure (no version/ETag), pause/resume, cancel/redrive/expire, purge, run-now, reprioritize, concurrency limit, worker shutdown request, worker lease expiry |
 
 `GET /taskq/v1/workers` is **declared and generated but gated**: its method/OpenAPI error/client
 surface exists and returns typed `TQ501`; it has no success model. `GET
-/taskq/v1/queues/{queue}` is **deferred out** under ADR-015 and has no generated operation or client
-method. General job list is H-08-deferred. `get_authorization_projection` is facade-internal;
+/taskq/v1/queues/{queue}` and `GET /taskq/v1/jobs` are **deferred out** under ADR-015/017 and have no
+generated operation, OpenAPI operation, success schema, or client method. Each reserved path is
+still mounted as a hidden negative responder returning typed `TQ501`.
+`get_authorization_projection` is facade-internal;
 `redrive_failed`, `tick`, and `janitor` remain DB/CLI-only because Protocol v1 defines no public HTTP
 route. Inactive dependency, workflow, schedule, archive, SSE, and uniqueness-mode fields are rejected
 with `TQ501`, never ignored or prematurely represented.
 
-Operator routes are generated only when a separate operator transport/pool is configured. Their
-absence is deployment surface reduction, not fallback to the ordinary facade credential.
+Queue ensure and every other operator route are generated only when both a separate operator
+transport/pool and `operator_authorizer` are configured; supplying only one is a construction error.
+Their absence is deployment surface reduction, not fallback to the ordinary facade credential or
+primary authorizer. Hidden deferred-route responders remain mounted because they execute no SQL.
 
 ## 5. Wire models, envelopes, and error normalization
 
@@ -132,8 +140,10 @@ absence is deployment surface reduction, not fallback to the ordinary facade cre
 Inbound command models use `extra="forbid"`; unknown fields, malformed JSON, explicit null outside
 a nullable domain, invalid path values, and inactive fields normalize to the Protocol registry.
 Outbound models use `extra="ignore"` for additive v1 compatibility. All H-09 byte/item/count bounds
-are checked before SQL. Batch validation is one atomic model pass and reports an input index without
-partially authorizing or mutating.
+are checked before SQL except ADR-012's diagnostic carve-out: settlement error/cancel text may pass
+through within the request ceiling and SQL performs the authoritative byte-safe truncation so
+diagnostics can never block settlement. Batch validation is one atomic model pass and reports a
+1-based input index, matching SQL, without partially authorizing or mutating.
 
 The claim wire projection is distinct from the fence-redacted public Python `ClaimedJob`
 serialization: it includes `attempt_id` because claim is the sole fence-delivery channel. Settlement
@@ -159,14 +169,16 @@ class ErrorEnvelope:
 ```
 
 `Taskq-Protocol-Version: 1` is echoed on every response. Missing input is accepted; unsupported input
-returns `TQ426`. `Taskq-Request-Id` follows ADR-016 exactly: validated 1–128 safe ASCII, or a
-server-minted lowercase UUID, echoed in body and header, and never stored unbounded.
+returns `TQ426`. `Taskq-Request-Id` follows ADR-016/017 exactly: validated 1–128 safe ASCII, or a
+server-minted lowercase UUID, echoed in body and header, and never stored unbounded. Invalid supplied
+values are correlation-absent: authenticate first, then reject with `TQ422` using the minted value;
+the invalid bytes are never echoed or logged.
 
 Expected races (`lost`, `already_settled`, `settle_conflict`, paused/empty/timeout/unavailable) are
 typed command outcomes even where their HTTP status is non-2xx. Native or unregistered database
 errors become opaque `TQ500`; protected logs retain the source class/SQLSTATE but no SQL text,
 arguments, payload, secret, or fence. Authentication failures use `AUTH401`/`AUTH403` inside the
-same outer envelope. Every response reports registry-owned `retryable`; `Retry-After` is emitted only
+same outer envelope. Every **error** response reports registry-owned `retryable`; `Retry-After` is emitted only
 where the Protocol permits it.
 
 ### 5.3 Actor and request data
@@ -199,18 +211,27 @@ Credentials are secret values and never appear in repr, exceptions, logs, or ret
 Borrowed HTTPX clients are never closed or reconfigured. Sync/async clients do not share a mutable
 session across process forks.
 
-Automatic retries follow only Protocol §5. Enqueue retries require the same non-empty idempotency
+Automatic retries are generated from each command's immutable retry classification and follow only
+Protocol §5. Enqueue retries require the same non-empty idempotency
 key; a mixed/non-keyed batch is never retried automatically. Claim is never replayed after an
-unknown response. Fenced settlement retries only the identical verb and semantic arguments.
+unknown response. Fenced settlement retry ownership remains exclusively in the Stage-2 worker
+settlement layer; the HTTP client performs one settlement request per call and never adds an inner
+retry loop.
 `TQ501`, `TQ422`, `lost`, and `settle_conflict` never loop. Server `Retry-After` plus bounded jitter
 is honored for permitted retryable commands.
 
 An HTTP-backed `WorkerService` uses the same Stage-2 supervisor, cancellation, heartbeat, replay,
-and soft-stop semantics. Its client may configure `claim_wait_seconds` (default 25, maximum 30) so
-the existing claim call performs the facade long poll; it runs with no database listener. Cancelling
-an HTTP claim may lose the response but never fabricates a fence or settlement; a committed claim
-recovers by lease. Presence uses ADR-014 and a remote drain signal is sticky. Sync handlers remain in
-the audited bounded executor; the synchronous HTTP client does not imply event-loop blocking.
+and soft-stop semantics. Server-side long polling (`claim_wait_seconds`, default 25, maximum 30) is
+permitted only for a worker configured with exactly one queue. Multi-queue HTTP workers must use
+immediate claims (`wait_seconds=0`) through the existing fair sweep plus a bounded monotonic poll
+interval; configuration rejects a positive wait with multiple queues. On stop, only an in-flight
+**HTTP long-poll claim** is cancelled so the Stage-2 grace window is not consumed by the server wait.
+That cancellation may lose a committed claim response but never fabricates a fence or settlement;
+lease recovery is authoritative. SQL-mode worker cancellation, defaults, listener behavior, and
+sweep semantics remain byte-for-byte unchanged. Presence uses ADR-014 and a remote drain signal is
+sticky. HTTP wire `timeout` normalizes to core `ClaimState.EMPTY`; elapsed/deadline information may
+remain on a raw HTTP result wrapper but never grows the core state enum. Sync handlers remain in the
+audited bounded executor; the synchronous HTTP client does not imply event-loop blocking.
 
 The existing worker CLI gains an explicit HTTP transport mode only in the implementation slice. DSN
 and HTTP base URL are mutually exclusive; credentials are environment/secret inputs; HTTP workers
@@ -243,7 +264,7 @@ class QueueAuthorizer(Protocol):
 
 The five actions are closed. `queue=None` means a global permission. Generic adapters include
 static API-key, bearer-token, callable, legacy read/write/operator shim, and an explicitly named
-test-only no-auth adapter. There is no production default authorizer: `create_router` refuses to
+test-only no-auth adapter. There is no production default authorizer: `create_taskq_app` refuses to
 construct without one. Queue-blind simple adapters authorize all queues after credential success;
 that simplicity is explicit, never represented as queue isolation.
 
@@ -277,14 +298,17 @@ authenticate
 ```
 
 The caller never supplies the authorization queue. The mutation rechecks ownership atomically.
-Default denial is 403 naming the queue; `not_found_on_forbidden=True` maps denial to 404 without
-changing database behavior. Projection and mutation use short independent transactions and never
+Default denial is 403 naming the queue; `not_found_on_forbidden=True` maps denial to a response
+field-identical to the genuine `TQ001` missing-job envelope except for `request_id`, so it cannot
+become an existence oracle. Projection and mutation use short independent transactions and never
 hold a connection while authorization performs external work.
 
 ### 7.3 Database credential split
 
 The ordinary facade login has producer + runner + observer + housekeeper memberships and **never**
-operator. Operator routes require an opt-in separate pool/login with observer + operator. The
+operator. Queue ensure is an operator/admin command, not ordinary bootstrap. It and all other
+operator routes require an opt-in separate pool/login with observer + operator plus the explicit
+`operator_authorizer`. The
 operator pool never executes producer/runner/housekeeper commands; the ordinary pool never retries
 an operator command after permission denial. Omitting the operator pool omits those routes.
 
@@ -293,19 +317,33 @@ uses observer capability and an independently configurable scrape authorizer. `/
 authenticated `read` by default, with an explicit deployment-policy option for public metadata as
 per Protocol v1.
 
-## 8. FastAPI router and long polling
+## 8. FastAPI sub-application and long polling
 
-`create_router(runtime, *, authorizer, operator_authorizer=None,
-not_found_on_forbidden=False, meta_public=False, metrics_authorizer=None)` returns an `APIRouter` and
-performs no I/O. It mounts canonical paths only; host compatibility aliases are separate adapters
-that call the same generated handlers and never define a second model or outcome table.
+`create_taskq_app(runtime, *, authorizer, operator_transport=None,
+operator_authorizer=None, not_found_on_forbidden=False, meta_public=False,
+metrics_authorizer=None)` returns a lifespan-free `FastAPI` sub-application and performs no I/O.
+The stable integration mounts it at `/taskq`; the sub-application registers `/v1/...` internally so
+the external paths remain the canonical `/taskq/v1/...`. Mounting a bare generated `APIRouter` is
+unsupported. Host compatibility aliases are separate adapters that call the same generated handlers
+and never define a second model or outcome table.
 
-FastAPI's default validation/error bodies never escape. Syntax, path, query, body, dependency, and
-response failures all pass through the Protocol envelope. OpenAPI advertises exact discriminated
-success/error unions, limits, protocol/request headers, authorization, retry statuses, and
-write-only fences; it contains no credentials or attempt examples.
+The sub-application uses a custom `TaskqRoute` to own parsing, validation, dependency, handler, and
+response exceptions for matched commands, with input echo suppressed. Sub-application exception
+handlers/middleware own unmatched 404, method-mismatch 405, and uncaught 500 normalization. Thus
+FastAPI's native error bodies never escape the `/taskq` boundary and settlement fences appear
+nowhere in error bodies, headers, or logs. The two deferred reserved GET paths are explicit hidden
+responders, not accidental 404/405 behavior.
 
-The facade runtime owns one reconnectable PostgreSQL LISTEN connection per process for long-poll
+The mounted app publishes its generated schema at `/taskq/openapi.json` with `/v1/...` paths and a
+`/taskq` server/base entry; mounted operations are not silently merged into the host's
+`/openapi.json`. Hosts wanting one schema explicitly merge the deterministic schema through the
+provided composition helper, which prefixes those paths to `/taskq/v1/...`. In either form,
+OpenAPI advertises exact discriminated success/error unions, limits, protocol/request headers,
+authorization, retry statuses, and write-only fences; it contains no credentials or attempt
+examples. Documentation UIs remain host policy.
+
+`TaskqRuntime`—never the sub-application—is the sole Taskq lifecycle/resource owner. The facade
+runtime owns one reconnectable PostgreSQL LISTEN connection per process for long-poll
 hints, not one per request. A generation-based `ClaimWaitHub` coalesces notifications and wakes
 subscribers; payload content is never authoritative. Each claim request performs:
 
@@ -337,10 +375,10 @@ The stable integration is:
 
 ```python
 runtime = TaskqRuntime.from_dsn(..., options=TaskqRuntimeOptions(...))
-router = create_router(runtime, authorizer=authorizer)
+taskq_app = create_taskq_app(runtime, authorizer=authorizer)
 
 app = FastAPI(lifespan=compose_lifespans(host_lifespan, runtime))
-app.include_router(router)
+app.mount("/taskq", taskq_app)
 ```
 
 Composition order is host startup → taskq startup → serve → taskq shutdown → host shutdown, so
@@ -434,8 +472,10 @@ The adapter accepts an explicit auth object/session dependency and optional lega
 strangler period. Principal-to-actor conversion is deterministic and bounded. Authorization errors
 normalize to AUTH envelopes without exposing permission catalogs, token claims, session data, or
 checker internals. Service tokens are the default fleet credential; system integration keys require
-the documented allowed-action-prefix configuration for enqueue/admin; personal keys never run
-workers.
+the documented allowed-action-prefix configuration for enqueue/admin. Personal-key `run` exclusion
+is package-enforced only under EnterpriseRBAC. Under SimpleRBAC it is a host role/grant invariant:
+human roles must not receive `taskq:run` or queue-scoped `run`, and worker credentials should be
+service tokens.
 
 ### 11.2 Catalog and provisioning
 
@@ -452,8 +492,10 @@ supports:
 - explicit `reconcile=True` for authorized convergence; and
 - optional per-queue worker roles.
 
-Standard roles and grants remain exactly those in the Authorization doc. Permission seeding uses the
-public system-record API; role changes use the public role service. Caller transaction/session
+Standard roles and grants remain exactly those in the Authorization doc: the admin role enumerates
+the five global permissions and standard roles use `is_system_role=False` so the public role service
+can reconcile them. Permission seeding uses the public system-record API; role changes use the
+public role service. Caller transaction/session
 ownership is preserved. Failures roll back the provisioning transaction and return no partial
 success claim.
 
@@ -490,15 +532,21 @@ not accepted as parity evidence.
 ### S3-01 — protocol metadata and clients
 
 - capability protocols preserve existing SQL/core behavior and reject unsupported capability use;
-- independently derived route/model/status/error catalog matches Protocol v1.0.3 exactly;
+- independently hand-derived route/model/status/error/retry catalog matches Protocol document
+  revision 1.0.4 exactly without importing generated expected values;
 - generated OpenAPI, async client, sync client, and parity vectors share one source;
 - direction-aware extras, every H-09 bound, Protocol/Request-Id headers, envelopes, and native-error
   normalization are exact;
+- absent/valid/oversize/non-ASCII request IDs prove mint/echo behavior, non-reflection, and
+  authenticate-before-`TQ422`; bad credentials plus an invalid ID return auth failure with a minted ID;
+- single enqueue exposes exact outcome plus `data.job_id` only for both dispositions, with no
+  `created_at` or request echoes;
 - claim is the sole fence output; OpenAPI/examples/repr/log/error/metrics remain fence-free elsewhere;
-- retry matrix, borrowed/owned client cleanup, cancellation, connection failure, and compatibility
+- the generated per-command retry classification matches an independently Tier-0-derived Protocol
+  §5 oracle; borrowed/owned client cleanup, cancellation, connection failure, and compatibility
   negotiation are deterministic; and
-- worker list produces typed `TQ501`, queue detail/list jobs have no generated method, and no inactive
-  field is accepted.
+- worker list produces typed `TQ501`; queue detail/list jobs have no generated method or OpenAPI
+  operation; and no inactive field is accepted.
 
 ### S3-02 — facade, authorization, and long poll
 
@@ -508,7 +556,11 @@ not accepted as parity evidence.
 - worker presence preflights every distinct queue, preserves subject/label separation, and proves
   both 200 outcomes without extending a lease;
 - ordinary and operator pools execute only their permitted commands; missing operator config exposes
-  no operator route and no fallback;
+  no operator route (including queue ensure) and no fallback;
+- invalid settlement input, unknown path, wrong method, and raising authorizer all return envelopes
+  with no fence/native body; queue detail and list jobs return hidden typed `TQ501` responses;
+- HTTP timeout and SQL empty normalize identically to `ClaimState.EMPTY`; single-queue long poll and
+  multi-queue immediate sweeps meet claim/stop latency bounds without changing SQL-mode behavior;
 - long poll proves subscribe/check, notification-before/after-wait, missed hint, future due, timeout,
   disconnect-before/after-commit, listener reconnect, and shutdown-drain winner orders; and
 - no transaction/connection spans a wait; every waiter/listener/task returns to baseline.
@@ -533,9 +585,11 @@ not accepted as parity evidence.
 - real supported-package validator and permission dependency prove per-queue, global fallback,
   explicit any-of, global route, denial, cache concurrency, actor mapping, and legacy candidates;
 - the required matrix includes an `emails` run token denied on `tools`, lied-queue settlement, shared
-  fleet label, service-token embedded scopes, system-key policy guidance, and personal-worker denial;
+  fleet label, service-token embedded scopes, system-key policy guidance, Enterprise-fixture
+  personal-worker denial, and a SimpleRBAC vector proving the documented grant-policy residual;
 - catalog counts/order/validation, report/apply/reconcile, second-run idempotency, conflict handling,
-  role grants, rollback, and caller session ownership are exact;
+  role grants, rollback, and caller session ownership are exact, including first apply on empty IAM
+  and convergence of a drifted non-system standard role through the public service;
 - CLI and ensure/provision composition are secret-free and honest about cross-system partial failure;
   and
 - core and HTTP imports remain independent of the OutLabs extra and of any external backing service.
@@ -548,7 +602,7 @@ not accepted as parity evidence.
   budget, cancellation, and resource-leak matrices repeat without correctness sleeps;
 - PostgreSQL 16.14 and 18.3 run the identical full suite; Python 3.12/3.13 run source isolation;
 - wheel and sdist each install/smoke core, HTTP, and OutLabs combinations outside the checkout;
-- B9 measures the actual generated client → ASGI → SQL path and query plans; B11 measures embedded
+- B14 measures the actual generated client → ASGI → SQL path and query plans; B11 measures embedded
   request-latency/resource overhead. Both are report-only until a reviewed baseline exists, and
   environmental noise is never claimed as a win;
 - CI collects the million-row plan gate, all Stage-3 races, artifact matrix, and protocol generation

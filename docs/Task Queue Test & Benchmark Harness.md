@@ -11,7 +11,7 @@
 Three artifacts, one repo:
 
 1. **`tests/`** — pytest suites T1–T8 (below), from pure-unit to kill-9 chaos and migration drills, runnable on a laptop with one env var.
-2. **`bench/`** — a named-scenario benchmark suite (B1–B13) with a calibrated, committed performance envelope and a compare gate. Benchmarks are *first-class deliverables*: they discharge the spec's explicitly benchmark-gated decisions (unindexed lease §18.10, claim-cost model §5.3) and put numbers behind "the most robust Postgres queue we can build."
+2. **`bench/`** — a named-scenario benchmark suite (B1–B14) with a calibrated, committed performance envelope and a compare gate. Benchmarks are *first-class deliverables*: they discharge the spec's explicitly benchmark-gated decisions (unindexed lease §18.10, claim-cost model §5.3) and put numbers behind "the most robust Postgres queue we can build."
 3. **CI matrix** — GitHub Actions jobs that make the import-isolation rule, the PG16/17/18 spread, and the race gates un-skippable before merge.
 
 Floors inherited from the spec, restated as hard harness assertions: **0 duplicate claims under any profile** (qdarte stress floor: ≥80 claim+settle/s sustained), all §16.3 gates green before any production lane moves.
@@ -27,7 +27,7 @@ Floors inherited from the spec, restated as hard harness assertions: **0 duplica
 | Race / concurrency | T3 | yes | the §16.3.1 gate: dedup convergence, double-claim impossibility, fence `lost`, cap no-overshoot, diamond no-deadlock |
 | Property (stateful) | T4 | yes | §16.3.2 budget semantics + state-machine invariants under random interleaving |
 | Crash / chaos | T5 | yes + subprocesses | §16.3.3: kill -9 mid-handler, lost settle responses, followup exactly-once, tick savepoint isolation |
-| Facade + auth | T6 | yes | router auth injection (queue-scoped matrix from the Authorization doc §8), HTTP↔settle-result mapping, lifespan/embedded runtime (feature 14 §5) |
+| Facade + auth | T6 | yes | mounted-subapp envelope ownership plus the canonical path-scoped authorization vectors in Authorization doc §8, HTTP↔settle-result mapping, lifespan/embedded runtime (feature 14 §5) |
 | Soak | T7 | yes, long-lived | §16.3.4 24h bloat profiles; nightly 1h mini-soak; release-gate full run |
 | Migration / compatibility | T8 | yes | ADR-004: clean install at N; double-invocation/lock contention; N→N+1 upgrade with queued/running/failed/archived jobs present; old client vs new schema inside the compatibility window; new client vs old schema fails fast with a stable error; interrupted migration resumes or reports a deterministic operator action; `verify` detects corrupted signatures/ownership/grants/checksums/missing indexes; mid-flight worker survives a pre-migration (brief §8.2 upgrade test) |
 
@@ -85,7 +85,7 @@ Nightly: T3-R long (10 min), T4 large example budget, T7 mini-soak (1h, heartbea
 
 ---
 
-## 5. Benchmark suite (B1–B11)
+## 5. Benchmark suite (B1–B14)
 
 `bench/` ships a small runner (`uv run taskq-bench run B3 --dsn ... --scale small|full`) — scenarios are code, results are JSON.
 
@@ -104,6 +104,7 @@ Nightly: T3-R long (10 min), T4 large example budget, T7 mini-soak (1h, heartbea
 | B11 | Embedded-mode overhead (feature 14) | API request p99 with/without embedded worker under load | pool-split sizing defaults |
 | B12 | Migration + `verify` on a populated schema (T8 companion) | lock duration, service disruption during migrate | ADR-004 upgrade windows |
 | B13 | Graceful fleet shutdown | drain duration; released vs expired claims (expired must be 0 within grace) | feature 11 defaults |
+| B14 | Generated client → ASGI → SQL command path | client/e2e p50/p99, facade overhead, structural SQL plans | Stage-3 transport overhead and parity |
 
 **Method rules:** each result JSON records scenario, scale, git sha, PG version + settings fingerprint, machine fingerprint, workload manifest + seed, warmup/duration/repetitions; ≥3 runs, report median (throughput) and worst (p99); DB dropped/recreated between scenarios. Beyond latency/throughput, capture **WAL bytes per accepted/settled job**, table/index bytes, live/dead tuples, vacuum activity, lock waits, connections, and client event-loop delay. Representative queries run `EXPLAIN (ANALYZE, BUFFERS, WAL)` and assert **structural** properties — expected index family, no unbounded full scan, bounded rows — never exact planner cost strings.
 

@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 blocked by round 5 docs remediation** — ADR-017 closes both Contract questions; R5-01..08/09/11/16 remain before S3-01 |
+| Stage | **Stage 3 awaiting targeted round-5 delta check** — ADR-017 and all required docs remediation are complete; implementation remains stopped |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | Targeted round-5 delta check after ADR-017 and documentation remediation; no full round 6 required |
 
 ## Now
 
-- [ ] S3-R5-DOC amend the Stage-3 specification and Authorization/Harness docs for R5-01..08 plus acceptance-oracle findings R5-09/R5-11/R5-16; no source or SQL change
-
-
-## Next — after S3-R5-DOC
-
 - [ ] S3-R5-DELTA prove response byte preservation, contract/spec deltas, unchanged source/SQL, green suite, and reviewer-targeted disposition; then decide whether S3-01 opens
+
+
+## Next — after S3-R5-DELTA
+
 - [ ] S3-01 implement capability protocols, generated wire models, and sync/async HTTP clients
 - [ ] S3-02 implement the generic FastAPI facade, authoritative authorization, pool split, and long-poll hub
 - [ ] S3-03 implement TaskqRuntime, housekeeper, embedded worker, HTTP worker/CLI integration, and process budgets
@@ -165,11 +164,22 @@ timestamps/state. The same amendment completes invalid request-id mint/reject or
 
 ## Round-5 finding dispositions
 
-The immutable response verdict is **BLOCKED**. Its architecture/catalog/boundary assessment is
-positive; S3-01 remains closed on R5-CQ-A/B, documentation BLOCKERs R5-01..03, documentation HIGHs
-R5-04..08, and acceptance-oracle MEDIUMs R5-09/R5-11/R5-16. Source-backed adjudication and the exact
-docs-only remediation choices remain pending; no finding authorizes implementation, SQL, grant, or
-migration work.
+The immutable response verdict was **BLOCKED**. ADR-017 resolves R5-CQ-A/B and R5-09. The amended
+Stage-3/Auth/Harness designs close R5-01..08, R5-10/11, and R5-16 with the approved mechanisms and
+acceptance vectors. No SQL, migration, grant, or source change was required. Residual findings are
+owned explicitly rather than treated as closed:
+
+- **S3-01:** R5-27, R5-37, R5-38, R5-39, R5-40, R5-41, R5-43 (artifact/package boundary, exact capability methods and view
+  close behavior, retry request IDs, sync thread safety, 1-based bulk index, worker-owned settle retry).
+- **S3-02:** R5-14, R5-17, R5-18, R5-19, R5-22, R5-23, R5-24, R5-33, R5-42 (hiding equality, diagnostic truncation,
+  dynamic listener/disconnect races, stats semantics, envelope wording, metrics default, gated-worker
+  action before activation, normative long-poll sequence).
+- **S3-03:** R5-20 (runtime-owned unsafe-sync process-exit actor and live-ASGI evidence).
+- **S3-04:** R5-12, R5-13, R5-15, R5-31, R5-32, R5-34, R5-35, R5-36 (auth 429/503, session lifecycle, queue input grammar,
+  seed side effects, API-key wildcard honesty, legacy candidates, alpha/API names, transaction savepoint).
+- **S3-AUDIT:** R5-21, R5-25, R5-26, R5-28, R5-30 (independent oracle proof, exact CI/artifact claims, raw-read
+  parity mutation, front-door freshness). R5-29 belongs to the future Growth §4 reactivation slice
+  and cannot be closed by Stage 3.
 
 ## Round-4 finding dispositions
 
@@ -181,6 +191,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-R5-DOC · Round-5 documentation remediation** — froze the mounted lifespan-free sub-application and complete envelope ownership, operator-only queue ensure/pool/authorizer split, explicit five-name admin role plus reconcilable non-system roles, mode-honest personal-key policy, hidden deferred-route responders, single-queue-only HTTP long poll with scoped stop cancellation, timeout→`ClaimState.EMPTY`, generated retry classification, canonical authorization matrix, B14 benchmark identity, and the required S3-02/S3-04 vectors; every remaining R5 finding has an owning board slice and no source/SQL/grant/migration changed.
 - [x] **S3-R5-CQ · Round-5 Contract questions adjudicated** — accepted ADR-017 / Protocol document revision 1.0.4 defers the SQL-unbacked general list behind a hidden `TQ501`, corrects every surviving operator-minimal statement, removes the unproducible enqueue `created_at` and all non-authoritative echoes, and pins authenticated/non-reflective invalid-request-id behavior; the manifest records no 0.1 `list_jobs`, while SQL contract 0.1.2, grants, source, and migrations remain unchanged.
 - [x] **S3-R5-RESPONSE · Round-5 response recorded** — registered the 235-line external response byte-for-byte as immutable Tier 4; verdict BLOCKED, architecture and scope accepted, two Contract questions plus three BLOCKER/five HIGH documentation findings gate S3-01, and the board sequences ADR-017 before docs-only remediation and a targeted delta check.
 - [x] **S3-00-R5 · Round-5 design gate assembled** — the immutable Tier-4 request pins the Stage-2 baseline through S3-00 and requires an independently derived Protocol-v1.0.3 route/backing/action/outcome catalog, ADR-014..016 governance audit, H-13/capability feasibility, fence/client/retry security, authorization and credential split, long-poll/lifespan/R2-11 races, OutLabs source validation, packaging/CI/benchmark honesty, scope proof, and an explicit S3-01 verdict; no implementation landed.

@@ -14,7 +14,7 @@ Per-queue permissions are a **facade-tier feature**. The SQL contract stays IAM-
 Design goal, in the owner's words: *"super simple just to set up queues with different permissions."* Concretely:
 
     await provision_taskq_auth(auth, session, queues=["emails", "tools"], roles="standard")
-    # → permissions taskq:*, taskq_emails:*, taskq_tools:* seeded
+    # → five global + five exact per-queue permission rows seeded for each queue
     # → roles taskq-producer / taskq-worker / taskq-operator / taskq-admin created
     # then mint a service token or API key holding taskq_emails:run — that worker can ONLY work "emails"
 
@@ -28,16 +28,16 @@ Five verbs cover the whole facade. Every route maps to exactly one.
 |---|---|---|
 | `enqueue` | enqueue, enqueue-bulk | producer services, API endpoints |
 | `run` | claim, heartbeat, complete, fail, release, snooze | workers |
-| `read` | job list/detail, queue stats, workflow status, cutover/schema status | dashboards, workers, operators |
-| `control` | pause, resume, cancel, redrive, expire-worker, tick | operators, ops tooling |
-| `admin` | ensure/alter queue, concurrency limits, schedules CRUD | deploy/bootstrap, admins |
+| `read` | job detail, queue stats, cutover/schema status | dashboards, workers, operators |
+| `control` | pause, resume, cancel, redrive, expire-worker | operators, ops tooling |
+| `admin` | ensure/alter queue, concurrency limits | deploy/bootstrap, admins |
 
 Rules:
 
 1. `run` deliberately bundles claim **and** settle — splitting them creates principals that can claim but never settle (a wedge machine, never a real need).
-2. `tick` is `control` with **no queue scope** (global). Workflow create/read are global `enqueue`/`read` in v1 (workflows may span queues; revisit only if a real multi-tenant need appears).
-3. Schedule CRUD scopes to the schedule's `queue` (`admin` on that queue).
-4. Verb names are part of the contract — adapters, docs, and the provisioning helper all use these five strings.
+2. `tick`/`janitor` are database/CLI-only through the housekeeper capability and have no facade
+   action or HTTP route. Workflow, schedule, and general-list routes are inactive in 0.1.
+3. Verb names are part of the contract — adapters, docs, and the provisioning helper all use these five strings.
 
 ---
 
@@ -45,19 +45,21 @@ Rules:
 
 ### 2.1 Route annotation (normative)
 
-`create_router` internally declares, per route: `(action, queue_source)` where `queue_source ∈ {path_param, body_field, job_lookup, none}`.
+The generated Taskq sub-application declares, per active route: `(action, queue_source)` where
+`queue_source ∈ {path_param, declared_queues, job_lookup, none}`.
 
 | Route | Action | Queue source |
 |---|---|---|
-| `POST /{queue}/claim` | `run` | path |
-| `POST /enqueue` | `enqueue` | body (`queue` field) |
-| `POST /enqueue-bulk` | `enqueue` | body — **every distinct queue in the batch is checked** |
-| `POST /jobs/{id}/heartbeat·complete·fail·release·snooze` | `run` | job lookup |
-| `POST /jobs/{id}/cancel·redrive` | `control` | job lookup |
-| `GET /jobs`, `GET /jobs/{id}`, stats views | `read` | query filter / job lookup; unfiltered list requires global `read` |
-| `POST /queues/{queue}/pause·resume` | `control` | path |
+| `POST /taskq/v1/queues/{queue}/claims` | `run` | path |
+| `POST /taskq/v1/queues/{queue}/jobs` | `enqueue` | path |
+| `POST /taskq/v1/queues/{queue}/jobs/batch` | `enqueue` | path — one queue and one authorization check per atomic batch |
+| `POST /taskq/v1/jobs/{id}/heartbeat·complete·fail·release·snooze·cancel-running` | `run` | job lookup |
+| `POST /taskq/v1/workers/heartbeat` | `run` | every distinct declared queue, all-or-nothing preflight |
+| `POST /taskq/v1/jobs/{id}/cancel·redrive·expire` | `control` | job lookup |
+| `GET /taskq/v1/jobs/{id}`, queue stats | `read` | job lookup / path; global stats uses no queue |
+| `POST /taskq/v1/queues/{queue}/pause·resume` | `control` | path |
 | (no HTTP tick route — the housekeeper is runtime-internal, ADR-011; manual surface is the operator CLI) | — | — |
-| queue/limit/schedule CRUD | `admin` | path / body |
+| queue ensure / concurrency-limit commands | `admin` | path / none; operator pool + authorizer only |
 
 **Job-lookup order (normative, ADR-006):** authenticate → **`taskq.get_authorization_projection(job_id)`** (a `SECURITY DEFINER` read granted to the facade's observer role, exposing only id, queue, job_type, status — never payloads or attempt fences) → authorize `(action, projection.queue)` → invoke the fenced mutation (which re-validates ownership atomically). Caller-supplied queue/job_type in payloads are **assertions**: rejected on mismatch (409/422 per the ADR-005 protocol), never an authorization input. On authorization failure the default is **403 naming the queue** (single-tenant blast-radius scoping, not tenant isolation); hosts that want existence-hiding set `not_found_on_forbidden=True` to get 404.
 
@@ -74,7 +76,9 @@ Defined in `taskq.http.deps`, zero outlabs imports:
 
 - `AuthContext` (actor string + opaque principal) is unchanged from the extraction brief §5.2.
 - **Back-compat shim:** a v1 `TaskqAuth` (read/write/operator) wraps into a `QueueAuthorizer` that ignores `queue` — `read → read`, `enqueue/run → write`, `control/admin → operator`. The bundled `static_api_key_auth` / `bearer_token_auth` / `no_auth_for_tests` adapters stay queue-blind exactly this way: one credential, all queues. Queue scoping is opt-in sophistication, never a toll on the simple path.
-- Bulk enqueue calls `authorize` once per distinct queue in the batch (cache per request).
+- Canonical bulk enqueue authorizes its one path queue exactly once. Historical body-queue enqueue
+  shapes may exist only as host-owned legacy aliases; no multi-queue bulk alias is permitted because
+  splitting it would destroy the canonical command's one-transaction atomicity.
 
 ---
 
@@ -159,21 +163,25 @@ The extraction brief §5.3 said "the package never seeds IAM rows." **Amended, p
         mode="report",
     )
 
-**Standard roles** (created only when `roles="standard"`, idempotent, `is_system=True`) — these are **outlabs-auth IAM roles, not PostgreSQL roles** (the DB capability roles are ADR-010/011's, a different trust layer):
+**Standard roles** (created only when `roles="standard"`, idempotent,
+`is_system_role=False`) — these are **outlabs-auth IAM roles, not PostgreSQL roles** (the DB
+capability roles are ADR-010/011's, a different trust layer). Non-system is deliberate: the supported
+public role service refuses every mutation of a system role, while explicit `reconcile=True` must be
+able to converge drift through public APIs.
 
 | Role | Grants |
 |---|---|
 | `taskq-producer` | `taskq:enqueue`, `taskq:read` |
 | `taskq-worker` | `taskq:run`, `taskq:read` |
 | `taskq-operator` | `taskq:read`, `taskq:control` |
-| `taskq-admin` | `taskq:*` |
+| `taskq-admin` | `taskq:enqueue`, `taskq:run`, `taskq:read`, `taskq:control`, `taskq:admin` |
 | `taskq-worker-{queue}` (per queue, opt-in `per_queue_roles=True`) | `taskq_{queue}:run`, `taskq_{queue}:read` |
 
 ### 4.2 CLI
 
     taskq auth sync-permissions --queues emails,tools [--roles standard]
 
-Requires `taskq[outlabs]` + host DSN/schema settings; calls the same helper; prints a diff (created / already-present) and **prints any host-config change it cannot make** (next section). Also: `ensure_queue(..., provision_auth=True)` forwards to the helper when an outlabs adapter is configured — declare a queue and its permissions in one call.
+Requires `taskq[outlabs]` + host DSN/schema settings; calls the same helper; prints a diff (created / already-present) and **prints any host-config change it cannot make** (next section). API keys cannot hold wildcard scopes; key grants enumerate exact actions even though wildcard permissions remain meaningful for roles and service-token matching. Also: `ensure_queue(..., provision_auth=True)` forwards to the helper when an outlabs adapter is configured — declare a queue and its permissions in one call.
 
 ### 4.3 API-key grant-policy honesty (document, don't hide)
 
@@ -182,10 +190,10 @@ outlabs-auth gates which scopes an API key may HOLD by action-prefix allowlists.
 | Verb | Personal keys (default) | System keys (default) |
 |---|---|---|
 | `read` | allowed (`read` prefix) | allowed (`read` prefix) |
-| `run` / `control` | denied | allowed (`run` / `control` prefixes) |
+| `run` / `control` | denied under EnterpriseRBAC policy; not package-enforced under SimpleRBAC | allowed (`run` / `control` prefixes) |
 | `enqueue` / `admin` | denied | **not in default list** |
 
-(Verified against `core/config.py` defaults in `0.1.0a24` — corrected 2026-07-18; an earlier revision of this table wrongly claimed system keys lack `read`.) So: hosts minting **API keys** carrying `enqueue`/`admin` taskq scopes add those verbs to `api_key_system_allowed_action_prefixes` (one constructor kwarg; the CLI prints the exact line) — worker keys (`run`/`read`) need no policy change. Personal keys stay locked down — correct posture; workers should never run on personal keys. **Service tokens bypass grant-policy entirely** (permissions embedded at mint) — which is one reason they're the default worker credential below.
+(Verified against `core/config.py` defaults in `0.1.0a24` — corrected 2026-07-18; an earlier revision of this table wrongly claimed system keys lack `read`.) So: hosts minting **API keys** carrying `enqueue`/`admin` taskq scopes add those verbs to `api_key_system_allowed_action_prefixes` (one constructor kwarg; the CLI prints the exact line) — worker keys (`run`/`read`) need no policy change. EnterpriseRBAC personal keys stay locked down. Under SimpleRBAC the package's personal-key policy returns before prefix filtering, so worker denial is instead a documented host grant invariant: never grant `run` to human roles and use service tokens for fleets. **Service tokens bypass grant-policy entirely** (permissions embedded at mint) — which is one reason they're the default worker credential below.
 
 ### 4.4 Worker credential guidance (normative table)
 
@@ -194,7 +202,7 @@ outlabs-auth gates which scopes an API key may HOLD by action-prefix allowlists.
 | **Service token** (qdarte pattern) | Default for fleets on SimpleRBAC hosts | Embedded scopes (`taskq_{queue}:run`, `taskq_{queue}:read`); ≤30-day lifetime → rotation is an ops rhythm, document alongside deploy |
 | **System-integration API key** | Enterprise hosts wanting durable, rotatable, IP-allowlisted identities | Principal's `allowed_scopes` caps key scopes; RBAC-only (no ABAC conditions) |
 | **Static key / bearer adapters** | No-IAM hosts (labs, outlabsAPI pre-auth) | Queue-blind by design |
-| Personal API key | Never for workers | Prefix policy blocks write verbs — leave it that way |
+| Personal API key | Never recommended for workers | EnterpriseRBAC prefix policy blocks `run`; SimpleRBAC must enforce this through human-role grants |
 
 One credential per fleet remains acceptable single-tenant posture (Unified Spec §14); per-queue tokens are the upgrade path, not a mandate.
 
@@ -228,13 +236,18 @@ Queue scoping is enforced **at the HTTP facade only**. A principal holding raw d
 
 1. Adapter matrix: token holding `taskq_emails:run` → can claim/settle on `emails`; 403 on `tools`; global `taskq:run` → both.
 2. Two-candidate check: `taskq:enqueue` alone authorizes enqueue on any queue; `taskq_emails:enqueue` alone authorizes only `emails`.
-3. Bulk enqueue spanning `emails`+`tools` with only `taskq_emails:enqueue` → 403 naming `tools`; nothing enqueued (authorize before execute).
+3. Canonical batch on the `tools` path while holding only `taskq_emails:enqueue` → 403 naming
+   `tools`; nothing enqueued (authorize once before executing the atomic one-queue batch).
 4. Job-lookup routes: settle on a job in a forbidden queue → 403 (404 when `not_found_on_forbidden=True`); job stays untouched.
 5. Legacy candidates: Diverse `job:write` token still claims during strangler; removing the extra candidate breaks it (proving the tightening path).
 6. `provision_taskq_auth` idempotent: second run creates nothing, reports already-present; catalog matches queue list.
 7. v1 `TaskqAuth` shim: existing static-key mounts work unchanged, queue-blind.
 8. Core import rule intact: `import taskq`, `import taskq.http` succeed without outlabs-auth installed (adapter module only under `[outlabs]`).
 9. Service token with embedded `taskq_emails:run` authorizes without any permission rows existing (embedded-scope path).
+10. First `mode="apply"` on empty IAM creates the catalog and all four standard roles; a drifted
+    non-system standard role conflicts by default and converges only with `reconcile=True`.
+11. EnterpriseRBAC rejects a personal key carrying `run`; SimpleRBAC demonstrates that a personal
+    key follows its owner's grants and is denied only when the documented human-role policy holds.
 
 ---
 
