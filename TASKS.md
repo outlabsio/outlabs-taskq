@@ -25,13 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 restricted-runtime base and credential-log remediation complete; allowlisted canary is open** — production API and worker use the non-superuser runtime login, taskq remains enabled in legacy mode with an empty allowlist, and the Redis credential has been rotated with both retired-credential rejection and secret-free logs proved after restart |
+| Stage | **S4-03 production canary paused at S4-CQ-04; safe legacy posture restored** — the first live credential probe proved the host tool route accepts a narrowly scoped system-integration key while the canonical taskq facade returns typed `TQ503 auth_infrastructure_unavailable` for that same key; no job was enqueued, the ephemeral key was archived, and production is healthy in legacy mode with no allowlist |
 | Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; deployed production host line 68/68 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
+- [ ] S4-CQ-04 adjudication/remediation: make the canonical OutLabs taskq authorization path accept the same supported system-integration API-key credential as the host tool route without bypassing queue-scoped permission checks; republish and repin immutably if library source changes
 - [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
@@ -44,6 +45,35 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
+
+**Blocking evidence:** before any canary enqueue, production was switched to taskq mode with only
+the read-only `umami` lane allowlisted. The pre-existing `TOOLS_API_KEY` is not a valid OutLabsAuth
+credential: both the host queued-tools dependency and `/taskq/v1/meta` returned 401. A replacement
+ephemeral system-integration principal/key was then created through exact a24's public services with
+only `tools:run` and `taskq_tools:read`. The host route authenticated it and reached its post-auth
+validation boundary (422 for deliberately invalid parameters), proving `tools:run`; the canonical
+taskq facade returned `TQ503` with fixed reason `auth_infrastructure_unavailable` on every one of
+three retries for the same `X-API-Key`. Bearer presentation returned 401 and presenting both did not
+change the typed 503. This contradicts the accepted Stage-3/Stage-4 posture that one supported
+OutLabs system-integration credential can enqueue through the host route and perform canonical
+queue-scoped readback. No enqueue request was sent, worker/tool invocation markers remained zero,
+the ephemeral principal and owned key were archived through the public service, and its temporary
+file was deleted. The production producer was restored to `legacy`, the temporary production and
+preview allowlist variables were deleted, the rollback deployment finished healthy, and the live
+container reports health 200, taskq enabled, mode `legacy`, and no allowlist.
+
+**Recommended adjudication:** reproduce the exact a24 system-integration-key path against
+`OutlabsQueueAuthorizer` with its real session dependency and Redis-backed auth configuration, then
+repair the canonical adapter or the pinned OutLabsAuth dependency at the failing supported surface.
+The regression must prove authenticate → queue-scoped authorize for `taskq_tools:read`, denial for a
+key lacking that scope, principal-fingerprint stability across the two phases, and unchanged typed
+429/503 normalization. Do not authorize from the host's custom `require_outlabs_api_key` helper,
+weaken fail-closed rate limiting, substitute direct SQL readback, or grant a global/wildcard scope.
+If taskq source changes, publish a new immutable alpha and update the host URL/hash pin before
+resuming the exact pre-enqueue probe. Production remains in legacy mode until the canonical 202→GET
+path passes with the real supported credential.
 
 ### S4-CQ-03 — Immutable migration cannot execute after `SET ROLE taskq_owner`
 
