@@ -25,8 +25,8 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 open** — disabled-by-default host integration is independently accepted; the allowlisted production canary is next |
-| Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 62/62 regular with 3 pre-existing opt-in skips; MyPy 111 files |
+| Stage | **S4-03 paused at enablement** — the disabled production deploy is healthy; S4-CQ-01 must choose the actual production database before provisioning or canary traffic |
+| Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; reconciled production host line 53/53 regular with 5 pre-existing opt-in skips; MyPy 61 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
@@ -44,6 +44,33 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S4-CQ-01 — The live production database is not the frozen Neon target
+
+**Blocking evidence:** the accepted Stage-4 specification states that production is managed
+PostgreSQL behind the canonical Neon DSN, and S4-01 proved migrations, split taskq roles, IAM,
+queue profile, TLS, and `max_connections=901` only on a disposable Neon branch. The first real
+Coolify deployment showed that the production application actually tracks `staging-prep` and its
+`POSTGRES_DSN` points to Coolify's internal PostgreSQL service. Host commit `d1b00fe` is now deployed
+healthy with taskq explicitly disabled; `alembic current` is `20260616_0005 (head)`, the public
+health check is 200, `/taskq/v1/meta` is 404, unauthorized enqueue is 401, and a read-only query in
+the running container reports `to_regnamespace('taskq') IS NOT NULL = false`. Enabling against the
+current DSN would therefore provision a database that the frozen production proof never covered;
+switching the whole host to Neon would be a separate data migration; adding a taskq-only DSN would
+be a new topology. Do not set `TASKQ_ENABLED=true`, run taskq migrations, or reconcile taskq IAM in
+production until this is adjudicated.
+
+**Recommended adjudication:** amend the living Stage-4 deployment target to the actual Coolify
+PostgreSQL service for this first-host dogfood, then repeat the S4-01 production preflight in place:
+record server/TLS/pool facts and `max_connections`, prove the migration owner can create the split
+roles, run immutable migrations plus `verify()`, reconcile the exact IAM catalog and `tools` queue
+profile, and only then acknowledge production enablement in legacy mode. This avoids an unrelated
+application-data migration and preserves the one-database embedded-host topology. If Neon remains
+mandatory, authorize and spec either the host data migration or a separate taskq DSN before source
+or production changes.
+
+**Decision needed:** approve the actual-database amendment and repeated in-place preflight, or choose
+the Neon host-migration/taskq-only-DSN alternative.
 
 ### S3-CQ-01 — HTTP worker presence is absent from Protocol v1
 
@@ -186,6 +213,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-03A · Disabled production deployment** — reconciled the accepted three-host-commit taskq slice onto Coolify's actual `staging-prep` production line while preserving its newer Postgres-backed legacy publisher and removed broker/domain code; the merged host passes 53/53 with five pre-existing infrastructure skips, Ruff, 61-file MyPy, lock, offline Alembic through `20260616_0005`, and image build. The first guarded candidate failed safely before replacement because the production image does not ship `uv`; Coolify retained the healthy old container, the pre-deploy command was corrected to `alembic upgrade head`, and a regression note was added. A second guarded candidate exposed OutLabs Auth a24's required Redis namespace; host commit `d1b00fe` adds the explicit setting/pass-through/test, Coolify now persists `OUTLABS_AUTH_REDIS_KEY_PREFIX=outlabs-auth:production:outlabs-api` and `OUTLABS_AUTH_AUTO_MIGRATE=false`, and the rolling deployment completed healthy on its first health attempt. Production evidence is health 200, application migration head `20260616_0005`, taskq meta 404, unauthenticated enqueue 401, and no `taskq` schema. S4-CQ-01 blocks enablement; no taskq production migration, role, IAM, queue, job, worker, or canary invocation occurred.
 
 - [x] **S4-02-ACCEPT · Disabled host integration independently accepted** — the reviewer reproduced host 62/62 with three pre-existing infrastructure skips, taskq 449/449 with one opt-in skip, Ruff, 111-file MyPy including Alembic, the offline full-upgrade compile, live `alembic current` at `20260313_0004`, the exact Docker image digest, and the live scratch-database active-window/post-settlement harness with a raw-table oracle. Source inspection accepted the real `NonRetryable`/`Retry` mapping, classification-only durable errors, recursive credential rejection, single-snapshot producer policy, flag-only private probe, exact 202/no-fallback behavior, health/CORS/OpenAPI vectors, and unchanged contracts. Both worktrees were clean; taskq matched origin and the host remained deliberately three commits ahead/unpushed with nothing deployed. S4-03 is open, but its first host push is an explicit production deployment action.
 - [x] **S4-02 · Disabled-by-default outlabsAPI integration** — host commit `7df6b7f` adds a frozen fail-fast Stage-4 policy, exactly one canonical tools task plus the flag-only private probe, the poll-only single-process embedded runtime, host-first composed lifespan, authorized lifespan-free `/taskq` mount without operator transport, generated OpenAPI composition, exact CORS headers, and backlog-independent health readiness. The existing queued route samples mode/allowlist once, validates bounded credential-free params, awaits taskq enqueue only for enabled allowlisted requests, returns exact 202/readback fields, and never falls back after an ambiguous error; disabled/non-allowlisted requests remain legacy-only. Handler outcomes use real `NonRetryable`/`Retry` types with classification-only durable errors, and the raw Umami auth-body leak is removed. The pre-existing Alembic ghost import is deleted, MyPy now covers `alembic`, and an offline full-upgrade test permanently imports the migration environment. Host verification is 62/62 with the same three infrastructure skips, Ruff clean, MyPy clean across 111 files, lock exact, Docker image green, and `alembic current` at `20260313_0004`. The live local harness independently observed active-key convergence, post-settlement new execution, and two raw one-attempt succeeded rows through the actual embedded worker. No host deployment, production mutation, taskq SQL/migration/contract/ADR/source change, or unrelated lane migration occurred; independent acceptance is required before S4-03.
