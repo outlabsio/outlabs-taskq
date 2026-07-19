@@ -25,19 +25,18 @@
 
 | | |
 |---|---|
-| Stage | **Stage 3 contract gate blocked** — S3-CQ-03 must close the remaining wire-model omissions; implementation remains untouched |
+| Stage | **Stage 3 specification gate in progress** — ADR-016 closes S3-CQ-03 docs-first; implementation remains untouched |
 | Suite | 366/366 regular on PG18.3 and PG16.14; the PG18 million-row plan gate is 2/2 |
-| Contracts | Protocol v1 document revision 1.0.2 + Function Manifest 0.1.2 (+ ADR-012..015) |
-| Next review | Held until S3-CQ-03 closes, then Stage-3 round-5 contract/design boundary |
+| Contracts | Protocol v1 document revision 1.0.3 + Function Manifest 0.1.2 (+ ADR-012..016) |
+| Next review | Stage-3 round-5 contract/design boundary after S3-00; no implementation before acceptance |
 
 ## Now
 
-- [ ] S3-CQ-03 close the remaining request-id, queue-ensure, and worker-list wire-model omissions; S3-00 remains closed
-
-
-## Next — after S3-CQ-03
-
 - [ ] S3-00-SPEC freeze the FastAPI + OutLabs authorization integration specification; do not implement integrations
+
+
+## Next — after S3-00-SPEC
+
 - [ ] S3-00-R5 assemble and tier-register the round-5 review request; stop before Stage-3 implementation
 
 ## Later
@@ -104,8 +103,13 @@ generated surface, until Growth §4/R2-16 freezes a bounded observer projection,
 authorization, and plan evidence. Keep per-worker presence writes and worker shutdown/expiry
 commands active; no SQL contract or migration changes.
 
-**Decision needed:** approve the recommendation or select different contract-owned wire shapes.
-Do not resume S3-00 until all three active models can be generated without Tier-3 invention.
+**Resolution:** accepted ADR-016 and additive Protocol v1 document revision 1.0.3. The canonical
+`Taskq-Request-Id` is bounded, server-minted when absent, and echoed without unbounded persistence;
+queue ensure returns its exact version-free SQL profile and rejects premature `If-Match` with
+`TQ501`; worker list remains declared in H-13 behind a typed `TQ501` gate with no success schema
+until R2-16 freezes the safe projection. Queue detail remains deferred out because its whole read
+model is absent, while worker list stays declared because only its public projection is pending.
+SQL contract 0.1.2 and migrations 0001–0003 remain unchanged.
 
 ## Round-4 finding dispositions
 
@@ -117,6 +121,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S3-CQ-03 · Final HTTP wire models normalized docs-first** — accepted ADR-016 and Protocol v1 document revision 1.0.3 define bounded request-id mint/echo behavior, correct queue ensure to the exact version-free SQL profile, and retain worker list as a generated typed-capability gate pending R2-16, with the declared-vs-deferred rule explicit and no SQL or migration change.
 - [x] **S3-CQ-02 · Queue-profile read contradiction adjudicated docs-first** — accepted ADR-015 and Protocol v1 document revision 1.0.2 visibly defer the unbacked GET route to H-11's Growth §4/R2-16 read-model design, exclude it from H-13's active generated surface, pin `TQ501`, retain stats/admin-ensure as the honest interim posture, and leave SQL contract 0.1.2 plus migrations 0001–0003 unchanged.
 - [x] **S3-CQ-01 · HTTP worker presence adjudicated docs-first** — accepted ADR-014 and Protocol v1 document revision 1.0.1 define the canonical route, all-declared-queue `run` authorization, advisory label/authenticated actor split, typed 200 outcomes, presence/job-heartbeat non-confusion rule, shared-fleet honesty edge, and H-13 generation/parity obligation without changing SQL contract 0.1.2 or adding a migration.
 - [x] **S2-06-AUDIT · Stage 2D permanent completion evidence** — repeated cancellation, followup, drain-cap, and task-ledger probes return transports and asyncio resources to baseline; CI collects the consumer suite on Python 3.12/3.13 and imports testing without pytest; wheel/sdist × core/HTTP/OutLabs artifact smokes exercise the installed fake/assertion surface. The identical full suite is 366/366 with one opt-in skip on PostgreSQL 18.3 and 16.14, the PG18 million-row gate is 2/2, the clean Python-3.13 no-DB lane is 219/219, Ruff/format are clean, and the exact slice changes no SQL migration, Tier-0/Tier-4, HTTP, OutLabs, listener, CLI, or Stage-3 source.

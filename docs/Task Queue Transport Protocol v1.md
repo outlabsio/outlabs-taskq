@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, and ADR-015 as additive protocol document revision **1.0.2**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, and ADR-016 as additive protocol document revision **1.0.3**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -33,6 +33,7 @@
 7. **ADR-013 effective lease projection:** `taskq.claimed_job` appends non-null `lease_seconds` after `step_key`. It is the exact duration selected by `claim_jobs` and used for the job lease and attempt row. Workers schedule `min(lease_seconds/3, 30s)` heartbeats from this duration on a monotonic timer and never derive it by subtracting local wall time from `lease_expires_at`. This is additive under H-02; protocol major remains v1.
 8. **ADR-014 HTTP worker presence:** protocol document revision 1.0.1 adds the canonical worker-presence command in §2.1. It is additive, changes no SQL identity or migration, and leaves the wire-major header at `1`.
 9. **ADR-015 queue-profile read deferral:** protocol document revision 1.0.2 moves the adopted base's `GET /taskq/v1/queues/{queue}` row from the active 0.1 surface to §2.2. The Function Manifest wins for 0.1 SQL specifics: no safe observer projection exists, so the route cannot be implemented honestly. This changes no SQL identity or migration and leaves the wire-major header at `1`.
+10. **ADR-016 final HTTP wire normalization:** protocol document revision 1.0.3 defines `Taskq-Request-Id`, removes the nonexistent 0.1 queue-profile version, and keeps worker list declared behind a typed capability gate as specified in §2.3. This changes no SQL identity or migration and leaves the wire-major header at `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -97,6 +98,38 @@ administrator declares a canonical profile through idempotent `PUT /taskq/v1/que
 `taskq.ensure_queue` and receives that canonical profile in the command response. Neither the
 observer credential nor the ordinary facade pool gains base-table or operator access. SQL contract
 0.1.2 and migrations 0001–0003 remain unchanged; there is no migration 0004.
+
+### 2.3 Final HTTP wire normalization (document revision 1.0.3)
+
+#### Request correlation
+
+The optional inbound correlation header is `Taskq-Request-Id`. It must be 1–128 ASCII characters
+matching `[A-Za-z0-9._:-]+`; invalid input returns `TQ422`. When absent, the server generates a
+lowercase UUID string. The selected value is returned both as the JSON envelope's `request_id` and
+the response `Taskq-Request-Id` header. It may enter only bounded diagnostic fields and structured
+logs and is never persisted unbounded.
+
+#### Queue ensure correction
+
+The adopted base's `PUT /taskq/v1/queues/{queue}` response contains the exact canonical profile
+returned by `taskq.ensure_queue` and **no version or ETag** in 0.1. `created` returns 201;
+`updated | unchanged` return 200. An `If-Match` header while H-11 is inactive returns `TQ501`; it is
+never ignored. H-11's future Growth §4/R2-16 read-model amendment owns version/ETag design.
+
+#### Declared, gated worker list
+
+`GET /taskq/v1/workers` remains in H-13's generated route, OpenAPI, sync/async client, and
+conformance surfaces, but 0.1 exposes only the typed `TQ501` capability-inactive response and no
+success schema. The command identity and global `read`/`control` authorization are settled; the
+Growth §4/R2-16 slice must still freeze a bounded observer projection, redaction, cursor, and query
+plan before activation. The facade never forwards raw `worker_status` fields such as hostname, pid,
+or arbitrary `meta`. Operators may query that view directly with an observer SQL credential.
+
+This differs deliberately from ADR-015 queue detail: queue detail has neither a designed public
+model nor observer SQL backing and is therefore excluded from H-13. Worker list has a settled
+command and backing view but lacks a public-safe projection, so it stays declared behind the typed
+gate. The reusable rule is “undesigned command: defer out; settled command awaiting safe
+projection: declare and gate.” SQL contract 0.1.2 and migrations 0001–0003 remain unchanged.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 
