@@ -29,6 +29,20 @@ from taskq.worker import WorkerOptions, WorkerService, WorkerServiceOptions
 logger = logging.getLogger("taskq.runtime")
 
 
+# ADR-020: this bridge is deliberately a closed compatibility set, not a range.
+# It exposes no 0.1.3 read-model capability; it only lets an already-deployed
+# runtime survive the additive metadata revision while a later surface release
+# remains separately gated.
+SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3"})
+
+
+def _require_supported_sql_contract(
+    contract_version: str, *, supported_versions: frozenset[str] = SUPPORTED_SQL_CONTRACT_VERSIONS
+) -> None:
+    if contract_version not in supported_versions:
+        raise TaskqVersionError(details={"contract_version": contract_version})
+
+
 class EmbeddedWorkerOptions(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -410,8 +424,7 @@ class TaskqRuntime:
         self._started_monotonic = self.clock.monotonic()
         try:
             meta = await self.facade_transports.observer.get_contract_meta()
-            if meta.contract_version != "0.1.2":
-                raise TaskqVersionError(details={"contract_version": meta.contract_version})
+            _require_supported_sql_contract(meta.contract_version)
             self._log_budget()
             if self.housekeeper_transport is not None:
                 await self._tick(startup=True)
