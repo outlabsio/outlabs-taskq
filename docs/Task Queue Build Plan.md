@@ -182,6 +182,16 @@ both images are green. The targeted R-AUDIT request must return READY before `ma
 branches move; `origin/main`, `origin/staging-prep`, Coolify, databases, environment, production,
 retirement, branch deletion, side-effecting lanes, and Stage 5 remain unchanged.
 
+**R-AUDIT READY; controlled cutover opens:** independent raw-object regeneration passes the 27/3
+ledger, all four list/path checksums, default-only semantic dispositions, exact ordered candidate
+parents, identical `ded6d43` tree, empty recursive diff, ancestry/fast-forward proof, and annotated
+remote tags. Host lock, 72/72 plus five skips, Ruff, 64-file MyPy, Alembic/import gates, exact pins,
+and the same-tree production-shape evidence pass with zero Contract questions. R8A-01 requires the
+cutover slice to re-read refs, Coolify branch/revision, and live health immediately before any move.
+Only fast-forward-only `main` plus the frozen API/worker deployment-branch choreography is open;
+BR-06..10 and independent post-cutover acceptance still gate retirement, while deletion,
+side-effecting lanes, and Stage 5 remain closed.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

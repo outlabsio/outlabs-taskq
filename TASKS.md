@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 reconciliation · R2 candidate ready** — exact two-parent candidate `2ed736b` preserves accepted tree `ded6d43`, both histories are ancestors, and three annotated rollback tags are remote; `main`, `staging-prep`, Coolify, deployment, database, and production remain unchanged pending R-AUDIT |
+| Stage | **Post-Stage-4 reconciliation · R-AUDIT READY** — candidate `2ed736b` and the 27/3 ledger independently pass; `main` may fast-forward and the controlled deployment-branch cutover may begin, but neither has started |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Targeted R-AUDIT must accept the R1 ledger, R2 candidate/tree/tags, and gates before `main` or deployment branches move; retirement remains closed |
+| Next review | After fast-forward and controlled API/worker branch cutover, independent acceptance must close BR-06..10 before any tools-retirement work |
 
 ## Now
 
-- [ ] **S4-POST-R-AUDIT · Independent candidate acceptance** — request assembled at `docs/design-review-8/R-AUDIT-REQUEST.md`; independently regenerate the 27/3 ledger, exact parents/tree/zero-diff/ancestry, annotated tag objects, remote non-mutation, and gates. READY is required before `main`, Coolify, or deployment moves.
+- [ ] **S4-POST-R3 · Authoritative-main and deployment-branch cutover** — execute R8A-01's immediate pre-move recheck, fast-forward `main` to accepted candidate `2ed736b` with commit/tree identity proof, then move API and standing worker to that identical `main` revision under §5 health/auth/taskq/non-tools/drain and branch-flip rollback choreography. Stop for independent acceptance before retirement, branch archival/deletion, side-effecting lanes, or Stage 5.
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R-AUDIT-RESPONSE · Candidate independently accepted** — registered the targeted response byte-for-byte as immutable Tier 4 (SHA-256 `2e86e692b35d62f70b0aa4d96f103035ac47367c5b002ed432f23b9337c5b78f`). Raw Git regeneration confirms candidate `2ed736b`, exact ordered parents, accepted tree `ded6d43`, empty recursive diff, both histories as ancestors, true fast-forward eligibility, 27/3 ledger counts, all four ledger checksums, source-backed default dispositions, zero forward ports, and all three annotated remote tags. Lock, host 72/72 plus five skips, Ruff, 64-file MyPy, Alembic/import gates, exact dependency pins, and same-tree harness inheritance pass; zero Contract questions. R8A-01 binds an immediate pre-move recheck of refs, Coolify branch/revision, and live health because platform policy state was not inspectable. READY authorizes only `main` fast-forward and frozen deployment cutover; retirement, deletion, side-effecting lanes, and Stage 5 remain closed.
 
 - [x] **S4-POST-R2 · Exact-tree two-parent candidate constructed** — host candidate `2ed736b` on non-deploying `codex/s4-post-r2-reconcile` has parent 1 `9348f85`, parent 2 old `main` `7df6b7f`, and exact tree `ded6d43ace2fced88600f19128dedcfcfe9fe0be`; raw and name-status diffs from the accepted parent are empty, both histories are ancestors, and current `main` is fast-forward eligible. Three remote annotated rollback tags peel exactly to old main, deployed `3f50b7d`, and accepted evidence `9348f85`. Host evidence commit `a2500a4` records the construction separately and is not a candidate input. Lock, 72/72 plus five-skip suite, Ruff, 64-file MyPy, offline Alembic, taskq/configured-host imports, and API/worker images (`e84309e`, `b1dd914`) are green. `origin/main` remains `7df6b7f`, `origin/staging-prep` remains `3f50b7d`; no Coolify/deployment/database/environment/production, retirement, deletion, side-effecting-lane, or Stage-5 change occurred.
 
