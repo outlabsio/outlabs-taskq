@@ -192,6 +192,17 @@ Only fast-forward-only `main` plus the frozen API/worker deployment-branch chore
 BR-06..10 and independent post-cutover acceptance still gate retirement, while deletion,
 side-effecting lanes, and Stage 5 remain closed.
 
+**S4-POST-R3 cutover complete; independent acceptance pending:** the binding pre-move check passed
+and remote `main` advanced without force from `7df6b7f` to exact candidate `2ed736b`. Coolify API
+and standing worker deployed that identical revision with unchanged settings, healthy/authenticated
+taskq behavior, zero active taskq and legacy depths, and the expected worker command. A keyed
+read-only producer pair converged `created` then `existed` to one succeeded job and its authorized
+canonical read; a validation-only non-tools probe left the legacy table unchanged. Both resources
+then booted the immutable deployed rollback tag at peeled commit `3f50b7d` against the unchanged
+PG16.14/Alembic database, after which exact `main@2ed736b` was restored. No manual DML, schema,
+IAM, queue-profile, environment, contract, SQL, or migration change occurred. BR-06..10 require
+independent acceptance before retirement, archival/deletion, side-effecting lanes, or Stage 5.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

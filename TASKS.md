@@ -25,14 +25,15 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 reconciliation · R-AUDIT READY** — candidate `2ed736b` and the 27/3 ledger independently pass; `main` may fast-forward and the controlled deployment-branch cutover may begin, but neither has started |
+| Stage | **Post-Stage-4 reconciliation · S4-POST-R3 complete** — `main`, API, and standing worker are on exact candidate `2ed736b`; the immutable rollback rehearsal passed and independent acceptance is pending |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | After fast-forward and controlled API/worker branch cutover, independent acceptance must close BR-06..10 before any tools-retirement work |
+| Next review | Independent post-cutover acceptance must close BR-06..10 before any tools-retirement work |
 
 ## Now
 
-- [ ] **S4-POST-R3 · Authoritative-main and deployment-branch cutover** — execute R8A-01's immediate pre-move recheck, fast-forward `main` to accepted candidate `2ed736b` with commit/tree identity proof, then move API and standing worker to that identical `main` revision under §5 health/auth/taskq/non-tools/drain and branch-flip rollback choreography. Stop for independent acceptance before retirement, branch archival/deletion, side-effecting lanes, or Stage 5.
+No implementation slice is open. Independent acceptance of S4-POST-R3 must close BR-06..10
+before retirement, branch archival/deletion, side-effecting lanes, or Stage 5.
 
 ## Later
 
@@ -314,6 +315,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R3 · Authoritative-main and deployment-branch cutover** — R8A-01's immediate recheck passed; `main` advanced without force from `7df6b7f` to exact-tree candidate `2ed736b`, and Coolify API plus standing worker now run that identical revision with unchanged settings digests. A keyed read-only Aerolineas request proved `created`→`existed` same-id convergence and authorized canonical `succeeded` readback; a validation-only newsletter probe left all three legacy rows unchanged. The annotated `3f50b7d` rollback tag, pinned to its peeled SHA for a platform-verifiable revision, booted both resources against the unchanged PG16.14/Alembic database, preserved auth, health, worker command, zero active depths, and required no manual DML; both resources were then restored to exact `main@2ed736b`. One simultaneous worker rebuild hit a transient BuildKit snapshot-cache failure and succeeded on sequential retry without replacing the running worker. Host evidence commit `6f566c1` records the complete transcript; independent BR-06..10 acceptance remains the only open gate.
 
 - [x] **S4-POST-R-AUDIT-RESPONSE · Candidate independently accepted** — registered the targeted response byte-for-byte as immutable Tier 4 (SHA-256 `2e86e692b35d62f70b0aa4d96f103035ac47367c5b002ed432f23b9337c5b78f`). Raw Git regeneration confirms candidate `2ed736b`, exact ordered parents, accepted tree `ded6d43`, empty recursive diff, both histories as ancestors, true fast-forward eligibility, 27/3 ledger counts, all four ledger checksums, source-backed default dispositions, zero forward ports, and all three annotated remote tags. Lock, host 72/72 plus five skips, Ruff, 64-file MyPy, Alembic/import gates, exact dependency pins, and same-tree harness inheritance pass; zero Contract questions. R8A-01 binds an immediate pre-move recheck of refs, Coolify branch/revision, and live health because platform policy state was not inspectable. READY authorizes only `main` fast-forward and frozen deployment cutover; retirement, deletion, side-effecting lanes, and Stage 5 remain closed.
 
