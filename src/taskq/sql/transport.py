@@ -35,8 +35,10 @@ from taskq.protocol import (
     ExpireWorkerLeasesResult,
     HeartbeatResult,
     JobDetail,
+    JobPage,
     Metric,
     QueueStats,
+    QueueProfile,
     QueueControlOutcome,
     RedriveFailedResult,
     SettleResult,
@@ -536,6 +538,32 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def list_jobs(
+        self, queue: str, view: str, *, limit: int = 50, after: Mapping[str, Any] | None = None
+    ) -> JobPage:
+        async def operation(conn: AsyncConnection) -> JobPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_jobs(:queue, :view, :limit, CAST(:after AS jsonb))",
+                {"queue": queue, "view": view, "limit": limit, "after": _json_param(after) if after else None},
+            )
+            data = dict(row)
+            data["items"] = [dict(item) for item in data["items"]]
+            data["next_after"] = _json(data["next_after"])
+            return JobPage.model_validate(data)
+
+        return await self._run(operation)
+
+    async def get_queue_profile(self, queue: str) -> QueueProfile | None:
+        async def operation(conn: AsyncConnection) -> QueueProfile | None:
+            rows = await self._many(
+                conn, "SELECT * FROM taskq.get_queue_profile(:queue)", {"queue": queue}
+            )
+            row = rows[0] if rows else None
+            return QueueProfile.model_validate(row) if row is not None else None
+
+        return await self._run(operation)
+
     async def get_queue_stats(self, queue: str | None = None) -> list[QueueStats]:
         async def operation(conn: AsyncConnection) -> list[QueueStats]:
             rows = await self._many(
@@ -582,6 +610,21 @@ class SqlTaskqTransport:
             result = EnsureQueueResult.model_validate({**row, "profile": _json(row["profile"])})
             self._validated_outcome(CommandName.ENSURE_QUEUE, result.result)
             return result
+
+        return await self._run(operation)
+
+    async def update_queue_profile(
+        self, name: str, profile: Mapping[str, Any], actor: str, expected_version: int
+    ) -> tuple[str, QueueProfile | None, int]:
+        async def operation(conn: AsyncConnection) -> tuple[str, QueueProfile | None, int]:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.update_queue_profile(:name, CAST(:profile AS jsonb), :actor, :expected_version)",
+                {"name": name, "profile": _json_param(profile), "actor": actor, "expected_version": expected_version},
+            )
+            assert row is not None
+            profile_row = row["profile"]
+            return str(row["result"]), (QueueProfile.model_validate(profile_row) if profile_row else None), int(row["current_version"])
 
         return await self._run(operation)
 

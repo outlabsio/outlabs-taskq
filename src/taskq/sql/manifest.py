@@ -249,17 +249,6 @@ def _parse_functions() -> dict[str, FunctionSpec]:
 FUNCTIONS = _parse_functions()
 PUBLIC_FUNCTIONS = frozenset(identity for identity, spec in FUNCTIONS.items() if spec.grants)
 
-# ADR-019 direct SQL surfaces ship before their H-13 generated/HTTP client
-# activation. Their absence from the Stage-2 typed transport is intentional
-# and is asserted explicitly rather than silently weakening the ledger.
-SQL_DIRECT_ONLY_FUNCTIONS = frozenset(
-    {
-        "taskq.get_queue_profile(text)",
-        "taskq.list_jobs(text,text,integer,jsonb)",
-        "taskq.update_queue_profile(text,jsonb,text,bigint)",
-    }
-)
-
 # Closed registered-error projection from the canonical function manifest and
 # Protocol v1. Empty sets are meaningful: those functions have no public TQ
 # exception outcome. R3-F04's executable vectors assert this map is complete.

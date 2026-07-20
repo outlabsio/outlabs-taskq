@@ -21,9 +21,11 @@ from taskq.protocol import (
     ExpireWorkerLeasesResult,
     HeartbeatResult,
     JobDetail,
+    JobPage,
     Metric,
     QueueControlOutcome,
     QueueStats,
+    QueueProfile,
     RedriveFailedResult,
     SettleResult,
 )
@@ -152,6 +154,12 @@ class RunnerTransport(ClosableTransport, Protocol):
 
 @runtime_checkable
 class ObserverTransport(ClosableTransport, Protocol):
+    async def list_jobs(
+        self, queue: str, view: str, *, limit: int = 50, after: Mapping[str, Any] | None = None
+    ) -> JobPage: ...
+
+    async def get_queue_profile(self, queue: str) -> QueueProfile | None: ...
+
     async def get_job(
         self,
         job_id: UUID,
@@ -183,6 +191,10 @@ class OperatorTransport(ClosableTransport, Protocol):
     async def ensure_queue(
         self, name: str, profile: Mapping[str, Any] | None = None, actor: str | None = None
     ) -> EnsureQueueResult: ...
+
+    async def update_queue_profile(
+        self, name: str, profile: Mapping[str, Any], actor: str, expected_version: int
+    ) -> tuple[str, QueueProfile | None, int]: ...
 
     async def pause_queue(
         self, name: str, actor: str, reason: str | None = None

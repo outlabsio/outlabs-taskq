@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.4"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.6"
 T = TypeVar("T")
 
 
@@ -443,6 +443,58 @@ class EnsureQueueWireData(BaseModel):
     profile: dict[str, Any]
 
 
+class QueueProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    profile_version: int = Field(ge=1)
+    default_priority: int = Field(ge=0, le=1000)
+    default_lease_seconds: int = Field(ge=15, le=86400)
+    default_max_attempts: int = Field(ge=1, le=100)
+    default_backoff_mode: Literal["fixed", "exponential"]
+    default_backoff_base: int = Field(ge=1, le=86400)
+    default_backoff_cap: int = Field(ge=1, le=86400)
+    retention_hours: int = Field(ge=1)
+    failed_retention_hours: int = Field(ge=1)
+    max_depth: int | None = Field(default=None, ge=1)
+    notify_enabled: bool
+    paused: bool
+
+
+class JobListItem(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID
+    job_type: str
+    status: JobStatus
+    outcome: str | None
+    priority: int
+    attempt_count: int
+    failure_count: int
+    max_attempts: int
+    created_at: datetime
+    scheduled_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    updated_at: datetime
+
+
+class JobPage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[JobListItem, ...]
+    next_after: dict[str, Any] | None = None
+
+
+class JobPageWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[JobListItem, ...]
+    next_cursor: str | None = None
+
+
 class ReasonWireRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -667,9 +719,12 @@ class CommandName(StrEnum):
     GET_AUTHORIZATION_PROJECTION = "get_authorization_projection"
     GET_JOB = "get_job"
     GET_QUEUE_STATS = "get_queue_stats"
+    GET_QUEUE_PROFILE = "get_queue_profile"
+    LIST_JOBS = "list_jobs"
     GET_CONTRACT_META = "get_contract_meta"
     METRICS = "metrics"
     ENSURE_QUEUE = "ensure_queue"
+    UPDATE_QUEUE_PROFILE = "update_queue_profile"
     PAUSE_QUEUE = "pause_queue"
     RESUME_QUEUE = "resume_queue"
     SET_CONCURRENCY_LIMIT = "set_concurrency_limit"
@@ -746,6 +801,7 @@ class QueueSource(StrEnum):
     DECLARED_QUEUES = "declared_queues"
     GLOBAL = "global"
     DEPLOYMENT = "deployment_policy"
+    QUERY = "query"
 
 
 class HttpSurface(StrEnum):
@@ -910,6 +966,11 @@ COMMAND_SPECS: Final = MappingProxyType(
             ("ok", "missing"),
         ),
         CommandName.GET_QUEUE_STATS: _spec("taskq.get_queue_stats(text)", _OBSERVER, ("ok",)),
+        CommandName.GET_QUEUE_PROFILE: _spec("taskq.get_queue_profile(text)", _OBSERVER, ("ok",)),
+        CommandName.LIST_JOBS: _spec(
+            "taskq.list_jobs(text,text,integer,jsonb)", _OBSERVER, ("ok",),
+            (TqCode.VALIDATION, TqCode.CAPABILITY),
+        ),
         CommandName.GET_CONTRACT_META: _spec("taskq.get_contract_meta()", _OBSERVER, ("ok",)),
         CommandName.METRICS: _spec("taskq.metrics()", _OBSERVER, ("ok",)),
         CommandName.ENSURE_QUEUE: _spec(
@@ -917,6 +978,10 @@ COMMAND_SPECS: Final = MappingProxyType(
             _OPERATOR,
             tuple(item.value for item in ConfigChangeOutcome),
             (TqCode.VALIDATION,),
+        ),
+        CommandName.UPDATE_QUEUE_PROFILE: _spec(
+            "taskq.update_queue_profile(text,jsonb,text,bigint)", _OPERATOR,
+            ("updated", "profile_version_conflict"), (TqCode.VALIDATION,),
         ),
         CommandName.PAUSE_QUEUE: _spec(
             "taskq.pause_queue(text,text,text)",

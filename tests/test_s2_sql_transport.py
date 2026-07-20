@@ -29,7 +29,6 @@ from taskq.sql.manifest import (
     PUBLIC_ERRORS,
     PUBLIC_FUNCTIONS,
     REPLAY_RULES,
-    SQL_DIRECT_ONLY_FUNCTIONS,
 )
 from taskq.sql.transport import METHOD_FUNCTIONS, SqlTaskqTransport
 
@@ -54,9 +53,8 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
 
 
 def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
-    assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS) - set(SQL_DIRECT_ONLY_FUNCTIONS)
-    assert len(METHOD_FUNCTIONS) == 30
-    assert len(PUBLIC_FUNCTIONS) == 33
+    assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
+    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 33
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
