@@ -160,6 +160,18 @@ Both plans have independently falsifiable source, database, invocation, deployme
 oracles. Round 8 must return READY before S4-POST-R1; no host source, branch, deployment, database,
 taskq contract, or production state changed in S4-POST-00.
 
+**Round-8 READY and S4-POST-R1 complete:** the immutable response independently reproduces the
+host graph, legacy-tools surface, and both repository gates, and authorizes reconciliation only with
+zero Contract questions. Host evidence commit `b78ca5e` derives every one-sided commit: 27 on the
+production/evidence line and three on stale `main`. Every row names surfaces, semantic evidence,
+and a wrong-disposition oracle; all default-only intent is present or superseded, so there are zero
+forward ports. R8-01 therefore freezes the R2 candidate to parents `9348f85` and `7df6b7f`, tree
+`ded6d43ace2fced88600f19128dedcfcfe9fe0be`, and zero differing paths. The R1 ledger commit remains
+evidence-only on the non-deploying branch and is not substituted for the accepted candidate parent.
+Host gates remain 72/72 plus five infrastructure skips with Ruff and 64-file MyPy clean. R2 is next;
+no candidate, tag, authoritative ref movement, deployment, database action, or production probe has
+occurred.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

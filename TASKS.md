@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage 4 specification gate** — branch reconciliation and tools-only legacy retirement are frozen as separate, ordered plans; no host branch, source, deployment, database, or production state has changed |
+| Stage | **Post-Stage-4 reconciliation · R1 complete** — the independently derived 30-row host ledger finds zero forward ports and freezes the future candidate tree to accepted `9348f85`; no merge candidate, tag, authoritative ref movement, deployment, database, or production state has changed |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | Round 8 must accept both post-Stage-4 plans before branch reconciliation starts; legacy retirement remains gated on accepted reconciliation, and hard-kill lease-expiry evidence still gates side-effecting lanes |
 
 ## Now
 
-- [ ] **S4-POST-R1 · Independently derived host reconciliation ledger** — enumerate every commit reachable from exactly one accepted host baseline, classify each disposition with semantic evidence and a named wrong-disposition oracle, bind R8-01's exact-tree construction, and stop before creating a merge candidate, tag, ref movement, deployment, or production mutation.
+- [ ] **S4-POST-R2 · Exact-tree two-parent reconciliation candidate** — from accepted host tip `9348f85` (not the evidence-only R1 ledger commit), construct the two-parent candidate with old `main` `7df6b7f`, exact tree `ded6d43`, zero differing paths, both ancestors, rollback tags, and a non-deploying `codex/` ref; then stop for R-AUDIT before `main`, Coolify, or production moves.
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R1 · Host reconciliation ledger derived** — host evidence commit `b78ca5e` records all 27 production/evidence-only and three default-only commits, each with affected surfaces, one allowed disposition, semantic evidence, a named wrong-disposition oracle, and independent-review status. The three default changes are superseded or already present: there are zero forward ports and zero rejected production behaviors. R8-01 is frozen to base parent `9348f85`, old-main parent `7df6b7f`, and expected tree `ded6d43ace2fced88600f19128dedcfcfe9fe0be` with no allowed differing path. The host ledger commit is evidence-only on the non-deploying branch and is deliberately not the future candidate parent/tree. Host gates remain 72/72 regular plus five infrastructure skips, Ruff clean, and MyPy clean across 64 files. No merge candidate, tag, branch/default ref movement, deployment, database command, environment change, or production probe occurred.
 
 - [x] **S4-POST-R8-RESPONSE · Round-8 response recorded; reconciliation READY** — registered the external response byte-for-byte as immutable Tier 4 (SHA-256 `957dbb3cad99a13b87ec1ee9eee5c72d5434e30d8ca070086c69395f90678732`). The reviewer independently reproduced the graph, complete legacy-tools surface, taskq 450/450 plus one opt-in skip, host 72/72 plus five infrastructure skips, and clean linters; it returned READY with zero Contract questions and no R1 preconditions. R8-01 binds R1/R-AUDIT to candidate-tree equality with the accepted tree plus only named forward ports and zero unclassified paths. R8-02/03/05 require docs-first retirement amendments before L1; R8-04/06 belong to L2. READY authorizes reconciliation only—no retirement, branch deletion, side-effecting lane, or Stage 5.
 
