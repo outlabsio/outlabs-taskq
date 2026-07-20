@@ -172,6 +172,16 @@ Host gates remain 72/72 plus five infrastructure skips with Ruff and 64-file MyP
 no candidate, tag, authoritative ref movement, deployment, database action, or production probe has
 occurred.
 
+**S4-POST-R2 candidate complete; R-AUDIT open:** host merge commit `2ed736b` on non-deploying
+`codex/s4-post-r2-reconcile` has exact parents `9348f85` then `7df6b7f`, exact accepted tree
+`ded6d43ace2fced88600f19128dedcfcfe9fe0be`, zero recursive differing paths, and both histories as
+ancestors. Three pushed annotated rollback tags peel to old `main`, deployed `3f50b7d`, and accepted
+evidence `9348f85`. Evidence-only host commit `a2500a4` records the construction outside the
+candidate tree. Lock, host 72/72 plus five skips, Ruff, 64-file MyPy, offline Alembic, imports, and
+both images are green. The targeted R-AUDIT request must return READY before `main` or deployment
+branches move; `origin/main`, `origin/staging-prep`, Coolify, databases, environment, production,
+retirement, branch deletion, side-effecting lanes, and Stage 5 remain unchanged.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

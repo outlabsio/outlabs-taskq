@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 reconciliation · R1 complete** — the independently derived 30-row host ledger finds zero forward ports and freezes the future candidate tree to accepted `9348f85`; no merge candidate, tag, authoritative ref movement, deployment, database, or production state has changed |
+| Stage | **Post-Stage-4 reconciliation · R2 candidate ready** — exact two-parent candidate `2ed736b` preserves accepted tree `ded6d43`, both histories are ancestors, and three annotated rollback tags are remote; `main`, `staging-prep`, Coolify, deployment, database, and production remain unchanged pending R-AUDIT |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Round 8 must accept both post-Stage-4 plans before branch reconciliation starts; legacy retirement remains gated on accepted reconciliation, and hard-kill lease-expiry evidence still gates side-effecting lanes |
+| Next review | Targeted R-AUDIT must accept the R1 ledger, R2 candidate/tree/tags, and gates before `main` or deployment branches move; retirement remains closed |
 
 ## Now
 
-- [ ] **S4-POST-R2 · Exact-tree two-parent reconciliation candidate** — from accepted host tip `9348f85` (not the evidence-only R1 ledger commit), construct the two-parent candidate with old `main` `7df6b7f`, exact tree `ded6d43`, zero differing paths, both ancestors, rollback tags, and a non-deploying `codex/` ref; then stop for R-AUDIT before `main`, Coolify, or production moves.
+- [ ] **S4-POST-R-AUDIT · Independent candidate acceptance** — request assembled at `docs/design-review-8/R-AUDIT-REQUEST.md`; independently regenerate the 27/3 ledger, exact parents/tree/zero-diff/ancestry, annotated tag objects, remote non-mutation, and gates. READY is required before `main`, Coolify, or deployment moves.
 
 ## Later
 
@@ -314,6 +314,10 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R2 · Exact-tree two-parent candidate constructed** — host candidate `2ed736b` on non-deploying `codex/s4-post-r2-reconcile` has parent 1 `9348f85`, parent 2 old `main` `7df6b7f`, and exact tree `ded6d43ace2fced88600f19128dedcfcfe9fe0be`; raw and name-status diffs from the accepted parent are empty, both histories are ancestors, and current `main` is fast-forward eligible. Three remote annotated rollback tags peel exactly to old main, deployed `3f50b7d`, and accepted evidence `9348f85`. Host evidence commit `a2500a4` records the construction separately and is not a candidate input. Lock, 72/72 plus five-skip suite, Ruff, 64-file MyPy, offline Alembic, taskq/configured-host imports, and API/worker images (`e84309e`, `b1dd914`) are green. `origin/main` remains `7df6b7f`, `origin/staging-prep` remains `3f50b7d`; no Coolify/deployment/database/environment/production, retirement, deletion, side-effecting-lane, or Stage-5 change occurred.
+
+- [x] **S4-POST-R-AUDIT-REQUEST · Targeted pre-move gate assembled** — the request requires independent R1 regeneration, raw Git parent/tree/diff/ancestry proof, annotated tag peeling, remote/deployment non-mutation, exact dependency and host gates, explicit local-harness sufficiency judgment, Contract questions, and BR/R8-01 dispositions. The reviewer may create only `docs/design-review-8/R-AUDIT-RESPONSE.md`; no authoritative ref, deployment, production, retirement, deletion, side-effecting-lane, or Stage-5 action is authorized.
 
 - [x] **S4-POST-R1 · Host reconciliation ledger derived** — host evidence commit `b78ca5e` records all 27 production/evidence-only and three default-only commits, each with affected surfaces, one allowed disposition, semantic evidence, a named wrong-disposition oracle, and independent-review status. The three default changes are superseded or already present: there are zero forward ports and zero rejected production behaviors. R8-01 is frozen to base parent `9348f85`, old-main parent `7df6b7f`, and expected tree `ded6d43ace2fced88600f19128dedcfcfe9fe0be` with no allowed differing path. The host ledger commit is evidence-only on the non-deploying branch and is deliberately not the future candidate parent/tree. Host gates remain 72/72 regular plus five infrastructure skips, Ruff clean, and MyPy clean across 64 files. No merge candidate, tag, branch/default ref movement, deployment, database command, environment change, or production probe occurred.
 
