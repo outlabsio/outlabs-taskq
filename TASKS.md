@@ -37,6 +37,8 @@ before retirement, branch archival/deletion, side-effecting lanes, or Stage 5.
 
 ## Later
 
+- [ ] **S4-POST-F01 · Coolify build-secret remediation** — the S4-POST-R3 debug build transcript exposed credential-bearing Docker build-argument values to authorized deployment-log viewers. Rotate the affected credentials, remove runtime secrets from Docker `ARG`/build output, prove image history and ordinary/debug logs contain no secret values, and retain restricted log access until complete. Host evidence commit `ae61ba6` records the finding without reproducing a credential. This is a host/platform security slice, not a taskq SQL, wire, or capability change, and it must close before another host or lane expands.
+
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
