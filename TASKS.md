@@ -25,15 +25,16 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 reconciliation · S4-POST-R3 complete** — `main`, API, and standing worker are on exact candidate `2ed736b`; the immutable rollback rehearsal passed and independent acceptance is pending |
+| Stage | **Post-Stage-4 retirement eligibility · S4-POST-R3 independently accepted** — `main` is the authoritative deployed line; S4-POST-L1-SPEC freezes the legacy-tools observation rules before any producer removal |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Independent post-cutover acceptance must close BR-06..10 before any tools-retirement work |
+| Next review | Targeted L1 eligibility acceptance must close the seven-day/two-deploy ledger and its independent-oracle limits before L2 producer removal |
 
 ## Now
 
-No implementation slice is open. Independent acceptance of S4-POST-R3 must close BR-06..10
-before retirement, branch archival/deletion, side-effecting lanes, or Stage 5.
+- [x] **S4-POST-L1-SPEC · Legacy-tools retirement eligibility frozen** — amended the Tier-3 retirement plan to close Round-8 R8-02/03/05 before observation starts: `TASKQ_TOOLS_ALLOWLIST` remains an enrollment gate after `TASKQ_TOOLS_MODE` removal; disabled, not-ready, and registered non-allowlisted tools share the exact fail-closed `503 {"detail":"Queued task processing is unavailable"}` response and never enqueue legacy work; `umami` uses a target access-log counter while the read-only flight lane's host-counter/taskq reconciliation is explicitly non-independent; and the retired 200 response now has an explicit caller-sweep gate. L2 owns the restricted-runtime proof rewrite and compatible settings/documentation update. No host source, taskq SQL/wire/IAM/capability, deployment, database, or producer/consumer behavior changed.
+
+- [ ] **S4-POST-L1 · Seven-day tools-retirement eligibility observation** — collect two normal authoritative-host deploys and seven consecutive days of the LR-01..02/04..05/10/12..13 evidence: frozen high-water/count/max-created-at oracle for zero new legacy `tool_run` rows, zero active legacy tools rows, canonical keyed taskq convergence for both read-only lanes, the per-lane invocation ledgers with the flight downgrade labelled, and the complete caller inventory. Any legacy insert resets the window. Stop for targeted independent acceptance before S4-POST-L2; no producer or consumer removal is authorized in this task.
 
 ## Later
 
