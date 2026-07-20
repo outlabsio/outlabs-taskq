@@ -32,7 +32,7 @@
 
 ## Now
 
-- [ ] **S4-POST-R8 · Independent post-Stage-4 specification review** — adversarially verify the host commit graph and reconciliation construction, the tools-only retirement boundary, high-water/invocation oracles, deployment sequencing, and zero-DML rollback. Must return READY before S4-POST-R1; no implementation is authorized by the request itself.
+- [ ] **S4-POST-R8 · Independent post-Stage-4 specification review** — request assembled at `docs/design-review-8/REQUEST.md`; dispatch it to an external reviewer to adversarially verify the host commit graph and reconciliation construction, tools-only retirement boundary, high-water/invocation oracles, deployment sequencing, and zero-DML rollback. Must return READY before S4-POST-R1; no implementation is authorized by the request itself.
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R8-REQUEST · Round-8 gate assembled** — the immutable request pins taskq `fef775e..9feaf79` and independently re-derivable host identities (`a0019cd`, `7df6b7f`, `3f50b7d`, `9348f85`). It requires an authority-first governance sweep, independently generated branch and legacy-call inventories, adversarial exact-tree/fast-forward/tag/branch-cutover analysis, high-water and invocation-oracle falsification, all four mixed-version producer/consumer windows, security/data/non-tools preservation, BR-01..10 and LR-01..12 dispositions, and explicit Contract questions. The reviewer may create only `docs/design-review-8/RESPONSE.md`; no implementation, ref movement, deployment, production mutation, retirement, side-effecting-lane migration, or Stage-5 work is authorized.
 
 - [x] **S4-POST-00 · Host convergence and tools-retirement plans frozen** — added separate Tier-3 specifications for (1) production-derived, ledger-driven branch reconciliation and (2) tools-only legacy producer/consumer retirement. Reconciliation starts from host common ancestor `a0019cd`, stale default `7df6b7f`, deployed `3f50b7d`, and accepted evidence `9348f85`; it forbids blind merge/rebase/force-push and requires a two-parent exact-tree oracle, fast-forward-only `main`, identical-commit deployment-branch cutover, rollback tags, and independent audit. Retirement follows only after accepted reconciliation, requires seven days/two deploys with zero new legacy `tool_run` rows, removes producer then consumer across separate rollback windows, and explicitly preserves the shared table, migration, worker, non-tools lanes, and future hard-kill gate. Pre-change gates reproduce taskq 450/450 plus one opt-in skip and host 72/72 plus five infrastructure skips, with Ruff and host MyPy clean. No source, branch, deployment, SQL, migration, Tier-0, IAM, or production change occurred.
 
