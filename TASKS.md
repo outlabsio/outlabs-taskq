@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **S4-AUDIT evidence complete; independent round-7 acceptance is open** — both normal cycles, same-job attempt-2 recovery, the zero-DML legacy/disabled/taskq rehearsal, failed-candidate containment, corrected re-enable, and final zero-depth worker ledger are recorded. The legacy path remains deployed and post-Stage-4 retirement/reconciliation has not started |
+| Stage | **Stage 4 complete and independently accepted** — outlabsAPI serves the two allowlisted read-only tool lanes through taskq in production; the legacy path remains deployed as the mutually exclusive fallback. No retirement, branch reconciliation, or side-effecting-lane migration has started |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Round 7 independently accepts or blocks the complete Stage-4 production record; legacy retirement remains closed until acceptance |
+| Next review | Legacy retirement and branch reconciliation require separate specifications; hard-kill lease-expiry evidence gates side-effecting lanes |
 
 ## Now
 
-- [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance — R7-01/R7-02 preconditions landed; targeted delta acceptance pending
+*(none — Stage 4 is accepted; the next goal must be specified separately.)*
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-AUDIT-ACCEPT · Stage 4 independently accepted** — registered the targeted delta response byte-for-byte as immutable Tier 4 (SHA-256 `982ec8594b8f621089f4963486a7e2487ed1d9e1b5b4e51e474f145db0b6405d`). The reviewer independently reproduced all five delta checks and declared `ACCEPTED — Stage 4 complete`: the production Aerolineas `created`→`existed`→canonical `succeeded` chain and one-attempt raw oracle, honest 28-connection usable headroom, corrected graceful-release versus hard-kill semantics, docs-only scope, response identity, and both repositories' green gates. This acceptance authorizes neither legacy retirement nor branch reconciliation; each requires a separate specification, and the hard-kill lease-expiry drill remains mandatory before any side-effecting lane migrates.
 
 - [x] **S4-R7-DELTA-GATE · Targeted acceptance packet assembled** — the immutable delta request pins taskq `5fef55c..96194a8`, host `7c60229..9348f85`, and the byte-identical round-7 response. It limits re-review to R7-01, R7-02/R7-04, exact hygiene, and unchanged-source gates; acceptance explicitly authorizes neither legacy retirement nor branch reconciliation. Taskq passes 450/450 with one opt-in skip against PostgreSQL 18 and a disposable CI-shaped Redis plus Ruff clean; host passes 72/72 with five existing infrastructure skips plus Ruff and 64-file MyPy clean.
 
