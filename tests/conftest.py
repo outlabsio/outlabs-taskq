@@ -172,7 +172,14 @@ async def _truncate_taskq(conn: asyncpg.Connection) -> None:
     names = [r["tablename"] for r in rows if r["tablename"] not in _TRUNCATE_KEEP]
     if names:
         targets = ", ".join(f'taskq."{name}"' for name in names)
-        await conn.execute(f"TRUNCATE {targets} CASCADE")
+        for attempt in range(5):
+            try:
+                await conn.execute(f"TRUNCATE {targets} CASCADE")
+                break
+            except asyncpg.DeadlockDetectedError:
+                if attempt == 4:
+                    raise
+                await asyncio.sleep(0.05 * (2**attempt))
     await conn.execute(
         """
         INSERT INTO taskq.control_state (key) VALUES
@@ -194,12 +201,18 @@ async def pg(taskq_dsn: str, migrated: None) -> AsyncIterator[asyncpg.Connection
 
 
 @pytest.fixture
-async def role_conn(taskq_dsn: str, migrated: None) -> AsyncIterator[RoleConnect]:
+async def role_conn(
+    taskq_dsn: str, migrated: None, pg: asyncpg.Connection
+) -> AsyncIterator[RoleConnect]:
     """Factory: a connection running as one capability role via ``SET ROLE``.
 
     Harness §1.1 rule 3 / ADR-011: suites dispatch every call through the
     exact capability role it is granted to, so grant regressions fail loudly.
     """
+    # Depend explicitly on ``pg``: pytest-asyncio may otherwise initialize
+    # independent async fixtures in either order, allowing its per-test
+    # truncate to erase a queue after a capability connection has provisioned it.
+    assert not pg.is_closed()
     opened: list[asyncpg.Connection] = []
 
     async def connect(role: str) -> asyncpg.Connection:
