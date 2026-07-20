@@ -136,6 +136,30 @@ One or two low-consequence lanes (tools, notifications) on the embedded runtime;
 
 **S4-03 cycle-2 local proof complete; production completion evidence remains open:** after the second tool was allowlisted, host commits `b1b5604` and `8084dfc` removed an absent credential field from the durable payload and matched the public tool's official web-channel request headers. The first real external 200 then exceeded Protocol H-09's 8KB result ceiling, correctly failed settlement, stopped the embedded worker, and made readiness fail; host `3f50b7d` now emits a compact, explicit omission record with original byte count and SHA-256 instead of attempting to persist bulky output. A clean local production-shape database ran host/Auth/taskq migrations, IAM, queue provisioning, and restricted-runtime grants before the mounted API proved real 202→authorized GET→external call→one-attempt settlement with a 247-byte result and health 200. A separate private hold job stopped in 20.25 seconds, returned to queued with no live lease or failure-budget charge, and the same id succeeded after restart on attempt 2. No SQL, migration, taskq source, contract, role, or grant changed. The live platform drain transcript, remaining S4-03 adversarial rows, rollback/re-enable, and probe disablement remain required before Stage 4 can close.
 
+## Post-Stage 4 — host convergence and narrow retirement
+
+Stage-4 acceptance opens two separate, ordered host-only slices before the QDarte pilot. The
+[Host Branch Reconciliation Specification](./Task%20Queue%20Host%20Branch%20Reconciliation%20Specification.md)
+makes the accepted deployed lineage authoritative through an independently derived commit ledger,
+exact-tree merge oracle, fast-forward-only default transition, deployment-branch rehearsal, and
+zero-DML rollback. It forbids a blind merge of the stale default line. Only after independent
+acceptance may the
+[Legacy Tools Path Retirement Specification](./Task%20Queue%20Legacy%20Tools%20Path%20Retirement%20Specification.md)
+remove the tools producer fallback and later its legacy consumer case. The shared `outbound_tasks`
+table, migration, worker, and non-tools lanes remain active. Neither slice migrates a side-effecting
+lane or satisfies the required future hard-kill lease-expiry gate.
+
+**S4-POST-00 specifications frozen:** the reconciliation baseline is common ancestor `a0019cd`,
+stale default `7df6b7f`, deployed production `3f50b7d`, and accepted evidence tip `9348f85`. The
+reconciliation plan makes every one-sided commit earn an explicit semantic disposition before a
+two-parent, production-tree-preserving candidate can advance `main`; Coolify changes branch only
+after commit/tree equality and a rollback tag are proven. Retirement is tools-only and two-step:
+seven days plus two deploys of zero legacy tool inserts precede producer removal, the legacy tool
+consumer remains through the first rollback window, and table/migration/history removal is forbidden.
+Both plans have independently falsifiable source, database, invocation, deployment, and rollback
+oracles. Round 8 must return READY before S4-POST-R1; no host source, branch, deployment, database,
+taskq contract, or production state changed in S4-POST-00.
+
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.

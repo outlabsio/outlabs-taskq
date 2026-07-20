@@ -25,14 +25,14 @@
 
 | | |
 |---|---|
-| Stage | **Stage 4 complete and independently accepted** — outlabsAPI serves the two allowlisted read-only tool lanes through taskq in production; the legacy path remains deployed as the mutually exclusive fallback. No retirement, branch reconciliation, or side-effecting-lane migration has started |
+| Stage | **Post-Stage 4 specification gate** — branch reconciliation and tools-only legacy retirement are frozen as separate, ordered plans; no host branch, source, deployment, database, or production state has changed |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
-| Next review | Legacy retirement and branch reconciliation require separate specifications; hard-kill lease-expiry evidence gates side-effecting lanes |
+| Next review | Round 8 must accept both post-Stage-4 plans before branch reconciliation starts; legacy retirement remains gated on accepted reconciliation, and hard-kill lease-expiry evidence still gates side-effecting lanes |
 
 ## Now
 
-*(none — Stage 4 is accepted; the next goal must be specified separately.)*
+- [ ] **S4-POST-R8 · Independent post-Stage-4 specification review** — adversarially verify the host commit graph and reconciliation construction, the tools-only retirement boundary, high-water/invocation oracles, deployment sequencing, and zero-DML rollback. Must return READY before S4-POST-R1; no implementation is authorized by the request itself.
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-00 · Host convergence and tools-retirement plans frozen** — added separate Tier-3 specifications for (1) production-derived, ledger-driven branch reconciliation and (2) tools-only legacy producer/consumer retirement. Reconciliation starts from host common ancestor `a0019cd`, stale default `7df6b7f`, deployed `3f50b7d`, and accepted evidence `9348f85`; it forbids blind merge/rebase/force-push and requires a two-parent exact-tree oracle, fast-forward-only `main`, identical-commit deployment-branch cutover, rollback tags, and independent audit. Retirement follows only after accepted reconciliation, requires seven days/two deploys with zero new legacy `tool_run` rows, removes producer then consumer across separate rollback windows, and explicitly preserves the shared table, migration, worker, non-tools lanes, and future hard-kill gate. Pre-change gates reproduce taskq 450/450 plus one opt-in skip and host 72/72 plus five infrastructure skips, with Ruff and host MyPy clean. No source, branch, deployment, SQL, migration, Tier-0, IAM, or production change occurred.
 
 - [x] **S4-AUDIT-ACCEPT · Stage 4 independently accepted** — registered the targeted delta response byte-for-byte as immutable Tier 4 (SHA-256 `982ec8594b8f621089f4963486a7e2487ed1d9e1b5b4e51e474f145db0b6405d`). The reviewer independently reproduced all five delta checks and declared `ACCEPTED — Stage 4 complete`: the production Aerolineas `created`→`existed`→canonical `succeeded` chain and one-attempt raw oracle, honest 28-connection usable headroom, corrected graceful-release versus hard-kill semantics, docs-only scope, response identity, and both repositories' green gates. This acceptance authorizes neither legacy retirement nor branch reconciliation; each requires a separate specification, and the hard-kill lease-expiry drill remains mandatory before any side-effecting lane migrates.
 
