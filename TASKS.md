@@ -42,7 +42,7 @@
 
 - [x] **S5-RM-ADR · H-08/H-11 contract reactivation accepted docs-first** — ADR-019 accepts Protocol v1 document revision 1.0.5, Function Manifest / SQL contract 0.1.3, and migration `0004_read_models.sql` identity before implementation. It fixes the 13-field queue-scoped job page, three independently gated views with explicit `TQ501` fallback, observer-safe versioned queue profile, ETag/`If-Match` matrix, `TQ409 profile_version_conflict` carrying only `current_version`, and direct-SQL/HTTP projection parity. R5-29 is closed by this package. No SQL, migration, generated client, facade, host, or L1 observation behavior changes in this docs-only task.
 
-- [ ] **S5-RM-01 · Read-model migration and catalog parity** — implement immutable `0004_read_models.sql` from Manifest 0.1.3: `profile_version`, hardened observer `list_jobs`/`get_queue_profile`, operator `update_queue_profile`, capability rows, and only B9-justified indexes; extend `verify()` and catalog parity for fresh install plus 0001→0004 upgrades on PG16/PG18. Stop before generated HTTP/client surface work.
+- [ ] **S5-RM-01 · Read-model migration and catalog parity** — **BLOCKED by S5-CQ-01.** After its docs-first compatibility decision, implement immutable `0004_read_models.sql` from Manifest 0.1.3: `profile_version`, hardened observer `list_jobs`/`get_queue_profile`, operator `update_queue_profile`, capability rows, and only B9-justified indexes; extend `verify()` and catalog parity for fresh install plus 0001→0004 upgrades on PG16/PG18. Stop before generated HTTP/client surface work.
 
 - [x] **S4-POST-F01 · Coolify build-secret containment** — every configured API (39) and worker (21) variable is runtime-only in Coolify, so no runtime secret is available during image build; the Dockerfiles contain no secret `ARG` instruction. The restricted runtime PostgreSQL login was re-proven, the runtime DB credential plus host auth-signing and documentation secrets were rotated, API rollout health/public health passed, and the worker replacement started without a recorded deployment failure. The new deployment transcripts contain neither an affected environment-variable name nor a Docker build-argument record; deployment-log access remains restricted. Host evidence is recorded in `outlabsAPI` as `docs/taskq-s4-post-f01-build-secret-remediation.md`. The owner explicitly accepted deferral of Redis, Umami, Telegram, and unused `TOOLS_API_KEY` cleanup for this low-value host; the record makes no claim those older credentials are invalidated. No taskq SQL, wire, capability, or application-source change occurred.
 
@@ -51,6 +51,23 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-CQ-01 — SQL-contract compatibility window for migration 0004 is unspecified
+
+**Blocking evidence:** `0004_read_models.sql` must advance
+`taskq.meta.contract_version` to `0.1.3` (Manifest §11), but the existing
+`TaskqRuntime.start()` accepts only exact `0.1.2`. Applying the migration to a
+running supported host would therefore make its runtime fail startup. Protocol
+§3 requires compatibility-window tests, while the accepted S5 sequence defers
+HTTP/client work; neither Tier-0 document defines whether the existing runtime
+must accept `0.1.2..0.1.3`, whether migration and a strict runtime bump must be
+released atomically, or the supported rollback posture.
+
+**Decision required:** amend the Tier-0 compatibility rule docs-first with the
+allowed metadata window and deployment sequencing for this additive SQL
+revision. The implementation must then prove the chosen old/new metadata
+vectors. Do not silently broaden the runtime check or ship a migration that
+breaks a supported pre-existing runtime.
 
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
