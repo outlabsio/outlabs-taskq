@@ -32,7 +32,7 @@
 
 ## Now
 
-- [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance — evidence and round-7 request assembled; response pending
+- [ ] S4-AUDIT controlled failure, rollback/re-enable, completion evidence, and independent acceptance — R7-01/R7-02 preconditions landed; targeted delta acceptance pending
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-R7-02 · Cycle-2 production canonical closure recorded** — host `9348f85` corrects the earlier local-versus-production wording and records one live safe Aerolineas request submitted twice with the same idempotency key: HTTP 202 `created` then 202 `existed`, identical job `019f7f95-3c93-71ce-9c8a-7c610212dead`, followed by authorized canonical HTTP 200 `succeeded`. A separate read-only production-table oracle proves exactly one successful attempt, zero failures/releases/expiry streak, and `enqueued -> claimed -> succeeded`; no sensitive columns were selected, and the temporary key/principal were revoked/archived. The same packet now computes 52 connections against the usable 80 ceiling-minus-reserve budget, leaving honest headroom 28. Targeted delta acceptance remains the only S4-AUDIT gate.
 
 - [x] **S4-R7-01 · Frozen controlled-failure drill corrected** — living Stage-4 §6 now states the mechanism production actually proved: a graceful rolling replacement releases the held async job as budget-free `worker_shutdown`, then a different worker process reclaims the same job id and succeeds. It no longer claims that a graceful stop can prove lease expiry. Before any side-effecting lane migrates, the named future side-effecting-lane expansion slice must hard-kill the owning process past platform grace and produce a read-only `expired/lease_expired` → same-id reclaim → terminal convergence oracle with correct budget arithmetic and zero manual DML.
 
