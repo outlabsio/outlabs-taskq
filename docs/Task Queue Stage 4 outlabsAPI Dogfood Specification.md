@@ -41,7 +41,8 @@ than the deployed host. S4-CQ-01 corrects the living design without rewriting th
   The accepted taskq integration and its 18 tests are byte-identical to the accepted default-branch
   slice. After Stage 4, `main` and the production lineage must become one authoritative line, and
   future host gates inspect the deployed line.
-- The host locks exact `outlabs-auth==0.1.0a24` and immutable `outlabs-taskq==0.1.0a1`; the earlier
+- The host locks exact `outlabs-auth==0.1.0a24` and immutable `outlabs-taskq==0.1.0a2`; the accepted
+  a1 artifact remains immutable and is superseded only because S4-CQ-04 required a library fix. The earlier
   a20/default-branch overlay evidence remains provenance, not the current production dependency fact.
 - Production starts one Uvicorn process from the root Dockerfile. The host lifespan starts
   authentication and checks PostgreSQL and Redis; no message broker or WhatsApp domain remains.
@@ -77,8 +78,9 @@ S4-01 completed, in this order:
    documented pre-deploy procedure; and
 6. keep `OUTLABS_AUTH_AUTO_MIGRATE=false` in deployed processes.
 
-The accepted artifact is `outlabs-taskq==0.1.0a1`, published from `a6967e6`; its wheel SHA-256 is
-`01ac3129866a8db34281688d65a95e9f30437b52739cec75c287c69e4d11a6ab`. No floating Git dependency,
+The current accepted artifact is `outlabs-taskq==0.1.0a2`, published from `36db7cf`; its wheel
+SHA-256 is `d3c37b0e30dbc75cbbb279c3e3f64a7df7416bf51ca1acfd016544c03e745f42`. The prior a1 release and
+hash remain immutable provenance. No floating Git dependency,
 local path, unversioned wheel, dependency override, or compatibility range is accepted for the
 dogfood gate.
 

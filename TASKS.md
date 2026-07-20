@@ -25,14 +25,13 @@
 
 | | |
 |---|---|
-| Stage | **S4-CQ-04 remediation in verification; production remains in safe legacy posture** — the exact host mount-before-auth-initialize order reproduced the typed `TQ503`: the adapter had frozen OutLabsAuth's pre-initialization API-key service, while the host helper used the live post-initialization service. Lazy checker binding and an exact a24/Redis regression are implemented; canary remains paused until release/repin and the live pre-enqueue probe pass |
-| Suite | 450/450 regular on PG18.3; 448/448 last run on PG16.14; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; deployed production host line 68/68 regular with 5 pre-existing opt-in skips; MyPy 64 files |
+| Stage | **S4-CQ-04 closed; S4-03 cycle 1 is live and awaiting independent evidence review** — `0.1.0a2` lazy-binds the real OutLabs checker after startup, the host is immutably repinned, and production proves a system-integration key can read `tools` while an undeclared global read is denied. The `umami` producer is now taskq-only and its canonical 202→authorized GET canary succeeded; cycle 2, deploy-drain evidence, and the remaining S4-03 vectors stay open |
+| Suite | 450/450 regular on PG18.3; 448/448 last run on PG16.14; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; deployed production host line 69/69 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 
 ## Now
 
-- [ ] S4-CQ-04 adjudication/remediation: make the canonical OutLabs taskq authorization path accept the same supported system-integration API-key credential as the host tool route without bypassing queue-scoped permission checks; republish and repin immutably if library source changes
 - [ ] S4-03 allowlisted production canary: disabled deploy, `umami` enablement, external invocation counter, two normal deploy cycles, and drain evidence inside the 35-second platform grace
 
 
@@ -74,6 +73,16 @@ weaken fail-closed rate limiting, substitute direct SQL readback, or grant a glo
 If taskq source changes, publish a new immutable alpha and update the host URL/hash pin before
 resuming the exact pre-enqueue probe. Production remains in legacy mode until the canonical 202→GET
 path passes with the real supported credential.
+
+**Resolution:** closed in taskq commit `36db7cf` and immutable release `v0.1.0a2` (wheel SHA-256
+`d3c37b0e30dbc75cbbb279c3e3f64a7df7416bf51ca1acfd016544c03e745f42`). The adapter now obtains
+and caches OutLabsAuth's checker on the first post-startup request instead of freezing the
+pre-initialization service; an exact a24/Redis-backed regression proves the real system-integration
+key path, queue-scoped allow/deny, stable two-phase fingerprint, and unchanged sanitized 429/503
+failure posture. Host commit `76ff5e1` pins the exact release artifact. A production ephemeral key
+then returned 200 from `GET /taskq/v1/stats/queues/tools` and 403 from undeclared global
+`GET /taskq/v1/meta`; every proof principal/key was revoked and archived. No SQL, migration,
+contract, ADR, role, grant, or wildcard scope changed.
 
 ### S4-CQ-03 — Immutable migration cannot execute after `SET ROLE taskq_owner`
 
@@ -311,6 +320,7 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
+- [x] **S4-CQ-04 · Real OutLabs system-key remediation** — taskq `36db7cf` lazy-binds the exact a24 checker after startup and ships as immutable `v0.1.0a2`; the host pins its exact wheel/hash at `76ff5e1`. Local real-Redis and production ephemeral-key proofs establish queue-scoped 200/403 authorization with stable identity and fail-closed sanitized 429/503 handling. Production cycle 1 then exposed a host-only FastAPI response-model 500 after a committed enqueue; host `464965d` adds the ASGI regression and union response projection. The redeployed keyed canary returned canonical 202, authorized GET 200, and terminal `succeeded`; temporary credentials were revoked/archived. No taskq SQL, migration, Tier-0, ADR, role, grant, or wildcard-scope change occurred.
 - [x] **S4-03D · Credential-log remediation and Redis credential rotation** — host commit `ffad218` installs an exact-source filter for the upstream auth Redis logger before application startup and renders any Redis userinfo as `[redacted]`; its 68/68 regular tests plus five existing infrastructure skips, Ruff, 64-file MyPy, formatting, and deployment gates are green. The fix was deployed before rotation and startup proved the retired credential absent while the authority appeared only in redacted form. The replacement credential was then staged for both API and worker, the Coolify Redis password metadata was updated and persisted across a real Redis restart, and marker-only terminal proofs showed environment-based and direct replacement authentication succeeded while the retired credential was rejected. Both consumers redeployed successfully: API health is 200, the worker is running, taskq remains enabled in `legacy` mode with an empty allowlist, and exact checks prove neither retired nor replacement credential appears in API or worker logs. No canary traffic ran during remediation; the allowlisted canary is now unblocked.
 
 - [x] **S4-03C · Restricted-runtime proof, production rotation, and legacy-mode taskq base** — a clean same-cluster disposable database ran host/Auth/taskq migrations twice, exact IAM report→apply→idempotent report, queue `created`→`unchanged`, the real API health/login/logout flow, and a real legacy enqueue/claim/settle through the separate worker under `outlabs_api_runtime`; all operator role-switch/queue-admin, role/database creation, superuser/CREATEDB/CREATEROLE/RLS-bypass negatives held, and the exact disposable database was dropped and proved absent. Production runtime/operator grants were then applied under the retained owner, the API pre-deploy hook became an explicit no-op, and both API and legacy worker deployed commit `0e6417c` with only the restricted DSN. The disabled checkpoint proved API health 200, taskq meta 404, `current_user=outlabs_api_runtime`, all elevated flags false, unchanged legacy row count, and no taskq schema. Direct owner taskq migrate/verify converged twice; operator IAM converged without conflicts and queue `tools` returned `created`→`unchanged`; the runtime retained all negative capability proofs. The final healthy deployment enabled taskq with connection ceiling 100, reserve 20, one expected production process, tools mode `legacy`, empty allowlist, and production acknowledgement. Live evidence is health 200, taskq meta 401, one visible queue-stats row, a persistent restricted worker session from its deployment, zero taskq jobs by the owner oracle, and the unchanged single legacy row. The prior owner credential remains outside both running pools for rollback. The proof also exposed a credential-bearing Redis connection URI in upstream auth logs; S4-03D blocks canary traffic until logging is sanitized and that credential is rotated.
