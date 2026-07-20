@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.2.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.3.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.1.2"
+CONTRACT_VERSION = "0.1.3"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -64,7 +64,7 @@ TABLE_SHAPES = {
     "job_events": (8, "fee387eec268693cd507c443a58e1322"),
     "jobs": (38, "cb58712f28f993c5ef35a672be3f2da2"),
     "meta": (3, "6b0aa3a5745ebdd662479daa8c766d1d"),
-    "queues": (15, "8b4245eace4fba779059cd86de2cdea2"),
+    "queues": (16, "56a64a19b9cdef25b8e842e5f0c16fa2"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
     "workers": (9, "25f0d3e2a63909dd4c52719c1f53bae4"),
     "workflows": (10, "13447b7e9f326989906a2f341a0c6dc8"),
@@ -141,6 +141,29 @@ COMPOSITES = {
         ("step_key", "text"),
         ("lease_seconds", "integer"),
     ),
+    "job_list_item": (
+        ("job_id", "uuid"), ("job_type", "text"), ("status", "text"),
+        ("outcome", "text"), ("priority", "smallint"),
+        ("attempt_count", "smallint"), ("failure_count", "smallint"),
+        ("max_attempts", "smallint"), ("created_at", "timestamp with time zone"),
+        ("scheduled_at", "timestamp with time zone"), ("started_at", "timestamp with time zone"),
+        ("finished_at", "timestamp with time zone"), ("updated_at", "timestamp with time zone"),
+    ),
+    "job_page": (
+        ("as_of", "timestamp with time zone"), ("items", "taskq.job_list_item[]"),
+        ("next_after", "jsonb"),
+    ),
+    "queue_profile": (
+        ("name", "text"), ("profile_version", "bigint"), ("default_priority", "smallint"),
+        ("default_lease_seconds", "integer"), ("default_max_attempts", "smallint"),
+        ("default_backoff_mode", "text"), ("default_backoff_base", "integer"),
+        ("default_backoff_cap", "integer"), ("retention_hours", "integer"),
+        ("failed_retention_hours", "integer"), ("max_depth", "integer"),
+        ("notify_enabled", "boolean"), ("paused", "boolean"),
+    ),
+    "queue_profile_update": (
+        ("result", "text"), ("profile", "taskq.queue_profile"), ("current_version", "bigint"),
+    ),
     "settle_result": (
         ("result", "text"),
         ("job_status", "text"),
@@ -178,10 +201,12 @@ taskq.finalize_cancel_stragglers(integer)|p_limit integer|integer|plpgsql|v|u|
 taskq.get_authorization_projection(uuid)|p_job_id uuid|TABLE(job_id uuid, queue text, job_type text, status text)|sql|s|u|taskq_observer
 taskq.get_contract_meta()||TABLE(contract_version text, capabilities jsonb)|sql|s|u|taskq_observer
 taskq.get_job(uuid,boolean,boolean,boolean,boolean)|p_job_id uuid, p_include_error boolean DEFAULT false, p_include_result boolean DEFAULT false, p_include_progress boolean DEFAULT false, p_include_payload boolean DEFAULT false|TABLE(job_id uuid, queue text, job_type text, status text, outcome text, priority smallint, attempt_count smallint, failure_count smallint, max_attempts smallint, created_at timestamp with time zone, scheduled_at timestamp with time zone, started_at timestamp with time zone, finished_at timestamp with time zone, updated_at timestamp with time zone, error text, result jsonb, progress jsonb, payload jsonb)|sql|s|u|taskq_observer
+taskq.get_queue_profile(text)|p_queue text|taskq.queue_profile|sql|s|u|taskq_observer
 taskq.get_queue_stats(text)|p_queue text DEFAULT NULL::text|TABLE(as_of timestamp with time zone, queue text, stats jsonb)|sql|s|u|taskq_observer
 taskq.has_capability(text)|p_name text|boolean|sql|s|u|
 taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|TABLE(ok boolean, cancel_requested boolean, lease_expires_at timestamp with time zone)|plpgsql|v|u|taskq_runner
 taskq.janitor()||jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
+taskq.list_jobs(text,text,integer,jsonb)|p_queue text, p_view text, p_limit integer DEFAULT 50, p_after jsonb DEFAULT NULL::jsonb|taskq.job_page|plpgsql|s|u|taskq_observer
 taskq.metrics()||TABLE(name text, labels jsonb, value numeric)|sql|s|u|taskq_observer
 taskq.pause_queue(text,text,text)|p_name text, p_actor text, p_reason text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.purge_queued(text,integer,text,text)|p_queue text, p_limit integer, p_actor text, p_reason text DEFAULT NULL::text|integer|plpgsql|v|u|taskq_operator
@@ -199,6 +224,7 @@ taskq.set_concurrency_limit(text,integer,text)|p_key text, p_max_running integer
 taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_delay_seconds integer, p_reason text DEFAULT NULL::text, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.tick(integer)|p_reap_limit integer DEFAULT 200|jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
 taskq.truncate_utf8(text,integer)|p_value text, p_max_bytes integer|text|plpgsql|i|s|
+taskq.update_queue_profile(text,jsonb,text,bigint)|p_name text, p_profile jsonb, p_actor text, p_expected_version bigint|taskq.queue_profile_update|plpgsql|v|u|taskq_operator
 taskq.uuid7()||uuid|sql|v|s|
 taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)|p_worker_id text, p_queues text[], p_hostname text DEFAULT NULL::text, p_pid integer DEFAULT NULL::integer, p_version text DEFAULT NULL::text, p_meta jsonb DEFAULT NULL::jsonb|TABLE(shutdown_requested boolean)|plpgsql|v|u|taskq_runner
 """.strip()
@@ -223,6 +249,17 @@ def _parse_functions() -> dict[str, FunctionSpec]:
 FUNCTIONS = _parse_functions()
 PUBLIC_FUNCTIONS = frozenset(identity for identity, spec in FUNCTIONS.items() if spec.grants)
 
+# ADR-019 direct SQL surfaces ship before their H-13 generated/HTTP client
+# activation. Their absence from the Stage-2 typed transport is intentional
+# and is asserted explicitly rather than silently weakening the ledger.
+SQL_DIRECT_ONLY_FUNCTIONS = frozenset(
+    {
+        "taskq.get_queue_profile(text)",
+        "taskq.list_jobs(text,text,integer,jsonb)",
+        "taskq.update_queue_profile(text,jsonb,text,bigint)",
+    }
+)
+
 # Closed registered-error projection from the canonical function manifest and
 # Protocol v1. Empty sets are meaningful: those functions have no public TQ
 # exception outcome. R3-F04's executable vectors assert this map is complete.
@@ -242,9 +279,11 @@ PUBLIC_ERRORS = {
     "taskq.get_authorization_projection(uuid)": frozenset(),
     "taskq.get_contract_meta()": frozenset(),
     "taskq.get_job(uuid,boolean,boolean,boolean,boolean)": frozenset(),
+    "taskq.get_queue_profile(text)": frozenset(),
     "taskq.get_queue_stats(text)": frozenset(),
     "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)": frozenset({"TQ422"}),
     "taskq.janitor()": frozenset(),
+    "taskq.list_jobs(text,text,integer,jsonb)": frozenset({"TQ422", "TQ501"}),
     "taskq.metrics()": frozenset(),
     "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
     "taskq.purge_queued(text,integer,text,text)": frozenset({"TQ001", "TQ422"}),
@@ -258,6 +297,7 @@ PUBLIC_ERRORS = {
     "taskq.set_concurrency_limit(text,integer,text)": frozenset({"TQ422"}),
     "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)": frozenset({"TQ422"}),
     "taskq.tick(integer)": frozenset({"TQ422"}),
+    "taskq.update_queue_profile(text,jsonb,text,bigint)": frozenset({"TQ422"}),
     "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)": frozenset({"TQ422"}),
 }
 
@@ -280,4 +320,4 @@ REPLAY_RULES = {
 # Mutable values are deliberately not frozen; only required seed identities and
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
-META_SEEDS = {"contract_version": '"0.1.2"', "capabilities": '{"active": []}'}
+META_SEEDS = {"contract_version": '"0.1.3"', "capabilities": '{"active": []}'}

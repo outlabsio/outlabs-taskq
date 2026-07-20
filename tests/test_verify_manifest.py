@@ -300,9 +300,10 @@ def _failed_check(report: object, name: str) -> object:
     return matches[0]
 
 
-def test_machine_manifest_has_closed_0_1_1_function_surface() -> None:
-    assert len(FUNCTIONS) == 40
+def test_machine_manifest_has_closed_0_1_3_function_surface() -> None:
+    assert len(FUNCTIONS) == 43
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
+    assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS
     assert all("PUBLIC" not in spec.grants for spec in FUNCTIONS.values())
 
 

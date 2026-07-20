@@ -42,7 +42,9 @@ BEHAVIOR_GROUPS = {
         "taskq.get_authorization_projection(uuid)",
         "taskq.get_contract_meta()",
         "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
+        "taskq.get_queue_profile(text)",
         "taskq.get_queue_stats(text)",
+        "taskq.list_jobs(text,text,integer,jsonb)",
         "taskq.metrics()",
     },
     "operator": {
@@ -59,6 +61,7 @@ BEHAVIOR_GROUPS = {
         "taskq.resume_queue(text,text)",
         "taskq.run_now(uuid,text)",
         "taskq.set_concurrency_limit(text,integer,text)",
+        "taskq.update_queue_profile(text,jsonb,text,bigint)",
     },
     "housekeeping": {"taskq.janitor()", "taskq.tick(integer)"},
 }
@@ -223,7 +226,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.1.2"
+    assert meta["contract_version"] == "0.1.3"
     assert _json(meta["capabilities"]) == {"active": []}
 
     await runner.fetchrow(

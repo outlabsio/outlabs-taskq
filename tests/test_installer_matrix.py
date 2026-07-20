@@ -37,7 +37,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
         results = await asyncio.gather(install(0), install(1))
         assert sorted(results, key=len) == [
             [],
-            ["0001_initial", "0002_contract_0_1_1", "0003_contract_0_1_2"],
+            ["0001_initial", "0002_contract_0_1_1", "0003_contract_0_1_2", "0004_read_models"],
         ]
         async with engines[0].connect() as conn:
             report = await verify(conn)

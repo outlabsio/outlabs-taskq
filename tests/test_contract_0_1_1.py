@@ -55,7 +55,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same full 0.1.2 ledger and version."""
+    """Both supported paths end at the same full 0.1.3 ledger and version."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -70,6 +70,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             "0001_initial",
             "0002_contract_0_1_1",
             "0003_contract_0_1_2",
+            "0004_read_models",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -93,7 +94,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             version = await conn.exec_driver_sql(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            assert version.scalar_one() == "0.1.2"
+            assert version.scalar_one() == "0.1.3"
             ledger = await conn.exec_driver_sql(
                 "SELECT id FROM taskq.schema_migrations ORDER BY id"
             )
@@ -101,12 +102,13 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 "0001_initial",
                 "0002_contract_0_1_1",
                 "0003_contract_0_1_2",
+                "0004_read_models",
             ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname='taskq' AND p.prokind='f'"
             )
-            assert count.scalar_one() == 40
+            assert count.scalar_one() == 43
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
