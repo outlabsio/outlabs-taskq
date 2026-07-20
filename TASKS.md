@@ -52,6 +52,20 @@
 - [x] **S4-POST-F01 · Coolify build-secret containment** — every configured API (39) and worker (21) variable is runtime-only in Coolify, so no runtime secret is available during image build; the Dockerfiles contain no secret `ARG` instruction. The restricted runtime PostgreSQL login was re-proven, the runtime DB credential plus host auth-signing and documentation secrets were rotated, API rollout health/public health passed, and the worker replacement started without a recorded deployment failure. The new deployment transcripts contain neither an affected environment-variable name nor a Docker build-argument record; deployment-log access remains restricted. Host evidence is recorded in `outlabsAPI` as `docs/taskq-s4-post-f01-build-secret-remediation.md`. The owner explicitly accepted deferral of Redis, Umami, Telegram, and unused `TOOLS_API_KEY` cleanup for this low-value host; the record makes no claim those older credentials are invalidated. No taskq SQL, wire, capability, or application-source change occurred.
 
 - [ ] **S4-POST-F02 · Deferred low-value-host credential cleanup** — owner-accepted residual from F01: rotate Redis, Umami, and Telegram credentials and remove the unused `TOOLS_API_KEY` configuration. This is nonblocking for the current tools lane, but must be re-evaluated before a host expansion or new side-effecting lane treats the historical build exposure as fully remediated.
+### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
+
+**Blocking evidence:** Protocol v1 §2.5 says canonical `PUT /taskq/v1/queues/{queue}` success
+data is the same flat queue-profile projection returned by the new GET. The existing generated
+`ensure_queue` command for that identical route, however, has shipped a distinct H-13 model
+`EnsureQueueWireData` whose data shape is `{ "profile": { ... } }`; both official HTTP clients
+decode that wrapper. The new conditional-update function can supply the profile and ETag, but it
+cannot decide whether the established wrapper is replaced, retained as a compatibility envelope,
+or split into a new identity without a Tier-0 compatibility decision. Treating the old wrapper as
+"close enough" violates §2.5's exact field set; silently replacing it would break existing clients.
+
+**Decision required:** amend the Protocol docs-first to name the canonical H-11 success shape and
+the explicit compatibility/rollout posture for the existing generated PUT command, including the
+ETag and `If-Match` cases. The decision must say whether clients accept both shapes, whether a new
 
 *(subsequent stages remain sequenced by the Build Plan)*
 
