@@ -968,7 +968,9 @@ COMMAND_SPECS: Final = MappingProxyType(
         CommandName.GET_QUEUE_STATS: _spec("taskq.get_queue_stats(text)", _OBSERVER, ("ok",)),
         CommandName.GET_QUEUE_PROFILE: _spec("taskq.get_queue_profile(text)", _OBSERVER, ("ok",)),
         CommandName.LIST_JOBS: _spec(
-            "taskq.list_jobs(text,text,integer,jsonb)", _OBSERVER, ("ok",),
+            "taskq.list_jobs(text,text,integer,jsonb)",
+            _OBSERVER,
+            ("ok",),
             (TqCode.VALIDATION, TqCode.CAPABILITY),
         ),
         CommandName.GET_CONTRACT_META: _spec("taskq.get_contract_meta()", _OBSERVER, ("ok",)),
@@ -980,8 +982,10 @@ COMMAND_SPECS: Final = MappingProxyType(
             (TqCode.VALIDATION,),
         ),
         CommandName.UPDATE_QUEUE_PROFILE: _spec(
-            "taskq.update_queue_profile(text,jsonb,text,bigint)", _OPERATOR,
-            ("updated", "profile_version_conflict"), (TqCode.VALIDATION,),
+            "taskq.update_queue_profile(text,jsonb,text,bigint)",
+            _OPERATOR,
+            ("updated", "profile_version_conflict"),
+            (TqCode.VALIDATION,),
         ),
         CommandName.PAUSE_QUEUE: _spec(
             "taskq.pause_queue(text,text,text)",

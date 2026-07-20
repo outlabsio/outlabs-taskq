@@ -1,4 +1,4 @@
-"""S3-01 hand-derived Protocol-v1.0.4 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.6 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
@@ -264,6 +264,8 @@ def test_capability_protocol_method_sets_are_exact() -> None:
     assert _method_names(ObserverTransport) == {
         "get_job",
         "get_queue_stats",
+        "get_queue_profile",
+        "list_jobs",
         "get_contract_meta",
         "metrics",
         "aclose",
@@ -316,7 +318,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.4"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.6"
     _assert_catalog_matches_hand_derived_oracle()
 
 

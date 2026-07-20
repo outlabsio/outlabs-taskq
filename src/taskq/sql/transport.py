@@ -545,7 +545,12 @@ class SqlTaskqTransport:
             row = await self._one(
                 conn,
                 "SELECT * FROM taskq.list_jobs(:queue, :view, :limit, CAST(:after AS jsonb))",
-                {"queue": queue, "view": view, "limit": limit, "after": _json_param(after) if after else None},
+                {
+                    "queue": queue,
+                    "view": view,
+                    "limit": limit,
+                    "after": _json_param(after) if after else None,
+                },
             )
             data = dict(row)
             data["items"] = [dict(item) for item in data["items"]]
@@ -620,11 +625,20 @@ class SqlTaskqTransport:
             row = await self._one(
                 conn,
                 "SELECT * FROM taskq.update_queue_profile(:name, CAST(:profile AS jsonb), :actor, :expected_version)",
-                {"name": name, "profile": _json_param(profile), "actor": actor, "expected_version": expected_version},
+                {
+                    "name": name,
+                    "profile": _json_param(profile),
+                    "actor": actor,
+                    "expected_version": expected_version,
+                },
             )
             assert row is not None
             profile_row = row["profile"]
-            return str(row["result"]), (QueueProfile.model_validate(profile_row) if profile_row else None), int(row["current_version"])
+            return (
+                str(row["result"]),
+                (QueueProfile.model_validate(profile_row) if profile_row else None),
+                int(row["current_version"]),
+            )
 
         return await self._run(operation)
 

@@ -54,10 +54,19 @@ async def test_profile_version_and_observer_projection_are_bounded(
     profile = await observer.fetchrow("SELECT * FROM taskq.get_queue_profile($1)", "rm01_profile")
     assert profile is not None
     assert set(profile.keys()) == {
-        "name", "profile_version", "default_priority", "default_lease_seconds",
-        "default_max_attempts", "default_backoff_mode", "default_backoff_base",
-        "default_backoff_cap", "retention_hours", "failed_retention_hours", "max_depth",
-        "notify_enabled", "paused",
+        "name",
+        "profile_version",
+        "default_priority",
+        "default_lease_seconds",
+        "default_max_attempts",
+        "default_backoff_mode",
+        "default_backoff_base",
+        "default_backoff_cap",
+        "retention_hours",
+        "failed_retention_hours",
+        "max_depth",
+        "notify_enabled",
+        "paused",
     }
     assert profile["profile_version"] == 2
 
@@ -73,5 +82,13 @@ async def test_all_read_model_views_remain_explicitly_inactive(
 
 
 async def test_observer_has_no_base_table_read_grant(observer: asyncpg.Connection) -> None:
-    assert await observer.fetchval("SELECT has_table_privilege(current_user, 'taskq.jobs', 'SELECT')") is False
-    assert await observer.fetchval("SELECT has_table_privilege(current_user, 'taskq.queues', 'SELECT')") is False
+    assert (
+        await observer.fetchval("SELECT has_table_privilege(current_user, 'taskq.jobs', 'SELECT')")
+        is False
+    )
+    assert (
+        await observer.fetchval(
+            "SELECT has_table_privilege(current_user, 'taskq.queues', 'SELECT')"
+        )
+        is False
+    )
