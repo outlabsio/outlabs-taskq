@@ -27,7 +27,7 @@
 |---|---|
 | Stage | **Post-Stage-4 retirement eligibility · S4-POST-R3 independently accepted** — `main` is the authoritative deployed line; S4-POST-L1-SPEC freezes the legacy-tools observation rules before any producer removal |
 | Suite | 450/450 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
-| Contracts | Protocol v1 document revision 1.0.5 + Function Manifest 0.1.3 (+ ADR-012..019) |
+| Contracts | Protocol v1 document revision 1.0.6 + Function Manifest 0.1.3 (+ ADR-012..020) |
 | Next review | Targeted L1 eligibility acceptance must close the seven-day/two-deploy ledger and its independent-oracle limits before L2 producer removal |
 
 ## Now
@@ -42,7 +42,7 @@
 
 - [x] **S5-RM-ADR · H-08/H-11 contract reactivation accepted docs-first** — ADR-019 accepts Protocol v1 document revision 1.0.5, Function Manifest / SQL contract 0.1.3, and migration `0004_read_models.sql` identity before implementation. It fixes the 13-field queue-scoped job page, three independently gated views with explicit `TQ501` fallback, observer-safe versioned queue profile, ETag/`If-Match` matrix, `TQ409 profile_version_conflict` carrying only `current_version`, and direct-SQL/HTTP projection parity. R5-29 is closed by this package. No SQL, migration, generated client, facade, host, or L1 observation behavior changes in this docs-only task.
 
-- [ ] **S5-RM-01 · Read-model migration and catalog parity** — **BLOCKED by S5-CQ-01.** After its docs-first compatibility decision, implement immutable `0004_read_models.sql` from Manifest 0.1.3: `profile_version`, hardened observer `list_jobs`/`get_queue_profile`, operator `update_queue_profile`, capability rows, and only B9-justified indexes; extend `verify()` and catalog parity for fresh install plus 0001→0004 upgrades on PG16/PG18. Stop before generated HTTP/client surface work.
+- [ ] **S5-RM-01 · Read-model bridge, migration, and catalog parity** — ADR-020 resolves S5-CQ-01 docs-first: the bridge runtime accepts only `{0.1.2,0.1.3}`, exposes no read-model capability or route, and raises the database rollback floor once 0004 is applied. Implement that bridge and immutable `0004_read_models.sql` from Manifest 0.1.3: `profile_version`, hardened observer `list_jobs`/`get_queue_profile`, operator `update_queue_profile`, inactive capability rows, and only B9-justified indexes; extend `verify()` and catalog parity for fresh install plus 0001→0004 upgrades on PG16/PG18. Production 0004 is out of scope; stop before generated HTTP/client surface work.
 
 - [x] **S4-POST-F01 · Coolify build-secret containment** — every configured API (39) and worker (21) variable is runtime-only in Coolify, so no runtime secret is available during image build; the Dockerfiles contain no secret `ARG` instruction. The restricted runtime PostgreSQL login was re-proven, the runtime DB credential plus host auth-signing and documentation secrets were rotated, API rollout health/public health passed, and the worker replacement started without a recorded deployment failure. The new deployment transcripts contain neither an affected environment-variable name nor a Docker build-argument record; deployment-log access remains restricted. Host evidence is recorded in `outlabsAPI` as `docs/taskq-s4-post-f01-build-secret-remediation.md`. The owner explicitly accepted deferral of Redis, Umami, Telegram, and unused `TOOLS_API_KEY` cleanup for this low-value host; the record makes no claim those older credentials are invalidated. No taskq SQL, wire, capability, or application-source change occurred.
 
@@ -63,11 +63,13 @@ HTTP/client work; neither Tier-0 document defines whether the existing runtime
 must accept `0.1.2..0.1.3`, whether migration and a strict runtime bump must be
 released atomically, or the supported rollback posture.
 
-**Decision required:** amend the Tier-0 compatibility rule docs-first with the
-allowed metadata window and deployment sequencing for this additive SQL
-revision. The implementation must then prove the chosen old/new metadata
-vectors. Do not silently broaden the runtime check or ship a migration that
-breaks a supported pre-existing runtime.
+**Resolution:** ADR-020 accepts a general closed supported-contract-set rule.
+The bridge runtime declares `{0.1.2,0.1.3}` and exposes no read-model surface;
+the historical `{0.1.2}` pin remains a regression proof. Applying 0004 raises
+the database rollback floor to the bridge. Production application is a later,
+separately gated deployment decision after the bridge is both deployed and the
+rollback baseline; it is not authorized by S5-RM-01. The runtime decides exact
+membership from the database-reported version, with no wire change.
 
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 

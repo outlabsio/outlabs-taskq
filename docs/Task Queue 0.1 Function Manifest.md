@@ -677,3 +677,8 @@ Migration `0004_read_models.sql` is the sole implementation vehicle for these ad
    catalog parity, fresh install, and the full `0001 → 0002 → 0003 → 0004` upgrade chain must assert
    every new type, function, grant, column, capability, index, and per-view negative disposition on
    PostgreSQL 16 and 18. Direct SQL and HTTP must return the same bounded projections.
+6. **Supported-runtime sets.** Per ADR-020, a runtime declares a closed set of supported SQL
+   contract revisions and startup uses exact membership in that set; it never loosens compatibility
+   through a prefix or version range. The 0004 bridge runtime declares `{0.1.2, 0.1.3}` while the
+   pre-bridge `{0.1.2}` runtime continues to reject `0.1.3`. The database reports its exact revision;
+   this rule adds no SQL function, grant, capability activation, or wire field.

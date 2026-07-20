@@ -270,11 +270,14 @@ plan evidence, and contract amendment.
 
 ## 8. Implementation sequence after this docs-first amendment
 
-1. Land immutable migration `0004_read_models.sql` with fresh-install and 0001→current upgrade
-   proof on PG16 and PG18.
-2. Add typed protocol models, one generated command source, SQL transport,
+1. Land the ADR-020 bridge runtime first. It accepts the closed `{0.1.2, 0.1.3}` SQL-contract set,
+   exposes no read-model capability or route, and is the required rollback floor before any database
+   receives 0004. Production application of 0004 remains a separate gated deployment decision.
+2. Land immutable migration `0004_read_models.sql` with fresh-install and 0001→current upgrade
+   proof on PG16 and PG18 under that bridge.
+3. Add typed protocol models, one generated command source, SQL transport,
    facade, and sync/async client support with conformance/parity tests.
-3. Add the B9 plan gate and CI evidence, then conduct a targeted independent
+4. Add the B9 plan gate and CI evidence, then conduct a targeted independent
    review before activating either deferred capability in a host.
 
 No Stage-4 retirement observation, host producer/consumer behavior, UI work,

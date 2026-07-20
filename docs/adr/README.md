@@ -24,5 +24,6 @@
 | [016](./ADR-016-final-http-wire-normalization.md) | Final request-id, queue-ensure, and worker-list wire normalization | S3-CQ-03 |
 | [017](./ADR-017-final-manifest-backed-wire-corrections.md) | Final manifest-backed list, enqueue, and request-id wire corrections | R5-CQ-A, R5-CQ-B, R5-09 |
 | [019](./ADR-019-safe-read-model-reactivation.md) | Safe read-model reactivation: bounded job pages and versioned queue profiles | H-08, H-11, R2-16, R5-29 |
+| [020](./ADR-020-supported-sql-contract-sets.md) | Supported SQL-contract sets for additive migrations | S5-CQ-01 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.
