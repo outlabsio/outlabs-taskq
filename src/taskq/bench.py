@@ -1,4 +1,4 @@
-"""Implemented B1–B4/B8/B11/B13/B14 benchmark scenarios (Harness §5).
+"""Implemented B1–B4/B8/B9/B11/B13/B14 benchmark scenarios (Harness §5).
 
 This is report-only until a dedicated runner is calibrated and an envelope is
 accepted. Toy runs prove the harness; they are never release baselines.
@@ -35,7 +35,7 @@ from taskq.sql import migrate
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("B1", "B2", "B3", "B4", "B8", "B11", "B13", "B14")
+SCENARIOS = ("B1", "B2", "B3", "B4", "B8", "B9", "B11", "B13", "B14")
 
 
 class _BenchInput(BaseModel):
@@ -288,6 +288,217 @@ async def _representative_claim_plan(admin: asyncpg.Connection, queue: str) -> d
         "bounded_actual_rows": plan["Actual Rows"],
         "plan": document,
     }
+
+
+_B9_VIEW_QUERIES = {
+    "ready": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'bench_b9_a' AND j.status = 'queued'
+           AND j.cancel_requested_at IS NULL AND j.scheduled_at <= now()
+         ORDER BY j.priority, j.scheduled_at, j.id LIMIT 101
+    """,
+    "running": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'bench_b9_a' AND j.status = 'running'
+         ORDER BY j.started_at DESC, j.id DESC LIMIT 101
+    """,
+    "finished": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'bench_b9_a'
+           AND j.status IN ('succeeded', 'failed', 'cancelled')
+         ORDER BY j.finished_at DESC, j.id DESC LIMIT 101
+    """,
+}
+
+
+def _walk_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    pending = [plan]
+    result: list[dict[str, Any]] = []
+    while pending:
+        node = pending.pop()
+        result.append(node)
+        pending.extend(node.get("Plans", ()))
+    return result
+
+
+async def _b9_view_plan(
+    admin: asyncpg.Connection,
+    view: str,
+    query: str,
+    *,
+    enforce_gate: bool,
+) -> dict[str, Any]:
+    raw = await admin.fetchval(f"EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) {query}")
+    assert isinstance(raw, str)
+    document = json.loads(raw)
+    plan = document[0]["Plan"]
+    nodes = _walk_plan(plan)
+    indexes = sorted({node["Index Name"] for node in nodes if node.get("Index Name")})
+    jobs_seq_scan = any(
+        node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "jobs"
+        for node in nodes
+    )
+    sorts = [
+        node["Node Type"] for node in nodes if node.get("Node Type") in {"Sort", "Incremental Sort"}
+    ]
+    candidate_rows = max(
+        (
+            int(node.get("Actual Rows", 0))
+            for node in nodes
+            if node.get("Relation Name") == "jobs" or node.get("Index Name")
+        ),
+        default=0,
+    )
+    bounded = not jobs_seq_scan and not sorts and candidate_rows <= 101
+    if view == "ready" and enforce_gate:
+        assert "jobs_claim_idx" in indexes
+        assert bounded
+    return {
+        "view": view,
+        "indexes": indexes,
+        "jobs_sequential_scan": jobs_seq_scan,
+        "sort_nodes": sorts,
+        "candidate_rows": candidate_rows,
+        "limit_plus_one": 101,
+        "bounded": bounded,
+        "disposition": "candidate" if bounded else "inactive",
+        "plan": document,
+    }
+
+
+async def _seed_b9_depth(
+    admin: asyncpg.Connection, operator: asyncpg.Connection, rows: int
+) -> None:
+    for queue in ("bench_b9_a", "bench_b9_b"):
+        await _ensure_queue(operator, queue)
+    await admin.execute(
+        """
+        WITH seed AS (
+            SELECT g,
+                   CASE
+                       WHEN g % 100 < 70 THEN 'queued'
+                       WHEN g % 100 < 72 THEN 'running'
+                       WHEN g % 100 < 85 THEN 'succeeded'
+                       WHEN g % 100 < 93 THEN 'failed'
+                       ELSE 'cancelled'
+                   END AS status
+              FROM generate_series(1, $1) AS g
+        )
+        INSERT INTO taskq.jobs (
+            id, queue, job_type, status, priority, payload, idempotency_key,
+            concurrency_key, scheduled_at, lease_seconds, lease_expires_at,
+            worker_id, current_attempt_id, attempt_count, failure_count,
+            expiry_streak, max_attempts, backoff_mode, backoff_base_seconds,
+            backoff_cap_seconds, outcome, created_at, updated_at, started_at,
+            finished_at
+        )
+        SELECT md5('bench-b9-job:' || g::text)::uuid,
+               CASE WHEN g % 2 = 0 THEN 'bench_b9_a' ELSE 'bench_b9_b' END,
+               'bench.noop', status, (g % 10)::smallint, '{}'::jsonb,
+               'bench-b9-key-' || g::text,
+               CASE WHEN status = 'running' THEN 'bench-b9-cap-' || (g % 100)::text END,
+               CASE WHEN status = 'queued' AND g % 10 = 0 THEN now() + interval '1 day'
+                    ELSE now() - interval '1 hour' END,
+               300,
+               CASE WHEN status = 'running' THEN now() + interval '5 minutes' END,
+               CASE WHEN status = 'running' THEN 'bench-b9-worker-' || (g % 100)::text END,
+               CASE WHEN status = 'running' THEN md5('bench-b9-attempt:' || g::text)::uuid END,
+               CASE WHEN status = 'running' THEN 1 ELSE 0 END,
+               CASE WHEN status = 'failed' THEN 1 ELSE 0 END,
+               0, 5, 'fixed', 30, 300,
+               CASE status WHEN 'succeeded' THEN 'success' WHEN 'failed' THEN 'non_retryable'
+                           WHEN 'cancelled' THEN 'canceled' END,
+               now() - interval '2 hours', now() - interval '1 hour',
+               CASE WHEN status IN ('running','succeeded','failed','cancelled')
+                    THEN now() - interval '90 minutes' END,
+               CASE WHEN status IN ('succeeded','failed','cancelled')
+                    THEN now() - interval '1 hour' END
+          FROM seed
+        """,
+        rows,
+    )
+    await admin.execute("VACUUM (ANALYZE) taskq.jobs")
+
+
+async def _b9_write_path_samples(
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    count: int,
+    seed: int,
+) -> tuple[dict[str, float], dict[str, float]]:
+    queue = "bench_b9_write"
+    await _ensure_queue(operator, queue)
+    await _seed_backlog(producer, queue, f"b9-write-{seed}", count)
+    claim_latencies: list[float] = []
+    heartbeat_latencies: list[float] = []
+    for index in range(count):
+        started = time.perf_counter()
+        claim = await runner.fetchrow("SELECT * FROM taskq.claim_jobs($1, $2)", queue, "bench-b9")
+        claim_latencies.append(time.perf_counter() - started)
+        assert claim is not None and claim["state"] == "claimed"
+        job = claim["jobs"][0]
+        started = time.perf_counter()
+        heartbeat = await runner.fetchrow(
+            "SELECT * FROM taskq.heartbeat($1, $2, $3)",
+            job["job_id"],
+            job["attempt_id"],
+            "bench-b9",
+        )
+        heartbeat_latencies.append(time.perf_counter() - started)
+        assert heartbeat is not None and heartbeat["ok"] is True
+    return _latency_summary(claim_latencies), _latency_summary(heartbeat_latencies)
+
+
+async def _b9(
+    admin: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    scale: Scale,
+    repetitions: int,
+    seed: int,
+) -> list[dict[str, Any]]:
+    """B9 read-model evidence; only ``full`` is the 1M activation fixture."""
+    await _seed_b9_depth(admin, operator, scale.backlog)
+    await admin.execute("SET jit = off")
+    enforce_gate = scale.backlog >= 1_000_000
+    claim_latency, heartbeat_latency = await _b9_write_path_samples(
+        producer, runner, operator, min(25, scale.operations), seed
+    )
+    runs: list[dict[str, Any]] = []
+    for _ in range(repetitions):
+        view_plans = {
+            view: await _b9_view_plan(admin, view, query, enforce_gate=enforce_gate)
+            for view, query in _B9_VIEW_QUERIES.items()
+        }
+        view_latencies: dict[str, dict[str, float]] = {}
+        started = time.perf_counter()
+        for view, query in _B9_VIEW_QUERIES.items():
+            samples: list[float] = []
+            for _ in range(20):
+                sample_started = time.perf_counter()
+                await admin.fetch(query)
+                samples.append(time.perf_counter() - sample_started)
+            view_latencies[f"{view}_latency"] = _latency_summary(samples)
+        duration = time.perf_counter() - started
+        runs.append(
+            {
+                "accepted": 60,
+                "backlog_rows": scale.backlog,
+                "duration_seconds": duration,
+                "throughput_rows_per_second": 60 / duration,
+                **view_latencies,
+                "claim_latency": claim_latency,
+                "heartbeat_latency": heartbeat_latency,
+                "view_plans": view_plans,
+                "write_path_comparison": {
+                    "added_read_model_indexes": False,
+                    "posture": "no index proposal; report-only current claim/heartbeat samples",
+                },
+            }
+        )
+    return runs
 
 
 async def _enqueue_one(producer: asyncpg.Connection, queue: str, key: str) -> asyncpg.Record:
@@ -983,6 +1194,8 @@ async def _run_scenario_in_database(
             runs = await _b4(dsn, admin, queue, scale, repetitions, seed)
         elif scenario == "B8":
             runs = await _b8(dsn, producer, queue, scale, repetitions, seed)
+        elif scenario == "B9":
+            runs = await _b9(admin, producer, runner, operator, scale, repetitions, seed)
         elif scenario == "B11":
             runs = await _b11(dsn, queue, scale, repetitions)
         elif scenario == "B13":
@@ -1062,6 +1275,22 @@ async def _run_scenario_in_database(
             result["summary"]["poll_only_p50_ms"] = statistics.median(
                 run["wake_latency"]["p50_ms"] for run in runs if run["mode"] == "poll_only"
             )
+        elif scenario == "B9":
+            result["read_model_b9"] = {
+                "fixture_rows": scale.backlog,
+                "activation_fixture": scale.backlog >= 1_000_000,
+                "view_dispositions": runs[0]["view_plans"],
+                "ready_median_p95_ms": statistics.median(
+                    run["ready_latency"]["p95_ms"] for run in runs
+                ),
+                "claim_median_p95_ms": statistics.median(
+                    run["claim_latency"]["p95_ms"] for run in runs
+                ),
+                "heartbeat_median_p95_ms": statistics.median(
+                    run["heartbeat_latency"]["p95_ms"] for run in runs
+                ),
+                "write_path_comparison": runs[0]["write_path_comparison"],
+            }
         elif scenario == "B11":
             facade_p99 = statistics.median(
                 run["request_latency"]["p99_ms"] for run in runs if run["mode"] == "facade_only"

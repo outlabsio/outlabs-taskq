@@ -67,6 +67,15 @@ async def test_benchmark_scenario_records_json(
         assert {run["mode"] for run in result["runs"]} == {"notify", "poll_only"}
         assert result["summary"]["notify_p50_ms"] >= 0
         assert result["summary"]["poll_only_p50_ms"] >= 0
+    elif scenario == "B9":
+        evidence = result["read_model_b9"]
+        assert evidence["fixture_rows"] == 200
+        assert evidence["activation_fixture"] is False
+        assert evidence["view_dispositions"]["ready"]["view"] == "ready"
+        assert evidence["write_path_comparison"]["added_read_model_indexes"] is False
+        assert evidence["ready_median_p95_ms"] >= 0
+        assert evidence["claim_median_p95_ms"] >= 0
+        assert evidence["heartbeat_median_p95_ms"] >= 0
     elif scenario == "B13":
         assert result["summary"]["released_claims"] == 0
         assert result["summary"]["expired_claims"] == 0
