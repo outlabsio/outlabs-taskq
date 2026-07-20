@@ -283,6 +283,25 @@ plan evidence, and contract amendment.
 No Stage-4 retirement observation, host producer/consumer behavior, UI work,
 or side-effecting lane is authorized by these preparation steps.
 
+### 8.1 ADR-020 bridge pin-site inventory
+
+The bridge changes exactly one runtime compatibility decision:
+`TaskqRuntime.start()` changes from its historical exact `{0.1.2}` pin to the
+closed `{0.1.2,0.1.3}` set. Its proof must retain the historical set as a
+negative `0.1.3` vector and prove both bridge members start without invoking a
+0004 function.
+
+The remaining exact-version sites are not startup compatibility gates and must
+be treated according to their role, never widened implicitly:
+
+| Site | Bridge disposition |
+|---|---|
+| SQL machine manifest, `verify()`, installer matrix, catalog parity, and SQL transport tests | Advance their expected database revision with migration 0004; fresh and full-chain proofs assert the exact post-migration `0.1.3` metadata. |
+| HTTP sync/async clients and facade test doubles | Continue to decode/report the exact metadata value; they do not choose a runtime supported set and receive no read-model command in this slice. |
+| `taskq migrate` / `taskq verify` CLI | No runtime startup pin exists. The commands retain exact catalog verification and are exercised against both the bridge's 0.1.2 database and the migrated 0.1.3 database. |
+| Host preflight/deployment scripts | No exact contract-version pin exists in the authoritative host deployment record; future production 0004 approval must separately record the bridge rollout and rollback-floor transition. |
+| Documentation statements | Historical 0.1.2 passages remain historical; current status/contract statements advance to ADR-020's 1.0.6 / 0.1.3 posture. |
+
 ## 9. Accepted decision record
 
 ADR-019 accepts this minimum H-08/H-11 package and binds Protocol document
