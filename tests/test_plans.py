@@ -71,6 +71,32 @@ _PLAN_QUERIES = {
     """,
 }
 
+# ADR-019's B9 gate measures the exact finite H-08 view shapes.  These are
+# owner-only plan probes: list_jobs() remains capability-gated, so a view
+# cannot become observable merely because this structural evidence runs.
+_READ_MODEL_PLAN_QUERIES = {
+    "ready": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.status = 'queued'
+           AND j.cancel_requested_at IS NULL AND j.scheduled_at <= now()
+         ORDER BY j.priority, j.scheduled_at, j.id
+         LIMIT 101
+    """,
+    "running": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.status = 'running'
+         ORDER BY j.started_at DESC, j.id DESC
+         LIMIT 101
+    """,
+    "finished": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a'
+           AND j.status IN ('succeeded', 'failed', 'cancelled')
+         ORDER BY j.finished_at DESC, j.id DESC
+         LIMIT 101
+    """,
+}
+
 _PLAN_BINDINGS = {
     "claim": PlanBinding(
         functions=("taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",),
@@ -160,6 +186,16 @@ def _assert_index_family(plan: dict[str, Any], expected: str) -> None:
         node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "jobs"
         for node in nodes
     ), f"unbounded jobs Seq Scan in plan: {plan!r}"
+
+
+def _plan_nodes(plan: dict[str, Any], node_type: str) -> list[dict[str, Any]]:
+    return [node for node in _walk_plan(plan) if node.get("Node Type") == node_type]
+
+
+def _sort_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        node for node in _walk_plan(plan) if node.get("Node Type") in {"Sort", "Incremental Sort"}
+    ]
 
 
 async def _seed_million(pg: asyncpg.Connection) -> None:
@@ -289,6 +325,32 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     # Execute the exact owner helper too; EXPLAIN cannot expose SQL nested in
     # PL/pgSQL, so the representative subqueries above provide plan evidence.
     await pg.fetchval("SELECT taskq.refresh_stats_snapshot()")
+
+    # B9 / ADR-019: ready is the sole view the currently shipped index set
+    # can prove bounded.  Running and finished deliberately remain inactive:
+    # their legacy indexes are not queue-leading and the planner must sort or
+    # examine more than limit + 1 candidate rows.  These negative assertions
+    # force any later activation/index proposal to replace the evidence rather
+    # than quietly inheriting a happy-path test.
+    ready = await _explain(pg, _READ_MODEL_PLAN_QUERIES["ready"])
+    _assert_index_family(ready, "jobs_claim_idx")
+    assert not _sort_nodes(ready)
+    assert ready["Actual Rows"] <= 101
+
+    running = await _explain(pg, _READ_MODEL_PLAN_QUERIES["running"])
+    running_scans = _plan_nodes(running, "Bitmap Heap Scan")
+    assert _sort_nodes(running)
+    assert running_scans and running_scans[0]["Actual Rows"] > 101
+
+    finished = await _explain(pg, _READ_MODEL_PLAN_QUERIES["finished"])
+    finished_scans = [
+        node for node in _walk_plan(finished) if node.get("Index Name") == "jobs_finished_idx"
+    ]
+    assert _sort_nodes(finished)
+    assert finished_scans and finished_scans[0]["Actual Rows"] > 101
+
+    capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
+    assert json.loads(capabilities) == {"active": []}
 
 
 async def test_plan_binding_detects_rollback_only_function_drift(
