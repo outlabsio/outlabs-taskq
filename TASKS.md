@@ -32,7 +32,7 @@
 
 ## Now
 
-- [ ] **S4-POST-R8 · Independent post-Stage-4 specification review** — request assembled at `docs/design-review-8/REQUEST.md`; dispatch it to an external reviewer to adversarially verify the host commit graph and reconciliation construction, tools-only retirement boundary, high-water/invocation oracles, deployment sequencing, and zero-DML rollback. Must return READY before S4-POST-R1; no implementation is authorized by the request itself.
+- [ ] **S4-POST-R1 · Independently derived host reconciliation ledger** — enumerate every commit reachable from exactly one accepted host baseline, classify each disposition with semantic evidence and a named wrong-disposition oracle, bind R8-01's exact-tree construction, and stop before creating a merge candidate, tag, ref movement, deployment, or production mutation.
 
 ## Later
 
@@ -314,6 +314,8 @@ The response verdict was **BLOCKED**. R4-01..12 are accepted as source-backed im
 All seven findings are **accepted as source-backed**; ADR-012 resolved the two Contract questions. R3-01, R3-02, and both Contract questions were independently reproduced after the response landed; R3-03..07 agree with the cited ADR/harness/source gaps. R3-07 is an evidence-hardening item rather than a direct contract violation. No finding is rejected or deferred into Stage 2.
 
 ## Done
+
+- [x] **S4-POST-R8-RESPONSE · Round-8 response recorded; reconciliation READY** — registered the external response byte-for-byte as immutable Tier 4 (SHA-256 `957dbb3cad99a13b87ec1ee9eee5c72d5434e30d8ca070086c69395f90678732`). The reviewer independently reproduced the graph, complete legacy-tools surface, taskq 450/450 plus one opt-in skip, host 72/72 plus five infrastructure skips, and clean linters; it returned READY with zero Contract questions and no R1 preconditions. R8-01 binds R1/R-AUDIT to candidate-tree equality with the accepted tree plus only named forward ports and zero unclassified paths. R8-02/03/05 require docs-first retirement amendments before L1; R8-04/06 belong to L2. READY authorizes reconciliation only—no retirement, branch deletion, side-effecting lane, or Stage 5.
 
 - [x] **S4-POST-R8-REQUEST · Round-8 gate assembled** — the immutable request pins taskq `fef775e..9feaf79` and independently re-derivable host identities (`a0019cd`, `7df6b7f`, `3f50b7d`, `9348f85`). It requires an authority-first governance sweep, independently generated branch and legacy-call inventories, adversarial exact-tree/fast-forward/tag/branch-cutover analysis, high-water and invocation-oracle falsification, all four mixed-version producer/consumer windows, security/data/non-tools preservation, BR-01..10 and LR-01..12 dispositions, and explicit Contract questions. The reviewer may create only `docs/design-review-8/RESPONSE.md`; no implementation, ref movement, deployment, production mutation, retirement, side-effecting-lane migration, or Stage-5 work is authorized.
 
