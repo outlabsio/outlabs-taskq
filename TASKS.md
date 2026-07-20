@@ -10,7 +10,7 @@
    Caveat: migration 0001 creates six cluster-wide `taskq_*` roles on that server — expected on a dev cluster; never point tests at a shared/production server.
 3. Run everything:
    ```bash
-   uv sync --extra dev
+   uv sync --extra dev --extra http --extra outlabs
    uv run pytest tests/ -q                                   # T1 only (no DSN)
    TASKQ_TEST_DSN="postgresql://postgres:postgres@localhost:5432/taskq_stage1_test" \
      uv run pytest tests/ -q                                 # T1 + T2 (must be 42/42 before you start)
@@ -25,8 +25,8 @@
 
 | | |
 |---|---|
-| Stage | **S4-03 production canary paused at S4-CQ-04; safe legacy posture restored** — the first live credential probe proved the host tool route accepts a narrowly scoped system-integration key while the canonical taskq facade returns typed `TQ503 auth_infrastructure_unavailable` for that same key; no job was enqueued, the ephemeral key was archived, and production is healthy in legacy mode with no allowlist |
-| Suite | 449/449 regular on PG18.3; 448/448 last run on PG16.14; 289/289 DB-free on Python 3.12 and 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; deployed production host line 68/68 regular with 5 pre-existing opt-in skips; MyPy 64 files |
+| Stage | **S4-CQ-04 remediation in verification; production remains in safe legacy posture** — the exact host mount-before-auth-initialize order reproduced the typed `TQ503`: the adapter had frozen OutLabsAuth's pre-initialization API-key service, while the host helper used the live post-initialization service. Lazy checker binding and an exact a24/Redis regression are implemented; canary remains paused until release/repin and the live pre-enqueue probe pass |
+| Suite | 450/450 regular on PG18.3; 448/448 last run on PG16.14; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; deployed production host line 68/68 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.4 + Function Manifest 0.1.2 (+ ADR-012..017) |
 | Next review | S4-AUDIT independently accepts two normal deploy cycles, controlled failure, rollback, and re-enable evidence |
 

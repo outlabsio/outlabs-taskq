@@ -220,9 +220,12 @@ class OutlabsQueueAuthorizer:
             if key not in _ACTIONS:
                 raise ValueError(f"unknown taskq action: {key}")
             self._extra_candidates[key] = tuple(_validated_permission(name) for name in names)
-        self._authenticate_checker = deps.require_auth()
-        if "session" not in inspect.signature(self._authenticate_checker).parameters:
-            raise TypeError("OutLabs auth dependencies must expose the session parameter")
+        # Hosts mount the facade before their lifespan initializes OutlabsAuth.
+        # Building the dependency here would freeze the pre-initialization service
+        # graph (including an unavailable Redis-backed API-key service). Bind it
+        # lazily on the first served request, after application startup completes.
+        self._authenticate_checker: Callable[..., Any] | None = None
+        self._authenticate_checker_lock = asyncio.Lock()
         self._checkers: dict[tuple[str, ...], Callable[..., Awaitable[Mapping[str, Any]]]] = {}
         self._checker_lock = asyncio.Lock()
 
@@ -231,6 +234,19 @@ class OutlabsQueueAuthorizer:
             "OutlabsQueueAuthorizer("
             f"cached_checkers={len(self._checkers)}, legacy_actions={tuple(sorted(self._extra_candidates))})"
         )
+
+    async def _auth_checker(self) -> Callable[..., Any]:
+        checker = self._authenticate_checker
+        if checker is not None:
+            return checker
+        async with self._authenticate_checker_lock:
+            checker = self._authenticate_checker
+            if checker is None:
+                checker = self._auth.deps.require_auth()
+                if "session" not in inspect.signature(checker).parameters:
+                    raise TypeError("OutLabs auth dependencies must expose the session parameter")
+                self._authenticate_checker = checker
+        return checker
 
     async def _checker(self, names: tuple[str, ...]) -> Callable[..., Any]:
         checker = self._checkers.get(names)
@@ -292,9 +308,10 @@ class OutlabsQueueAuthorizer:
         )
 
     async def authenticate(self, request: Request) -> AuthContext:
+        checker = await self._auth_checker()
         try:
             async with _resolved_session(self._session_dependency, request) as session:
-                result = await self._authenticate_checker(request=request, session=session)
+                result = await checker(request=request, session=session)
         except HTTPException as exc:
             raise self._normalize_http_exception(exc) from None
         if not isinstance(result, Mapping):

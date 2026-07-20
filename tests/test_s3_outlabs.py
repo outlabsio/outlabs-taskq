@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 import importlib.metadata
 import logging
+import os
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -19,12 +20,13 @@ from starlette.requests import Request
 from outlabs_auth import (
     AuthConfig,
     AuthDeps,
+    EnterpriseRBAC,
     PermissionService,
     ServiceTokenService,
     SimpleRBAC,
 )
 from outlabs_auth.core.exceptions import InvalidInputError
-from outlabs_auth.models.sql.enums import APIKeyKind
+from outlabs_auth.models.sql.enums import APIKeyKind, IntegrationPrincipalScopeKind
 from outlabs_auth.services.api_key_policy import APIKeyPolicyService
 from taskq.http.outlabs import (
     OutlabsQueueAuthorizer,
@@ -85,6 +87,21 @@ def _request() -> Request:
             "method": "POST",
             "path": "/taskq/v1/queues/emails/claims",
             "headers": [],
+            "query_string": b"",
+            "server": ("test", 80),
+            "client": ("test", 1),
+            "scheme": "http",
+        }
+    )
+
+
+def _api_key_request(api_key: str) -> Request:
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/taskq/v1/queues/tools/stats",
+            "headers": [(b"x-api-key", api_key.encode("ascii"))],
             "query_string": b"",
             "server": ("test", 80),
             "client": ("test", 1),
@@ -454,6 +471,105 @@ async def test_real_api_key_policy_enterprise_denies_run_simple_documents_residu
     config = AuthConfig(secret_key="x" * 32)
     assert {"run", "read", "control"} <= set(config.api_key_system_allowed_action_prefixes)
     assert {"enqueue", "admin"}.isdisjoint(config.api_key_system_allowed_action_prefixes)
+
+
+@pytest.mark.taskq_sql
+@pytest.mark.filterwarnings("ignore:No path_separator found in configuration:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:Call to deprecated setex.*:DeprecationWarning")
+@pytest.mark.filterwarnings("ignore:Call to deprecated close.*:DeprecationWarning")
+async def test_preinitialized_enterprise_system_key_binds_after_startup(
+    taskq_dsn: str,
+) -> None:
+    """Regression for S4-CQ-04's real host mount-before-initialize ordering."""
+
+    schema = "taskq_s4_cq04_auth_test"
+    plain_dsn = taskq_dsn.replace("postgresql+asyncpg://", "postgresql://")
+    _, separator, suffix = plain_dsn.partition("://")
+    engine_dsn = "postgresql+asyncpg" + separator + suffix
+    redis_url = os.environ.get("TASKQ_TEST_REDIS_URL", "redis://localhost:6379/15")
+    admin = await asyncpg.connect(plain_dsn)
+    await admin.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+    await admin.close()
+    auth = EnterpriseRBAC(
+        database_url=engine_dsn,
+        database_schema=schema,
+        secret_key="x" * 32,
+        auto_migrate=True,
+        redis_url=redis_url,
+        redis_key_prefix=f"taskq:test:cq04:{uuid4().hex}",
+    )
+    root = logging.getLogger()
+    root_state = (root.level, tuple(root.handlers))
+    logger_state = {
+        name: (logger.disabled, logger.level, logger.propagate, tuple(logger.handlers))
+        for name, logger in logging.Logger.manager.loggerDict.items()
+        if isinstance(logger, logging.Logger)
+    }
+    auth.prime_fastapi_routing()
+    authorizer = OutlabsQueueAuthorizer(
+        auth=auth,
+        session_dependency=auth.get_session,
+    )
+    assert auth.deps.services.get("api_key_service") is not auth.api_key_service
+
+    try:
+        await auth.initialize()
+        assert auth.redis_client is not None and auth.redis_client.is_available
+        async with auth.get_session() as session:
+            async with session.begin():
+                report = await provision_taskq_auth(
+                    auth,
+                    session,
+                    queues=["tools"],
+                    mode="apply",
+                )
+                assert report.ok
+                actor = await auth.user_service.create_user(
+                    session,
+                    "taskq-cq04-admin@example.test",
+                    "Password!123",
+                    is_superuser=True,
+                )
+                principal = await auth.integration_principal_service.create_principal(
+                    session,
+                    name="taskq-cq04-reader",
+                    description="S4-CQ-04 regression principal",
+                    scope_kind=IntegrationPrincipalScopeKind.PLATFORM_GLOBAL,
+                    anchor_entity_id=None,
+                    inherit_from_tree=False,
+                    allowed_scopes=["taskq_tools:read"],
+                    created_by_user_id=actor.id,
+                )
+                raw_key, _ = await auth.api_key_service.create_api_key(
+                    session,
+                    integration_principal_id=principal.id,
+                    name="taskq-cq04-reader-key",
+                    scopes=["taskq_tools:read"],
+                    key_kind=APIKeyKind.SYSTEM_INTEGRATION,
+                    actor_user_id=actor.id,
+                )
+
+        request = _api_key_request(raw_key)
+        context = await authorizer.authenticate(request)
+        fingerprint = context.principal.fingerprint
+        await authorizer.authorize_context(request, context, TaskqAction.READ, "tools")
+        assert context.principal.fingerprint == fingerprint
+
+        with pytest.raises(HTTPException) as denied:
+            await authorizer.authorize_context(request, context, TaskqAction.RUN, "tools")
+        assert denied.value.status_code == 403
+        assert denied.value.detail == "authorization failed"
+    finally:
+        await auth.shutdown()
+        root.setLevel(root_state[0])
+        root.handlers[:] = root_state[1]
+        for name, state in logger_state.items():
+            logger = logging.getLogger(name)
+            logger.disabled, logger.level, logger.propagate = state[:3]
+            logger.handlers[:] = state[3]
+        admin = await asyncpg.connect(plain_dsn)
+        await admin.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
+        await admin.close()
 
 
 async def test_ensure_queue_composition_reports_partial_failure_without_secret() -> None:
