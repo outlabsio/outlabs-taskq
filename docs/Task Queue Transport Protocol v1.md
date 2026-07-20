@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, and ADR-017 as additive protocol document revision **1.0.4**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, and ADR-019 as additive protocol document revision **1.0.5** / SQL contract 0.1.3. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -15,10 +15,10 @@
 | H-05 bulk convergence | Closed by spec v1.6 §5.2 (one-result-per-input, later-snapshot resolution, `TQ500` atomic rollback) + manifest body. |
 | H-06 error envelope + native normalization | Accepted: §4 registry is closed; the manifest enumerates every public raise; facade normalizes any unregistered SQLSTATE to `TQ500` and logs the original privately. |
 | H-07 job-detail projection | **Closed — minimal safe projection frozen for 0.1:** `id, queue, job_type, status, outcome, priority, attempt_count, failure_count, max_attempts, created_at, scheduled_at, started_at, finished_at, updated_at` always; `error` (≤2KB), `result` (≤8KB), `progress` (≤2KB) only via explicit `include=` flags gated by queue `read`; `payload` (≤64KB) via `include=payload`, same gate; **never** headers, fences, or worker internals. Redaction hook point reserved per field. |
-| H-08 list cursors/indexes | **Deferred out by ADR-017:** 0.1 read surface is get-by-id + per-queue stats; no general list function or successful HTTP list operation exists. Reactivation requires Growth §4 / R2-16 to freeze the observer projection, redaction, authorization, keyset cursor, indexes, and bounded EXPLAIN evidence. |
+| H-08 list cursors/indexes | **Closed by ADR-019 / revision 1.0.5:** `GET /jobs` is a queue-scoped finite-view page with the exact projection, cursor, per-view capability gates, and B9 evidence in §2.5. An unproven view remains an explicit `TQ501`; no all-queue or arbitrary-filter surface exists. |
 | H-09 size ceilings | **Closed — published limits (also in `/meta.limits`):** payload ≤64KB, progress ≤2KB, result ≤8KB, stored error ≤2KB, bulk ≤1000 items and ≤4MB body, claim batch ≤50, `wait_seconds` ≤30, job-type filter ≤20 entries, headers ≤8KB. Oversize → `TQ422`. |
 | H-10 long-poll lifecycle | Accepted as drafted: disconnect cancels the waiter, never a committed claim; shutdown drains hub subscribers before LISTEN/pool close (tested in T6). |
-| H-11 profile read + If-Match | Deferred by ADR-015 (queues are bootstrap/migration-owned in 0.1). Reactivation requires the Growth §4 / R2-16 exact observer projection, redaction, authorization, bounded-plan, and optimistic-concurrency design. |
+| H-11 profile read + If-Match | **Closed by ADR-019 / revision 1.0.5:** observer-safe profile GET plus `profile_version` ETag and a separately named conditional-update function are defined in §2.5. Bootstrap ensure remains backwards compatible. |
 | H-12 0.2/0.3 commands | Deferred; inactive fields rejected with `TQ501`, never ignored. |
 | H-13 single generation source | **Closed:** one Python protocol manifest (models + command table) generates the OpenAPI schema, sync + async HTTP clients, and the SQL/HTTP parity test vectors. Hand-copied route tables are banned — this document and the manifest are the only human-maintained sources. |
 
@@ -39,6 +39,10 @@
     unbacked general job-list command, removes the unproducible enqueue `created_at`, pins the exact
     enqueue response fields, and completes invalid-request-id behavior as specified in §2.4. This
     changes no SQL identity or migration and leaves the wire-major header at `1`.
+12. **ADR-019 safe read-model reactivation:** protocol document revision 1.0.5 activates the
+    bounded H-08/H-11 command identities defined in §2.5, with per-view negative capabilities and
+    the profile ETag conflict matrix. It requires Manifest/SQL contract 0.1.3 and migration
+    `0004_read_models`; wire major remains `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -93,6 +97,9 @@ conformance vectors, and SQL-versus-HTTP parity vectors. The SQL contract remain
 This is an explicit correction to the adopted base's §3.1 active row. The Tier-0 Function Manifest
 is senior for 0.1 SQL specifics and contains no safe queue-profile projection; the Protocol row was
 a drafting error, not evidence that the Manifest should grow a one-off function.
+
+**Historical disposition:** ADR-019 / §2.5 supersedes this negative capability for SQL contract
+0.1.3. This subsection preserves the 0.1.2 state only.
 
 H-13 excludes this deferred command from the active generated command table, OpenAPI operation
 set, sync/async client methods, and SQL/HTTP conformance vectors. One negative capability vector
@@ -153,6 +160,9 @@ assemble a list from base tables, unsafe views, repeated detail calls, or operat
 H-13 excludes the route from its generated command table, OpenAPI operation set, official clients,
 and success parity vectors. A hidden reserved-path responder supplies the negative `TQ501` vector.
 
+**Historical disposition:** ADR-019 / §2.5 supersedes this negative capability for SQL contract
+0.1.3. This subsection preserves the 0.1.2 state only.
+
 #### Exact single-enqueue response
 
 For `POST /taskq/v1/queues/{queue}/jobs`, the response field set is exact:
@@ -167,9 +177,83 @@ especially when the outcome is `existed`. Authorized job detail is the sole HTTP
 stored timestamp and current row projection. H-13's independent catalog oracle asserts this exact
 field set.
 
+### 2.5 Safe read-model activation (document revision 1.0.5)
+
+#### Queue-scoped job pages (H-08)
+
+`GET /taskq/v1/jobs` is active only with exactly these query parameters:
+
+```text
+queue=<^[a-z0-9_]{1,57}$>&view=<ready|running|finished>&limit=<1..100>&cursor=<optional>
+```
+
+`queue` and `view` are required; `limit` defaults to 50. Unknown or repeated scalar query keys,
+an invalid queue/view/limit, or a malformed cursor return `TQ422`. The facade authenticates and
+authorizes `read(queue)` before parsing the cursor or invoking SQL. Global `taskq:read` may use the
+same one-queue command, but does not activate an unfiltered or multi-queue form.
+
+The success data is exactly:
+
+```json
+{"as_of":"database timestamp","items":[{"job_id":"uuid","job_type":"text","status":"text","outcome":"text|null","priority":0,"attempt_count":0,"failure_count":0,"max_attempts":1,"created_at":"timestamp","scheduled_at":"timestamp","started_at":"timestamp|null","finished_at":"timestamp|null","updated_at":"timestamp"}],"next_cursor":"base64url|null"}
+```
+
+No list item contains queue, payload, headers, worker identity, attempt id, fence, cancellation
+reason, error, result, progress, event data, or arbitrary JSON. An authorized missing queue is
+`TQ001`; an authorized empty view is successful with `items=[]` and `next_cursor=null`.
+
+The opaque cursor is unpadded base64url, at most 1,366 ASCII characters. Its decoded canonical JSON
+is at most 1,024 bytes and contains only `v=1`, `queue`, `view`, and the final view's complete sort
+tuple. The server validates and binds every field before SQL; a cursor for another queue or view is
+`TQ422`. It is not an authorization credential and never contains SQL.
+
+| View | Membership at database `as_of` | Keyset order | Capability / inactive disposition |
+|---|---|---|---|
+| `ready` | `queued`, no pending cancellation, scheduled no later than `as_of` | `priority ASC, scheduled_at ASC, id ASC` | `read_model_list_ready`; absent → `TQ501`, reason `read_model_view_inactive`, view `ready` |
+| `running` | `running` | `started_at DESC, id DESC` | `read_model_list_running`; absent → `TQ501`, reason `read_model_view_inactive`, view `running` |
+| `finished` | `succeeded`, `failed`, or `cancelled` | `finished_at DESC, id DESC` | `read_model_list_finished`; absent → `TQ501`, reason `read_model_view_inactive`, view `finished` |
+
+`as_of` is a membership boundary for one response, not a cross-page snapshot/export promise.
+`scheduled`, cancellation-pending, `blocked`, failed-only, arbitrary status/job-type/time/text, and
+payload filters have no success surface. Each future view requires a new exact cursor, projection,
+index, plan, authorization, and contract amendment.
+
+#### Queue profile and conditional update (H-11)
+
+`GET /taskq/v1/queues/{queue}` requires `read(queue)` and returns HTTP 200 data exactly:
+
+```text
+name, profile_version, default_priority, default_lease_seconds, default_max_attempts,
+default_backoff_mode, default_backoff_base, default_backoff_cap, retention_hours,
+failed_retention_hours, max_depth, notify_enabled, paused
+```
+
+It also returns `ETag: "taskq-profile-<profile_version>"`. `profile_version` is a positive decimal
+integer. `paused` is current operational state only; it makes no future claim promise. The route
+never returns pause reason, workers, IAM, host metadata, or raw queue data. An authorized missing
+queue is `TQ001`.
+
+The canonical `PUT /taskq/v1/queues/{queue}` success data is that same profile projection and ETag.
+Its `If-Match` behavior is fixed:
+
+| Header case | Existing queue | Missing queue |
+|---|---|---|
+| absent | Existing idempotent `ensure_queue`: `updated` or `unchanged` | Bootstrap create: `created` |
+| malformed, weak, wildcard, or non-positive tag | `TQ422` | `TQ422` |
+| exact `"taskq-profile-N"` | Atomically update iff `N` is current; success `updated` | `TQ001` — a conditional update cannot create |
+| stale valid tag | `TQ409`, `retryable=false`, reason `profile_version_conflict`, details exactly `{ "current_version": N }` | `TQ001` |
+
+The stale response contains no request echo, profile, queue configuration, or other row data. It
+reuses the established `TQ409` conflict family; no registry code is added. The exact header grammar
+is `^"taskq-profile-([1-9][0-9]*)"$`.
+
+H-13 generates the two commands, models, OpenAPI, clients, and parity vectors from this amendment.
+The SQL client receives the same fixed page/profile projections and per-view outcomes. It never gains
+a wider projection by bypassing HTTP.
+
 ## 3. Stage-0 exit status (ADR-005 checklist)
 
-- Draft §1 decisions: accepted (10/10). Holes: H-01..H-07, H-09, H-10, H-13 closed above; H-08/H-11/H-12 explicitly deferred with typed negative capabilities.
+- Draft §1 decisions: accepted (10/10). Holes: H-01..H-11 and H-13 closed above; H-08 views retain typed per-view negative capabilities until their individual B9 gates pass; H-12 remains deferred.
 - Exact SQL signatures/composites/grants/SQLSTATEs per command: the 0.1 Function Manifest (same pass).
 - Parity suite, OpenAPI fence-redaction, and compatibility-window tests: harness T6/T8 obligations, pre-wired in the manifest's per-function test ids.
 - Legacy Diverse/QDarte paths remain host adapters with a removal milestone; they define no second protocol.

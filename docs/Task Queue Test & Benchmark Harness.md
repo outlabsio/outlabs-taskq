@@ -107,7 +107,7 @@ The installed command runs implemented scenarios, for example
 | B6 | Retry storm (mass failure + backoff) | requeue/s, claim p99 during storm, index growth | backoff engine, §13 index churn model |
 | B7 | Saturated concurrency cap | claim p99 with cap hot, overshoot count (**must be 0**) | try-lock admission cost (§5.3 honesty note) |
 | B8 | NOTIFY wake latency vs poll-only | enqueue→claim-start p50/p99 both modes | feature 06 latency claim |
-| B9 | Stats under depth (1M backlog) | `queue_stats` / `metrics()` latency | §12.1 cost note; dashboard safety |
+| B9 | Stats and read models under depth (1M backlog) | `queue_stats` / `metrics()` plus each H-08 view's latency, structural plan, and write-path comparison | §12.1 cost note; ADR-019 per-view activation safety |
 | B10 | Archive sweep + partition drop under live load | sweep rows/s, claim p99 impact | §13 archival non-interference |
 | B11 | Embedded-mode overhead (feature 14) | API request p99 with/without embedded worker under load | pool-split sizing defaults |
 | B12 | Migration + `verify` on a populated schema (T8 companion) | lock duration, service disruption during migrate | ADR-004 upgrade windows |

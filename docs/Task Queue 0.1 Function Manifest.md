@@ -1,6 +1,6 @@
 # taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.2 — 2026-07-18. Closes R2-08 and incorporates ADR-012/013: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.2 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.3 — 2026-07-20. Closes R2-08 and incorporates ADR-012/013/019: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.3 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -9,7 +9,7 @@
 
 Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
 
-Composite types frozen for 0.1 (H-02; additive evolution only). Contract 0.1.2 has the following complete `claimed_job` shape; `lease_seconds` is appended and no existing attribute moves:
+Composite types frozen for 0.1 (H-02; additive evolution only). Contract 0.1.3 has the following complete `claimed_job` shape; `lease_seconds` is appended and no existing attribute moves:
 
 ```sql
 CREATE TYPE taskq.claimed_job AS (
@@ -24,6 +24,25 @@ CREATE TYPE taskq.claimed_job AS (
 CREATE TYPE taskq.claim_batch AS (
     state text,                 -- claimed | empty | paused | unknown_queue | unavailable
     jobs  taskq.claimed_job[]   -- non-empty only when state = 'claimed'
+);
+CREATE TYPE taskq.job_list_item AS (
+    job_id uuid, job_type text, status text, outcome text, priority smallint,
+    attempt_count smallint, failure_count smallint, max_attempts smallint,
+    created_at timestamptz, scheduled_at timestamptz, started_at timestamptz,
+    finished_at timestamptz, updated_at timestamptz
+);
+CREATE TYPE taskq.job_page AS (
+    as_of timestamptz, items taskq.job_list_item[], next_after jsonb
+);
+CREATE TYPE taskq.queue_profile AS (
+    name text, profile_version bigint,
+    default_priority smallint, default_lease_seconds int, default_max_attempts smallint,
+    default_backoff_mode text, default_backoff_base int, default_backoff_cap int,
+    retention_hours int, failed_retention_hours int, max_depth int,
+    notify_enabled boolean, paused boolean
+);
+CREATE TYPE taskq.queue_profile_update AS (
+    result text, profile taskq.queue_profile, current_version bigint
 );
 -- taskq.claimed_job and taskq.settle_result: as spec §4, with settle_result.result
 -- gaining the 'settle_conflict' value (H-03).
@@ -380,6 +399,33 @@ LANGUAGE sql STABLE SECURITY DEFINER AS $$
      WHERE c.key = 'stats_snapshot' AND (p_queue IS NULL OR q.key = p_queue)
 $$;
 
+-- ADR-019 / H-08. p_after is the already-validated typed cursor object, never
+-- an opaque HTTP token or SQL fragment. p_view is exactly ready|running|finished;
+-- p_limit is 1..100. Each view checks its named capability and returns TQ501
+-- while inactive. The page is queue-scoped and contains only taskq.job_list_item.
+-- DIRECT SQL PARITY RULE: a direct SQL client must not get a wider projection
+-- merely because it bypasses HTTP.
+-- Function identity (normative body in §4.1):
+-- taskq.list_jobs(p_queue text, p_view text, p_limit int DEFAULT 50,
+--                 p_after jsonb DEFAULT NULL) RETURNS taskq.job_page
+
+-- ADR-019 / H-11. The exact observer-safe profile, never a raw queues row.
+CREATE FUNCTION taskq.get_queue_profile(p_queue text)
+RETURNS taskq.queue_profile
+LANGUAGE sql STABLE SECURITY DEFINER AS $$
+    SELECT ROW(
+        q.name, q.profile_version,
+        q.default_priority, q.default_lease_seconds, q.default_max_attempts,
+        q.default_backoff_mode, q.default_backoff_base, q.default_backoff_cap,
+        q.retention_hours, q.failed_retention_hours, q.max_depth,
+        q.notify_enabled, q.paused_at IS NOT NULL
+    )::taskq.queue_profile
+    FROM taskq.queues q WHERE q.name = p_queue
+$$;
+ALTER FUNCTION taskq.get_queue_profile(text) OWNER TO taskq_owner;
+REVOKE EXECUTE ON FUNCTION taskq.get_queue_profile(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION taskq.get_queue_profile(text) TO taskq_observer;
+
 CREATE FUNCTION taskq.get_contract_meta()
 RETURNS TABLE (contract_version text, capabilities jsonb)
 LANGUAGE sql STABLE SECURITY DEFINER AS $$
@@ -394,6 +440,41 @@ $$;
 -- (spec §12.1; workflow_status is 0.2).
 ```
 
+### 4.1 ADR-019 read-model rules (normative body requirements)
+
+`taskq.list_jobs(text, text, int, jsonb)` is `STABLE SECURITY DEFINER`, owned
+by `taskq_owner`, has the universal pinned search path, PUBLIC execute revoked,
+and EXEC granted only to `taskq_observer`. It validates the queue grammar,
+`p_view ∈ ready|running|finished`, `p_limit ∈ 1..100`, and the typed `p_after`
+object before reading `taskq.jobs`. Bad inputs or a tuple not matching the
+queue/view are `TQ422`. Each view first requires its exact capability:
+`read_model_list_ready`, `read_model_list_running`, or
+`read_model_list_finished`; an inactive one raises `TQ501` with typed reason
+`read_model_view_inactive` and the requested view.
+
+It captures database `as_of` once and returns exactly one `taskq.job_page`.
+`items` contains at most `p_limit` `taskq.job_list_item` rows; `next_after` is
+the full typed sort tuple for the next page or NULL. It selects `p_limit + 1`
+candidates from exactly one finite view:
+
+| View | Predicate | Order / `next_after` tuple |
+|---|---|---|
+| `ready` | `status='queued' AND cancel_requested_at IS NULL AND scheduled_at <= as_of` | `priority ASC, scheduled_at ASC, id ASC` |
+| `running` | `status='running'` | `started_at DESC, id DESC` |
+| `finished` | `status IN ('succeeded','failed','cancelled')` | `finished_at DESC, id DESC` |
+
+No function branch selects payload, headers, worker identity, attempt id,
+fence, cancellation reason, error, result, progress, events, or any JSON
+column. A missing queue returns an empty SQL page; the facade maps an
+authorized missing queue to `TQ001` after its own queue existence policy.
+Direct SQL returns precisely this page composite: **a direct SQL client must
+not get a wider projection merely because it bypasses HTTP.**
+
+`taskq.get_queue_profile(text)` is the only observer profile projection. It
+returns NULL/no row for an unknown queue and its exact `taskq.queue_profile`
+type above for a known one. `paused` is `paused_at IS NOT NULL`; pause reason,
+workers, IAM, host metadata, and raw queue fields never appear.
+
 ## 5. Operator functions — EXEC `taskq_operator`
 
 | Function | Body | Raises / result |
@@ -402,7 +483,23 @@ $$;
 | `taskq.redrive_job(job_id, actor, reset_progress)` | spec §5.9 | TQ409 (`not_redrivable` / `idempotency_collision`) |
 | `taskq.expire_job(job_id, actor)` | spec §5.9 (v1.6 targeted `reap_job`) | typed `not_running` |
 | `taskq.expire_worker_leases(worker_id, actor)` | spec §5.9 (v1.6) | `{matched,reaped,skipped}` |
-| `taskq.ensure_queue(name, profile jsonb, actor)` | upsert `taskq.queues` from validated profile fields; unknown field → TQ422; returns `created|updated|unchanged` + canonical profile | TQ422 |
+| `taskq.ensure_queue(name, profile jsonb, actor)` | existing three-argument bootstrap identity; upsert validated canonical profile, incrementing `profile_version` only on actual canonical-profile change; returns `created|updated|unchanged` + canonical profile including version | TQ422 |
+| `taskq.update_queue_profile(name, profile jsonb, actor, expected_version bigint)` | validates the same canonical fields, locks the queue row, and applies the profile only when `expected_version` is current; returns `updated` + profile/new version or `profile_version_conflict` + current version only | typed conflict → HTTP TQ409; TQ001 / TQ422 |
+
+### 5.1 ADR-019 conditional profile-update identity
+
+`taskq.update_queue_profile(text, jsonb, text, bigint)` returns
+`taskq.queue_profile_update`. It is `SECURITY DEFINER`, owned by
+`taskq_owner`, has the universal pinned search path, PUBLIC execute revoked,
+and EXEC granted only to `taskq_operator`. It rejects invalid queue/profile or
+non-positive expected version with `TQ422`; it returns no row only for an
+unknown queue (`TQ001` at the public boundary). Under the same row lock used by
+`ensure_queue`, a mismatch returns
+`('profile_version_conflict', NULL, current_version)` without mutation. A match
+applies the same validation/normalization as `ensure_queue`, increments the
+version only for a real canonical-profile change, and returns
+`('updated', profile, new_version)`. This function never returns a request
+echo, pause reason, worker data, or a raw queue row.
 | `taskq.pause_queue(name, actor, reason)` / `resume_queue(name, actor)` | set/clear `paused_at`; idempotent (`already_*`); TQ001 unknown queue; event emitted | TQ001 |
 | `taskq.set_concurrency_limit(key, max_running, actor)` | upsert `concurrency_limits`; `max_running >= 0` else TQ422; returns `created|updated|unchanged` | TQ422 |
 | `taskq.request_worker_shutdown(worker_id, queue, actor)` | stamp `shutdown_requested_at` for exact worker / queue subscribers / fleet (both NULL); returns matched count | — |
@@ -510,7 +607,7 @@ END $$;
 
 ## 7. Explicitly absent from the 0.1 migration
 
-`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, **every form of `list_jobs`**, and every 0.2/0.3 composite field. No `list_jobs` function or safe list projection exists in SQL contract 0.1.2; ADR-017 defers the HTTP operation to H-08's designed read-model slice. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.3 contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
 
 ## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
 
@@ -523,9 +620,9 @@ Resolved when migration 0001 + the harness first met live PostgreSQL (42/42 cont
 5. **Queue/worker-level operator verbs (pause/resume/shutdown-request/set-limit) emit no `job_events` row** — `job_events.job_id` is NOT NULL; their audit is the typed result + caller logging (facade actor / CLI).
 6. **Verb-aware replay includes the reaper:** an attempt settled as `expired` answers any worker settle with `settle_conflict`.
 7. 0.1 single-`enqueue` rejects `p_depends_on`/`p_workflow_id` with `TQ501` (capability gate); bulk specs carrying dependency fields are `TQ422` with the input index.
-8. **No operator-minimal `list_jobs` exists in 0.1.** ADR-017 corrects the adopted Protocol
+8. **Historical 0.1.2 posture:** no operator-minimal `list_jobs` existed. ADR-017 corrected the adopted Protocol
    drafting error: SQL contract 0.1.2 contains neither a `list_jobs` function nor a safe general-list
-   projection. Its reserved HTTP path is a typed negative capability only until H-08 lands.
+   projection. ADR-019 / contract 0.1.3 supersedes that posture with only §4.1's exact finite page.
 
 ## 9. Contract patch 0.1.1 — ADR-012 (2026-07-18)
 
@@ -558,3 +655,25 @@ Migration `0003_contract_0_1_2.sql` applies one additive projection correction w
 3. **Clock boundary.** Workers schedule heartbeats from `lease_seconds` on a monotonic timer and never compute a duration as `lease_expires_at - local_now()`.
 4. **Version state.** Migration 0003 updates `taskq.meta['contract_version']` from JSON string `"0.1.1"` to `"0.1.2"`; capabilities and Protocol major v1 are unchanged.
 5. **Required tests.** `verify()` and the independent catalog-parity projection assert the ordered 15-attribute composite. T2 proves queue-default, task-stamped, and explicit claim-override durations match the job row, attempt row, and returned projection. T8 proves a fresh chain and the full immutable `0001 → 0002 → 0003` upgrade on PostgreSQL 16 and 18.
+
+## 11. Contract patch 0.1.3 — ADR-019 (2026-07-20)
+
+Migration `0004_read_models.sql` is the sole implementation vehicle for these additive changes:
+
+1. **Profile version.** It adds `taskq.queues.profile_version bigint NOT NULL DEFAULT 1` and
+   replaces the existing `ensure_queue(text,jsonb,text)` body without changing its identity. The
+   version increments only when canonical profile fields change, never for pause/resume.
+2. **Exact observer surface.** It creates the `job_list_item`, `job_page`, `queue_profile`, and
+   `queue_profile_update` composites plus hardened observer `list_jobs` and `get_queue_profile`
+   functions defined in §4/§4.1. No observer base-table SELECT grant is added.
+3. **Conditional profile update.** It creates operator
+   `update_queue_profile(text,jsonb,text,bigint)`, returning only `updated` + canonical profile/new
+   version or `profile_version_conflict` + current version. Existing `ensure_queue` stays callable.
+4. **Per-view gate and indexes.** The migration records the three named H-08 capabilities. It may
+   activate only a view with its committed PG16 and PG18 B9 evidence; every other view remains
+   `TQ501`. Any new queue-leading running/finished index is likewise conditional on that evidence;
+   `ready` begins with the existing claim index.
+5. **Version and parity.** It updates `taskq.meta['contract_version']` to `"0.1.3"`. `verify()`,
+   catalog parity, fresh install, and the full `0001 → 0002 → 0003 → 0004` upgrade chain must assert
+   every new type, function, grant, column, capability, index, and per-view negative disposition on
+   PostgreSQL 16 and 18. Direct SQL and HTTP must return the same bounded projections.

@@ -81,6 +81,14 @@ Versioned, read-only, **`read`-scoped** (queue-scoped per ADR-006) diagnostics e
 
 `taskq inspect --json` shares the same read models (one contract, three consumers: CLI, dashboard, MCP-later). The frontend itself stays **out of taskq** in 0.x: first consumer is a page in an existing host admin panel (DiverseAdminPanel / OutlabsAuthUI pattern); a bundled dashboard is a 0.3+ question, only after the JSON contract has survived real use. Staging: stats/jobs/detail endpoints are cheap and belong in **0.1** (they are how the pilot gets debugged); storage stats with the archive in 0.3.
 
+
+**ADR-019 reactivation:** the table above is historical direction, not the active
+H-08/H-11 contract. The [Read Model Specification](./Task%20Queue%20Read%20Model%20Specification.md)
+and Protocol revision 1.0.5 now own the exact queue-profile GET, finite
+queue-scoped job-page views, profile ETag/conditional-update behavior, field
+redaction, cursor, and B9 plan gates. The old broad `jobs?queue=&status=&job_type=`
+sketch must not be implemented. Unproven views remain typed `TQ501`; the UI
+waits for the accepted implementation, not merely this design decision.
 ---
 
 ## 5. Server-sent events (PROPOSAL — an SSE bridge over the events ledger, 0.2)

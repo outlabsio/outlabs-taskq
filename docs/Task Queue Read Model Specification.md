@@ -1,16 +1,17 @@
 # taskq — Read Model Specification
 
-> **Status:** Tier-3 proposal — 2026-07-20. It prepares the H-08/H-11
-> reactivation decision; it changes no 0.1 contract, SQL function, migration,
-> generated client, facade route, or deployed host behavior. The current
-> `TQ501` dispositions remain authoritative until an ADR and the docs-first
-> contract amendments described in §9 are accepted.
+> **Status:** Tier-3 accepted design — 2026-07-20, by
+> [ADR-019](./adr/ADR-019-safe-read-model-reactivation.md). Protocol document
+> revision 1.0.5 and Function Manifest / SQL contract 0.1.3 adopt this design
+> docs-first. It still changes no deployed host behavior: migration 0004,
+> generated clients, facade routes, and per-view activation remain subject to
+> the implementation and B9 gates below.
 >
 > **Authority:** [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md)
 > H-07/H-08/H-11, the [0.1 Function Manifest](./Task%20Queue%200.1%20Function%20Manifest.md),
-> ADR-005/006/010/011/015/017, and R2-16. This document yields to each of
-> them. It is a design for a future additive contract revision, not permission
-> to expose the observer views or base tables.
+> ADR-005/006/010/011/015/017/019, and R2-16. This document yields to each of
+> them. It authorizes only the contract-defined implementation path, never an
+> observer base-table grant or a wider host-side read path.
 
 ## 1. Purpose and boundary
 
@@ -22,7 +23,7 @@ TaskQ 0.1 already has two safe read surfaces:
 
 The remaining visibility gap is deliberately deferred: a bounded job browser
 (H-08) and a non-mutating queue-profile read with an honest update-precondition
-story (H-11). This proposal defines the smallest useful activation slice.
+story (H-11). This design defines the smallest useful activation slice.
 
 It does **not** design a frontend, storage/archive statistics, worker listing,
 attempt/event timelines, payload search, a general reporting query language,
@@ -58,7 +59,7 @@ ADR-018; it is not part of this slice.
 
 ### 3.1 Canonical command
 
-The proposed reactivation keeps the reserved identity and adds no alias:
+The accepted reactivation keeps the reserved identity and adds no alias:
 
 ```text
 GET /taskq/v1/jobs?queue={queue}&view={ready|running|finished}&limit={1..100}&cursor={opaque?}
@@ -131,7 +132,7 @@ names, counts, or cursor positions in either case.
 
 ### 4.1 Read projection
 
-The proposed active route is the reserved identity:
+The active route is the reserved identity:
 
 ```text
 GET /taskq/v1/queues/{queue}
@@ -160,7 +161,7 @@ outcome. No call to the operator-only mutating `ensure_queue` may serve a GET.
 ### 4.2 Version and `If-Match`
 
 H-11 cannot honestly reactivate a profile read while leaving interactive
-profile edits with an unspecified lost-update story. The recommended design is:
+profile edits with an unspecified lost-update story. The accepted design is:
 
 1. Add `profile_version bigint NOT NULL DEFAULT 1` to `taskq.queues` in an
    additive migration. It increments exactly when one of the canonical profile
@@ -193,12 +194,12 @@ implementation to make `If-Match` silently optional or silently ignored.
 
 The activation package must be docs-first and append-only:
 
-1. ADR decision and Protocol document revision activate H-08/H-11 and replace
-   their current negative-capability entries.
-2. Function Manifest minor revision defines exact input/output composites,
-   grants, pinned search paths, typed SQLSTATEs, cursor validation, and the
-   two new functions above before a migration is written.
-3. The next immutable migration adds `profile_version`, the new functions, and
+1. ADR-019, Protocol revision 1.0.5, and Manifest / SQL contract 0.1.3 replace
+   the former H-08/H-11 blanket negative capabilities in this docs-only commit.
+2. The Manifest defines exact input/output composites, grants, pinned search
+   paths, typed outcomes, cursor validation, and the two new functions before
+   migration 0004 is written.
+3. Immutable migration `0004_read_models.sql` adds `profile_version`, the new functions, and
    only the indexes that pass the benchmark gate. Existing function identities
    and the three-argument `ensure_queue` remain intact.
 4. `verify()` and the catalog-parity matrix assert the new column, functions,
@@ -211,7 +212,7 @@ components into the opaque cursor; SQL callers receive the same bounded page,
 not an observer SELECT grant on a base table. A direct SQL client must not get
 a wider projection merely because it bypasses HTTP.
 
-## 6. Required evidence before acceptance
+## 6. Required implementation acceptance evidence
 
 ### Security and parity
 
@@ -267,29 +268,22 @@ The following are not implied by this work:
 Each needs its own bounded projection, authorization decision, SQL support,
 plan evidence, and contract amendment.
 
-## 8. Implementation sequence after approval
+## 8. Implementation sequence after this docs-first amendment
 
-1. Land the ADR, Protocol revision, Manifest revision, this specification's
-   accepted status, and a board task in a docs-only commit.
-2. Land one immutable migration with fresh-install and 0001→current upgrade
+1. Land immutable migration `0004_read_models.sql` with fresh-install and 0001→current upgrade
    proof on PG16 and PG18.
-3. Add typed protocol models, one generated command source, SQL transport,
+2. Add typed protocol models, one generated command source, SQL transport,
    facade, and sync/async client support with conformance/parity tests.
-4. Add the B9 plan gate and CI evidence, then conduct a targeted independent
+3. Add the B9 plan gate and CI evidence, then conduct a targeted independent
    review before activating either deferred capability in a host.
 
 No Stage-4 retirement observation, host producer/consumer behavior, UI work,
 or side-effecting lane is authorized by these preparation steps.
 
-## 9. Decision request
+## 9. Accepted decision record
 
-The next decision should be a new ADR (provisionally **ADR-019**) that either:
-
-- accepts this minimum H-08/H-11 package, with the named finite views and
-  conditional profile update; or
-- narrows/reorders a view based on measured write cost while keeping every
-  rejected capability visibly `TQ501`.
-
-On acceptance, it must authorize an additive Protocol v1 document revision and
-Function Manifest revision before implementation. Until then, the existing
-Protocol v1 revision 1.0.4 and Function Manifest 0.1.2 are unchanged.
+ADR-019 accepts this minimum H-08/H-11 package and binds Protocol document
+revision 1.0.5, Function Manifest / SQL contract 0.1.3, and migration 0004.
+It also binds the per-view `TQ501` fallback, the stale-profile `TQ409` shape,
+and the SQL-parity rule. Measured write cost may keep a view inactive, but may
+not substitute an unbounded query or silently remove its negative capability.
