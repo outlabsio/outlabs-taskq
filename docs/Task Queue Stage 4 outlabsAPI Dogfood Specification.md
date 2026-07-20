@@ -351,10 +351,21 @@ The probe is side-effect-free and has two modes:
 2. `hold`: signals that the handler started and waits, allowing the deployment process to be
    terminated deliberately.
 
-The required forced-failure drill uses `hold`: terminate the old API process, start the replacement,
-allow the database lease to expire and the housekeeper to reap it, then prove the **same job id** is
-claimed under a new attempt and reaches `succeeded`. Evidence includes attempts/events, budget use,
-worker presence, and zero manual DML. The probe flag is disabled after the drill.
+The Stage-4 rolling-replacement drill uses `hold` and follows the normal graceful worker contract:
+start the replacement, stop the old API process inside platform grace, and allow the old worker to
+release its live async handler as `worker_shutdown`. That release is budget-free; the **same job id**
+must then be claimed by a different worker process under a new attempt and reach `succeeded`.
+Evidence includes attempts/events, actor transition, budget use, worker presence, platform-grace
+timing, and zero manual DML. The probe flag is disabled after the drill.
+
+A graceful rolling replacement cannot honestly prove lease-expiry recovery because the worker
+settles the held job before the lease expires. A true lease-expiry/housekeeper-reap drill requires
+the owning process to be hard-killed or otherwise terminated past platform grace so it cannot
+release or settle the attempt. Before **any side-effecting lane** migrates, the future
+side-effecting-lane expansion slice owns a REQUIRED production hard-kill drill whose read-only
+oracle shows the first attempt `expired/lease_expired`, a `lease_expired` event, reclaim of the same
+job id by a different worker attempt, terminal convergence, correct budget arithmetic, and zero
+manual DML. The Stage-4 graceful-release evidence does not satisfy or waive that future gate.
 
 ## 7. Rollout and rollback
 
@@ -374,8 +385,9 @@ worker presence, and zero manual DML. The probe flag is disabled after the drill
 2. Prove old/new overlap yields no duplicate execution and old process drains within 20 seconds.
 3. Add `aerolineas` to the allowlist only after the first cycle is green.
 4. Repeat HTTP 202→canonical GET result and keyed replay evidence.
-5. Execute the controlled process-failure drill; S4-AUDIT owns this step and its evidence even though
-   it is scheduled during deployment cycle 2.
+5. Execute the graceful controlled-replacement drill described in §6; S4-AUDIT owns this step and
+   its evidence even though it is scheduled during deployment cycle 2. The separate hard-kill
+   lease-expiry drill remains owned by the future side-effecting-lane expansion gate.
 
 ### 7.3 Rollback rehearsal
 
