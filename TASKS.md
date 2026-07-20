@@ -108,6 +108,18 @@ runtime bridge set and production rollback floor for the additional migration. D
 expose the list route/client until that authority, fresh/full-chain proofs, and SQL/HTTP parity are
 frozen.
 
+### S5-CQ-04 — approved H-11 revision number is already occupied by the bridge amendment
+
+**Blocking evidence:** the approved envelope correction names Protocol document revision `1.0.6` /
+amendment 13, but the current locked Protocol log already assigns revision `1.0.6` to ADR-020's
+supported-contract-set bridge (amendment 13 in the existing log). Reusing that revision would
+silently overwrite an accepted compatibility decision and make the document revision non-unique.
+
+**Decision required:** confirm that the approved H-11 envelope correction is the next additive
+Protocol revision **1.0.7** (with the next sequential amendment-log number), retaining every
+approved envelope/ETag/drafting-error condition. No wire-major or SQL identity changes follow from
+this numbering correction. Do not reuse or edit the already accepted 1.0.6 amendment.
+
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
 **Blocking evidence:** before any canary enqueue, production was switched to taskq mode with only
