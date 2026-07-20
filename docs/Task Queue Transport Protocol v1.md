@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, and ADR-020 as compatibility-only document revision **1.0.6**. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, and ADR-021 as additive protocol document revision **1.0.7** / SQL contract 0.1.4. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -47,6 +47,11 @@
     runtime startup as exact membership in that runtime's declared supported SQL-contract set.
     The 0004 bridge set is `{0.1.2, 0.1.3}`. The database continues to report its exact revision;
     `/meta`, version-error shapes, command identities, outcomes, and wire-major are unchanged.
+14. **ADR-021 read-model conformance repairs:** protocol document revision 1.0.7 corrects the
+    existing H-11 `PUT` success envelope to `{ "profile": { ... } }` without changing its route or
+    command identity. SQL contract 0.1.4 / migration `0005_read_model_conformance.sql` corrects
+    direct-SQL `list_jobs` unknown-queue behavior; it adds no Protocol command, outcome, or
+    wire-major change.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -237,7 +242,17 @@ integer. `paused` is current operational state only; it makes no future claim pr
 never returns pause reason, workers, IAM, host metadata, or raw queue data. An authorized missing
 queue is `TQ001`.
 
-The canonical `PUT /taskq/v1/queues/{queue}` success data is that same profile projection and ETag.
+`GET /taskq/v1/queues/{queue}` remains the flat profile projection above. The canonical `PUT
+/taskq/v1/queues/{queue}` success data is instead exactly:
+
+```json
+{"profile":{"name":"...","profile_version":1,"default_priority":0,"default_lease_seconds":60,"default_max_attempts":1,"default_backoff_mode":"fixed","default_backoff_base":1,"default_backoff_cap":1,"retention_hours":24,"failed_retention_hours":168,"max_depth":1000,"notify_enabled":true,"paused":false}}
+```
+
+`profile` contains the same exact 13-field projection, including `profile_version`, and the
+successful response retains `ETag: "taskq-profile-<profile_version>"`. This wrapper is the shipped
+generated-command compatibility shape. The preceding flat-PUT statement in revision 1.0.5 was a
+drafting error; this amendment neither creates a second identity nor permits two success shapes.
 Its `If-Match` behavior is fixed:
 
 | Header case | Existing queue | Missing queue |

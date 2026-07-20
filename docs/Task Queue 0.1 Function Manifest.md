@@ -1,6 +1,6 @@
 # taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.3 — 2026-07-20. Closes R2-08 and incorporates ADR-012/013/019: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.3 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.4 — 2026-07-20. Closes R2-08 and incorporates ADR-012/013/019/021: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.4 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -447,7 +447,9 @@ by `taskq_owner`, has the universal pinned search path, PUBLIC execute revoked,
 and EXEC granted only to `taskq_observer`. It validates the queue grammar,
 `p_view ∈ ready|running|finished`, `p_limit ∈ 1..100`, and the typed `p_after`
 object before reading `taskq.jobs`. Bad inputs or a tuple not matching the
-queue/view are `TQ422`. Each view first requires its exact capability:
+queue/view are `TQ422`. It then establishes the queue exists before checking a
+view capability: an unknown queue raises the established `TQ001` marker for
+every view. Each existing-queue view then requires its exact capability:
 `read_model_list_ready`, `read_model_list_running`, or
 `read_model_list_finished`; an inactive one raises `TQ501` with typed reason
 `read_model_view_inactive` and the requested view.
@@ -465,9 +467,10 @@ candidates from exactly one finite view:
 
 No function branch selects payload, headers, worker identity, attempt id,
 fence, cancellation reason, error, result, progress, events, or any JSON
-column. A missing queue returns an empty SQL page; the facade maps an
-authorized missing queue to `TQ001` after its own queue existence policy.
-Direct SQL returns precisely this page composite: **a direct SQL client must
+column. An existing queue with an empty active view returns the fixed empty SQL
+page. Direct SQL and HTTP therefore share the same `unknown → TQ001`,
+`existing + inactive → TQ501`, and `existing + empty active → 200 empty`
+dispositions. Direct SQL returns precisely this page composite: **a direct SQL client must
 not get a wider projection merely because it bypasses HTTP.**
 
 `taskq.get_queue_profile(text)` is the only observer profile projection. It
@@ -607,7 +610,7 @@ END $$;
 
 ## 7. Explicitly absent from the 0.1 migration
 
-`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.3 contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.4 contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
 
 ## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
 
@@ -682,3 +685,24 @@ Migration `0004_read_models.sql` is the sole implementation vehicle for these ad
    through a prefix or version range. The 0004 bridge runtime declares `{0.1.2, 0.1.3}` while the
    pre-bridge `{0.1.2}` runtime continues to reject `0.1.3`. The database reports its exact revision;
    this rule adds no SQL function, grant, capability activation, or wire field.
+
+## 12. Contract patch 0.1.4 — ADR-021 (2026-07-20)
+
+Migration `0005_read_model_conformance.sql` is an immutable conformance repair:
+
+1. **Unknown queue before capability.** It replaces only the existing
+   `taskq.list_jobs(text,text,int,jsonb)` body. After public-input validation,
+   an unknown queue raises the established `TQ001` marker before any view-capability
+   check. Existing inactive views continue to raise `TQ501` with
+   `read_model_view_inactive`; existing empty active views return the fixed empty page.
+   No function identity, composite, grant, index, or error channel changes.
+2. **Version and evidence.** It updates `taskq.meta['contract_version']` to
+   `"0.1.4"`. `verify()`, catalog parity, fresh install, and the complete
+   `0001 → 0002 → 0003 → 0004 → 0005` chain assert the three-case vector on
+   PostgreSQL 16 and 18.
+3. **Supported runtime and activation floor.** The bridge runtime declares the closed set
+   `{0.1.2, 0.1.3, 0.1.4}`; the historical `{0.1.2}` runtime continues to reject
+   both newer metadata revisions. Activating any `read_model_*` capability requires
+   metadata 0.1.4 or later. This migration does not itself activate a view.
+4. **SQL parity.** A direct SQL client must not get a wider projection or a different
+   unknown/inactive/empty disposition merely because it bypasses HTTP.

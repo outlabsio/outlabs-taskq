@@ -27,7 +27,7 @@
 |---|---|
 | Stage | **Post-Stage-4 retirement eligibility · S4-POST-R3 independently accepted** — `main` is the authoritative deployed line; S4-POST-L1-SPEC freezes the legacy-tools observation rules before any producer removal |
 | Suite | 457/457 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
-| Contracts | Protocol v1 document revision 1.0.6 + Function Manifest 0.1.3 (+ ADR-012..020) |
+| Contracts | Protocol v1 document revision 1.0.7 + Function Manifest 0.1.4 (+ ADR-012..021) |
 | Next review | Targeted L1 eligibility acceptance must close the seven-day/two-deploy ledger and its independent-oracle limits before L2 producer removal |
 
 ## Now
@@ -48,7 +48,7 @@
 
 - [x] **S5-RM-02A · Generated SQL read-model transport** — added the H-08/H-11 typed domain models and the three manifest-backed commands to the same generated SQL transport ledger: observer `list_jobs`/`get_queue_profile` and operator `update_queue_profile`. The SQL transport remains capability-sized and decodes only the fixed composites; the closed registry and observer capability-surface oracle now pin all 33 commands and Protocol 1.0.6. No HTTP route, official HTTP-client method, capability activation, index, production migration, or B9 claim occurs in this increment.
 
-- [ ] **S5-RM-02B · Read-model facade, HTTP clients, parity, and B9** — generate the two HTTP read commands and conditional profile update from the Protocol 1.0.5 table; preserve authenticate → queue-authorize → cursor parsing; add independent SQL/HTTP/raw-row parity and redaction/cursor/conflict oracles; run per-view PG16/PG18 B9 gates and activate only proven views. The CI-shaped million-row PG18.3 and exact PG16.14 probes establish the initial structural disposition: `ready` is bounded on `jobs_claim_idx`; `running` and `finished` are structurally rejected because their existing non-queue-leading indexes require a sort and more than `limit + 1` candidates. The new report-only B9 runner captures per-view JSON plans/p95 plus claim/heartbeat samples: PG18.3 ready p95 0.411ms, claim 1.978ms, heartbeat 0.838ms; PG16.14 ready p95 2.601ms, claim 3.603ms, heartbeat 2.150ms. It proposes no index and therefore activates no capability. H-08 route/client work remains stopped at S5-CQ-03 and H-11 conditional PUT remains stopped at S5-CQ-02. Stop for targeted review before host adoption.
+- [ ] **S5-RM-02B · Read-model facade, HTTP clients, parity, and B9** — generate the two HTTP read commands and conditional profile update from the Protocol 1.0.7 table; preserve authenticate → queue-authorize → cursor parsing; add independent SQL/HTTP/raw-row parity and redaction/cursor/conflict oracles; run per-view PG16/PG18 B9 gates and activate only proven views. The CI-shaped million-row PG18.3 and exact PG16.14 probes establish the initial structural disposition: `ready` is bounded on `jobs_claim_idx`; `running` and `finished` are structurally rejected because their existing non-queue-leading indexes require a sort and more than `limit + 1` candidates. The new report-only B9 runner captures per-view JSON plans/p95 plus claim/heartbeat samples: PG18.3 ready p95 0.411ms, claim 1.978ms, heartbeat 0.838ms; PG16.14 ready p95 2.601ms, claim 3.603ms, heartbeat 2.150ms. It proposes no index and therefore activates no capability. ADR-021 resolves the H-11 response envelope and `list_jobs` unknown-queue contract before migration 0005; facade/client activation still stops for targeted review before host adoption.
 
 - [x] **S4-POST-F01 · Coolify build-secret containment** — every configured API (39) and worker (21) variable is runtime-only in Coolify, so no runtime secret is available during image build; the Dockerfiles contain no secret `ARG` instruction. The restricted runtime PostgreSQL login was re-proven, the runtime DB credential plus host auth-signing and documentation secrets were rotated, API rollout health/public health passed, and the worker replacement started without a recorded deployment failure. The new deployment transcripts contain neither an affected environment-variable name nor a Docker build-argument record; deployment-log access remains restricted. Host evidence is recorded in `outlabsAPI` as `docs/taskq-s4-post-f01-build-secret-remediation.md`. The owner explicitly accepted deferral of Redis, Umami, Telegram, and unused `TOOLS_API_KEY` cleanup for this low-value host; the record makes no claim those older credentials are invalidated. No taskq SQL, wire, capability, or application-source change occurred.
 
@@ -119,6 +119,13 @@ silently overwrite an accepted compatibility decision and make the document revi
 Protocol revision **1.0.7** (with the next sequential amendment-log number), retaining every
 approved envelope/ETag/drafting-error condition. No wire-major or SQL identity changes follow from
 this numbering correction. Do not reuse or edit the already accepted 1.0.6 amendment.
+
+**Resolution:** ADR-021 records the approved correction as Protocol document revision 1.0.7 /
+amendment 14. It keeps the existing generated `{"profile": {...}}` PUT response as the single
+canonical success shape, leaves GET flat, preserves the ETag/If-Match matrix, and records the
+revision-1.0.5 flat-PUT statement as a drafting error. The same docs-first ADR reserves Manifest /
+SQL contract 0.1.4 and immutable migration 0005 for `list_jobs` existence-before-capability
+conformance; no 0004 edit or new wire identity is authorized.
 
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
