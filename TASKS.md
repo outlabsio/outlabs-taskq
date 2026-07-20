@@ -91,6 +91,23 @@ separately gated deployment decision after the bridge is both deployed and the
 rollback baseline; it is not authorized by S5-RM-01. The runtime decides exact
 membership from the database-reported version, with no wire change.
 
+### S5-CQ-03 — active H-08 list function cannot distinguish an unknown queue from an empty view
+
+**Blocking evidence:** Protocol v1 §2.5 requires an authorized missing queue to return `TQ001`,
+and requires direct SQL and HTTP to share the same bounded-page semantics. Immutable migration 0004's
+`taskq.list_jobs(text,text,integer,jsonb)` instead checks the per-view capability and then queries
+`taskq.jobs` without establishing that `taskq.queues.name = p_queue` exists. Once a view capability
+is active, an unknown authorized queue therefore returns a successful empty page. A facade-side
+`get_queue_profile()` preflight would make HTTP differ from direct SQL and would be an impermissible
+workaround.
+
+**Decision required:** authorize a docs-first repair path: a new Manifest/SQL-contract revision and
+immutable migration 0005 which keeps the `list_jobs` identity and fixed page composite but raises
+typed `TQ001` for an unknown queue before the capability gate/query. The decision must define the
+runtime bridge set and production rollback floor for the additional migration. Do not activate or
+expose the list route/client until that authority, fresh/full-chain proofs, and SQL/HTTP parity are
+frozen.
+
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
 **Blocking evidence:** before any canary enqueue, production was switched to taskq mode with only
