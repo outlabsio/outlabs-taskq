@@ -316,8 +316,9 @@ allow_production=true
 ```
 
 The deployment platform's application Stop Grace Period is configured to **35 seconds**, at least
-the 30-second ASGI graceful timeout and above the 20-second soft stop. S4-AUDIT records the live
-platform value and a normal-deploy transcript proving the process drains inside it.
+the 30-second ASGI graceful timeout and above the 20-second soft stop. S4-03 recorded a normal
+deployment whose old-container removal completed in 25.434478 seconds; S4-AUDIT independently
+accepts that transcript.
 
 Production must supply a measured database connection ceiling and a reserve covering the host's own
 SQL/OutLabs pools plus platform headroom. Runtime construction refuses an over-budget estimate. The
@@ -409,8 +410,8 @@ other legacy queue is removed in Stage 4.
 - role membership, connection class, server version, measured connection ceiling, SSL, and
   backup/durability posture are recorded without credentials; and
 - production pre-deploy commands are idempotent and runtime auto-migration remains off; and
-- the live platform Stop Grace Period is recorded at 35 seconds, with practical drain proof deferred
-  to the S4-AUDIT normal-deploy transcript.
+- the live platform Stop Grace Period is recorded at 35 seconds; S4-03's normal-deploy transcript
+  completed old-container removal in 25.434478 seconds and remains subject to S4-AUDIT acceptance.
 
 ### S4-02 — disabled-by-default host integration
 
@@ -448,6 +449,12 @@ other legacy queue is removed in Stage 4.
 - health and synchronous-tool endpoints each answer within five seconds while an embedded job runs;
 - shutdown releases/drains inside platform grace; and
 - poll-only recovery works after database disconnect without correctness sleeps.
+
+Executed S4-03 evidence records all of these rows. The production drain used job
+`019f7f21-59e3-7683-8a77-bc875a5c49bf`: the replacement became healthy before the old container
+was removed, removal completed in 25.434478 seconds, and the same job reached `succeeded` on attempt
+2 with zero failures and no manual DML. A subsequent healthy deployment applied
+`TASKQ_DOGFOOD_PROBE_ENABLED=false`; the live registry reports the private probe absent.
 
 ### S4-AUDIT — production completion
 
