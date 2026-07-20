@@ -60,3 +60,4 @@ Two living docs: [`TASKS.md`](../TASKS.md) (repo root — the task board, cold-s
 3. **Third-party queue projects are never named** anywhere in this repo — generic descriptors only (standing rule since the initial commit).
 4. Route/URL sketches outside the Protocol doc are illustrative by definition.
 5. The `taskq_worker`/`taskq_admin` names in older passages read as "the relevant capability role" (ADR-010/011).
+| [Read Model Specification](./Task%20Queue%20Read%20Model%20Specification.md) | Proposed H-08/H-11 queue-profile and finite job-page activation, authorization, cursor, index, and acceptance evidence | Tier-3 proposal only; current `TQ501` dispositions remain canonical until a new ADR and contract amendments are accepted |
