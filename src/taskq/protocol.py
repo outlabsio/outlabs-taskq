@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.6"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.7"
 T = TypeVar("T")
 
 
@@ -971,7 +971,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.list_jobs(text,text,integer,jsonb)",
             _OBSERVER,
             ("ok",),
-            (TqCode.VALIDATION, TqCode.CAPABILITY),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.CAPABILITY),
         ),
         CommandName.GET_CONTRACT_META: _spec("taskq.get_contract_meta()", _OBSERVER, ("ok",)),
         CommandName.METRICS: _spec("taskq.metrics()", _OBSERVER, ("ok",)),
