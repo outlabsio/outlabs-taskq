@@ -1,7 +1,9 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 accepted local-pilot design — 2026-07-21. Round 11 accepts
-> P0–P5 only in the isolated disposable `qdarte-dev` environment. It is
+> **Status:** Tier-3 local-pilot design — P1 blocked by S5-QD-CQ-01. Round 11
+> accepted P0–P5 against a stale source inventory; its safety findings remain
+> binding, but current-source direct-taskq overlap must be adjudicated before
+> P1. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
 > [Function Manifest 0.1.4](./Task%20Queue%200.1%20Function%20Manifest.md),
 > ADR-006, ADR-011, ADR-020, and the [Build Plan](./Task%20Queue%20Build%20Plan.md).
@@ -155,15 +157,11 @@ outlabsAPI read-model rollout or the tools-retirement observation.
 
 ## 7. Review gate and next decision
 
-Round 11 independently verified the source inventory, artifact/version choice,
-SQL-contract bridge posture, role and authorization split, compose isolation,
-handler purity, no-dual-publish architecture, test oracles, resource/connection
-arithmetic posture, recovery semantics, and explicit absence of all non-goals.
-Its four docs-first refinements above are binding. It authorizes only P0–P5
-local implementation.
-
-No Contract question is recorded by this proposal: it uses existing queue,
-authorization, worker, and settlement contracts. If source inspection shows
-that the existing cluster handler cannot remain pure or that a required QDarte
-wire/auth contract conflicts with the mounted facade, implementation stops and
-records the conflict before adding an adapter.
+Round 11 independently verified handler purity, legacy-ledger isolation,
+artifact posture, role boundary, compose isolation, recovery semantics, and
+the explicit absence of side effects against the source baseline it inspected.
+Its four docs-first refinements above remain binding. P0's current-source
+inspection then found a separate disabled direct-SQL taskq surface in the
+authoritative QDarte API/worker staging sources. This is S5-QD-CQ-01: until an
+explicit posture retires, isolates, or proves compatibility with that surface,
+P1–P5 are closed. No adapter may be added around it.
