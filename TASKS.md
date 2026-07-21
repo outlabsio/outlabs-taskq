@@ -130,6 +130,32 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(open)*
+
+**Blocking evidence:** CV-02's server-owned bridge correctly requires the
+package `job_id`, current `attempt_id`, and `worker_id` to heartbeat before it
+will authorize a QDarte domain write. The existing package `WorkerService`
+correctly constructs a fence-free `JobContext`: it exposes the job identity,
+payload, headers, and cancellation state to a handler but never the active
+attempt/fence. This is a deliberate Stage-2 safety contract, not an accidental
+redaction. Therefore a normal closed registry handler cannot call the CV-02
+result adapter. A raw HTTP claim loop could see the attempt, but it would make
+QDarte reimplement worker supervision, cancellation, heartbeat, and
+settlement-replay behavior that the package already owns.
+
+**Required adjudication:** choose a package-owned extension that preserves the
+fence-free user-handler boundary while letting a *trusted, host-owned*
+side-effect reporter receive the active attempt only at the result boundary;
+or explicitly approve and specify a different worker integration with
+equivalent replay/cancellation/process-exit evidence. Do not expose an attempt
+or fence through `JobContext`, weaken the bridge heartbeat, or add an ad-hoc
+QDarte raw claim/settle loop before the lifecycle and authority are frozen.
+
+CV-04 and CV-05 are blocked on this decision. CV-01–CV-03, the direct queue,
+the package contact database, and the disabled local harness remain intact;
+no contact worker, enqueue credential, provider call, or direct-queue mutation
+has occurred.
+
 ### S5-QD-CQ-05 — The run-only pilot worker cannot negotiate its mandatory HTTP metadata read *(resolved: metadata-bootstrap exception)*
 
 **Blocking evidence:** the official `AsyncTaskqHttpClient` calls
