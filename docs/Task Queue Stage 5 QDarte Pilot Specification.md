@@ -1,10 +1,11 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2/P3 accepted. The
-> isolated database/IAM, deterministic pure adapter, and the P4 worker canary
-> are complete; P5 alone may start recovery work. S5-QD-CQ-04 resolves its
-> local-only harness producer identity, and S5-QD-CQ-05 resolves its metadata
-> bootstrap.
+> **Status:** Tier-3 local-pilot design — P0 through P5 are complete. The
+> isolated database/IAM, deterministic pure adapter, worker canary, and P5
+> response-loss/hard-kill/teardown evidence are complete. S5-QD-CQ-04 resolves
+> its local-only harness producer identity, and S5-QD-CQ-05 resolves its
+> metadata bootstrap. The next item is the separately specified direct-queue
+> convergence decision; this pilot authorizes no incumbent change.
 > Round 11
 > accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
@@ -198,6 +199,31 @@ digest uses that exact value. The taskq adapter owns its type map exclusively;
 | QP-08 | Hard-kill recovery | A held pure job is terminated past its configured grace, reclaimed as the same id, and reaches one terminal success with audit-conserved attempts/events. |
 | QP-09 | Legacy isolation | Before/after snapshots use a canonical in-database full-row content digest in stable primary-key order for `qdarte_ops.worker_jobs`, `worker_job_events`, `worker_job_attempts`, `worker_artifacts`, `workflow_runs`, and `worker_job_dependencies`; the digest is the primary oracle and must include every persisted column, so inserts, updates, and deletes cannot hide. Count/id/time high-waters are retained only as diagnostics (`updated_at` where present; `created_at` for append-only events). No existing worker process claims the pilot job. |
 | QP-10 | Disable, teardown, and rollback | Turning off the pilot runtime/worker is zero-DML. Teardown disposes the local ephemeral pilot credentials and proves the QP-03 auth digest remains byte-identical; the disposable pilot database may then be dropped. The existing QDarte API, worker fleet, and isolated smoke remain healthy throughout. |
+
+### P5 completion record — 2026-07-21
+
+The isolated P5 run stayed entirely in `qdarte_pilot_dev`:
+
+- Job `019f8664-30d5-78c0-884a-8b981482c9df` exercised committed response
+  loss. The local wrapper raised after the first real `complete` committed;
+  worker-owned settlement replay made exactly two settlement calls with one
+  handler invocation and one successful raw attempt.
+- Job `019f8669-49f7-77b7-bb71-4acf31ff61b5` was held under the closed pure
+  registry, frozen for six seconds past its five-second soft-stop grace, and
+  force-killed without release. Its real 15-second lease elapsed; normal
+  polling/idle micro-reap reclaimed the same id to a second closed worker. Its
+  two raw attempts are `expired/lease_expired` then `succeeded/success`, with
+  no release and conserved event counts.
+- P4's primary six-table `qdarte_ops` full-row oracle remained byte-identical.
+  The pilot façade and workers were stopped, the immediate canonical QDarte
+  auth digest was unchanged across teardown, and the isolated core stack stayed
+  healthy. The disposable pilot database remains available for local work; it
+  was not dropped because no cleanup mutation was necessary.
+
+Detailed host evidence is recorded in
+`qdarteAPI/docs/taskq-pilot-p5-local-evidence.md`. This hard-kill proof is
+strictly for the pure pilot lane and does **not** waive any future
+side-effecting-lane hard-kill gate.
 
 All QP evidence is local and disposable. A later production or side-effecting
 lane needs its own specification, preflight, backup/restore evidence, external
