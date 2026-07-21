@@ -56,7 +56,7 @@
 
 - [x] **S5-QD-P3 · QDarte deterministic pilot adapter** — factored the incumbent calculation into a side-effect-free `compute_cluster_research_scope(payload)` and registered only `qdarte.cluster_research.pilot` in a closed package registry. The frozen AR synthetic input rejects every alternate shape; its bounded taskq-only output has no payload echo/followups and pins the inherited-result digest `14b7f6ef…63d4971`. Focused source tests prove it remains absent from QDarte’s legacy handler map and default `JobType` set. No worker, producer, HTTP client, database connection, queue claim, legacy enqueue, QDarte domain write, or shared-registry mutation occurred.
 
-- [ ] **S5-QD-P4 · QDarte isolated worker canary** *(blocked: S5-QD-CQ-05)* — specify and run exactly one development-only taskq HTTP worker using the closed P3 registry, `qdarte_pilot` queue, and a newly issued ephemeral `run` service token. The checked-in internal-only harness has its own short-lived `enqueue` token and proves `created` then `existed`, one handler invocation, canonical authorized success, exactly one successful attempt, and zero QDarte legacy-ledger mutation. Stop before replay/hard-kill recovery (P5); no public producer, broad worker, or side-effecting lane is authorized.
+- [ ] **S5-QD-P4 · QDarte isolated worker canary** — specify and run exactly one development-only taskq HTTP worker using the closed P3 registry, `qdarte_pilot` queue, and a newly issued ephemeral `run` service token. The checked-in internal-only harness has its own short-lived `enqueue` token and proves `created` then `existed`, one handler invocation, canonical authorized success, exactly one successful attempt, and zero QDarte legacy-ledger mutation. Stop before replay/hard-kill recovery (P5); no public producer, broad worker, or side-effecting lane is authorized.
 
 - [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
@@ -114,7 +114,7 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-CQ-05 — The run-only pilot worker cannot negotiate its mandatory HTTP metadata read *(open)*
+### S5-QD-CQ-05 — The run-only pilot worker cannot negotiate its mandatory HTTP metadata read *(resolved: metadata-bootstrap exception)*
 
 **Blocking evidence:** the official `AsyncTaskqHttpClient` calls
 `GET /taskq/v1/meta` before its first claim. Tier-0 Protocol v1 pins that
@@ -124,15 +124,15 @@ route to the `read` action, and the QDarte host adapter correctly maps it to
 can write presence or claim. The isolated facade was then stopped; no job,
 worker, QDarte auth row, or legacy-ledger mutation occurred.
 
-**Decision required:** define the narrow bootstrap posture before P4 resumes:
-either (a) the pilot worker receives a documented exact `run` plus `read`
-credential with an explicit acknowledgement that it can use ordinary
-queue-scoped reads, or (b) the host adapter permits a `run` credential only
-for the deployment-scoped metadata negotiation while retaining `run`-only
-denial for every queue/job read. The latter must be assessed against the
-Protocol's `meta → read` identity and carry direct positive/negative vectors.
-Do not silently skip compatibility negotiation, broadly grant `read`, or
-weaken a job-detail/read authorization check.
+**Decision adopted — metadata-bootstrap exception:** the Protocol command
+identity remains `meta → read`; the QDarte pilot host adapter may authorize a
+`taskq_qdarte_pilot:run` token for that deployment-scoped metadata negotiation
+only. It must not translate `run` into a queue-scoped `read` grant: profile,
+job detail, job pages, queue stats, and every other `read` command remain
+denied to the worker. P4 must prove the positive metadata startup plus direct
+negative job/profile reads under the run-only credential. It does not skip
+compatibility negotiation, add a broader scope, or modify Tier-0 command
+identity.
 
 ### S5-QD-CQ-04 — P4 requires a keyed harness producer but freezes no authorized producer identity *(resolved: local-only enqueue token)*
 
