@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 from datetime import UTC, datetime
 from typing import Any
@@ -141,6 +142,7 @@ class OperatorFake:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
         self.missing_profiles: set[str] = set()
+        self.conflicting_profiles: dict[str, int] = {}
 
     async def ensure_queue(
         self, name: str, profile: dict[str, Any] | None = None, actor: str | None = None
@@ -154,6 +156,8 @@ class OperatorFake:
         self.calls.append(("update_queue_profile", (name, profile, actor, expected_version)))
         if name in self.missing_profiles:
             return "missing", None, None
+        if name in self.conflicting_profiles:
+            return "profile_version_conflict", None, self.conflicting_profiles[name]
         updated = _profile(name).model_copy(update={"profile_version": expected_version + 1})
         return "updated", updated, updated.profile_version
 
@@ -500,6 +504,103 @@ async def test_conditional_queue_update_missing_and_inactive_view_are_typed() ->
         "reason": "read_model_view_inactive",
         "view": "running",
     }
+
+
+async def test_queue_profile_wire_conflict_and_weak_etag_are_exact() -> None:
+    transport = FacadeTransport()
+    operator = OperatorFake()
+    operator.conflicting_profiles["emails"] = 4
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport),
+            authorizer=no_auth_for_tests(),
+            operator_transport=operator,  # type: ignore[arg-type]
+            operator_authorizer=no_auth_for_tests(),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        stale = await client.put(
+            "/taskq/v1/queues/emails",
+            headers=_headers(**{"If-Match": '"taskq-profile-1"'}),
+            json={"profile": {}},
+        )
+        weak = await client.put(
+            "/taskq/v1/queues/emails",
+            headers=_headers(**{"If-Match": 'W/"taskq-profile-1"'}),
+            json={"profile": {}},
+        )
+    assert stale.status_code == 409
+    assert stale.json()["error"] == {
+        "code": "TQ409",
+        "message": "durable state conflict",
+        "retryable": False,
+        "details": {"reason": "profile_version_conflict", "current_version": 4},
+    }
+    assert weak.status_code == 422
+    assert weak.json()["error"]["code"] == "TQ422"
+
+
+async def test_list_jobs_wire_cursor_validation_and_pagination_round_trip() -> None:
+    class PagingTransport(FacadeTransport):
+        async def list_jobs(self, queue: str, view: str, **kwargs: Any) -> JobPage:
+            self.calls.append(("list_jobs", (queue, view, kwargs)))
+            return JobPage(
+                as_of=datetime.now(UTC),
+                items=(),
+                next_after=(
+                    None
+                    if kwargs["after"] is not None
+                    else {
+                        "queue": queue,
+                        "view": view,
+                        "priority": 3,
+                        "scheduled_at": "2026-07-21T00:00:00Z",
+                        "id": str(uuid4()),
+                    }
+                ),
+            )
+
+    transport = PagingTransport()
+    app = _mounted(create_taskq_app(_resources(transport), authorizer=no_auth_for_tests()))
+    foreign_queue = base64.urlsafe_b64encode(
+        json.dumps({"v": 1, "queue": "other", "view": "ready", "id": str(uuid4())}).encode()
+    ).decode().rstrip("=")
+    foreign_view = base64.urlsafe_b64encode(
+        json.dumps({"v": 1, "queue": "emails", "view": "finished", "id": str(uuid4())}).encode()
+    ).decode().rstrip("=")
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        first = await client.get("/taskq/v1/jobs?queue=emails&view=ready", headers=_headers())
+        cursor = first.json()["data"]["next_cursor"]
+        second = await client.get(
+            f"/taskq/v1/jobs?queue=emails&view=ready&cursor={cursor}", headers=_headers()
+        )
+        invalid = [
+            await client.get(
+                "/taskq/v1/jobs?queue=emails&view=ready&cursor=not-base64!", headers=_headers()
+            ),
+            await client.get(
+                f"/taskq/v1/jobs?queue=emails&view=ready&cursor={foreign_queue}", headers=_headers()
+            ),
+            await client.get(
+                f"/taskq/v1/jobs?queue=emails&view=ready&cursor={foreign_view}", headers=_headers()
+            ),
+            await client.get(
+                "/taskq/v1/jobs?queue=emails&view=ready&cursor=" + "a" * 1367,
+                headers=_headers(),
+            ),
+            await client.get(
+                "/taskq/v1/jobs?queue=emails&queue=other&view=ready", headers=_headers()
+            ),
+        ]
+    assert first.status_code == 200 and cursor is not None
+    assert second.status_code == 200 and second.json()["data"]["next_cursor"] is None
+    assert transport.calls[0][1][2]["after"] is None
+    assert transport.calls[1][1][2]["after"]["queue"] == "emails"
+    assert all(response.status_code == 422 for response in invalid)
 
 
 async def test_bearer_and_legacy_adapters_preserve_simple_mounts() -> None:

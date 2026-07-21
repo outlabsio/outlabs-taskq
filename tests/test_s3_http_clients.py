@@ -171,6 +171,39 @@ async def test_enqueue_uses_exact_path_body_and_typed_result() -> None:
     await borrowed.aclose()
 
 
+async def test_published_queue_profile_envelope_decodes_versioned_profile() -> None:
+    profile = {
+        "name": "emails",
+        "profile_version": 7,
+        "default_priority": 100,
+        "default_lease_seconds": 300,
+        "default_max_attempts": 5,
+        "default_backoff_mode": "exponential",
+        "default_backoff_base": 30,
+        "default_backoff_cap": 3600,
+        "retention_hours": 48,
+        "failed_retention_hours": 336,
+        "max_depth": None,
+        "notify_enabled": True,
+        "paused": False,
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/taskq/v1/queues/emails"
+        assert request.headers["If-Match"] == '"taskq-profile-6"'
+        assert json.loads(request.content) == {"profile": {"default_priority": 100}}
+        return _response(request, outcome="updated", data={"profile": profile})
+
+    borrowed = httpx.AsyncClient(
+        base_url="https://example.test", transport=httpx.MockTransport(handler)
+    )
+    client = AsyncTaskqHttpClient("https://example.test", bearer_token="secret", client=borrowed)
+    result = await client.ensure_queue("emails", {"default_priority": 100}, expected_version=6)
+    assert result.profile == profile
+    await client.aclose()
+    await borrowed.aclose()
+
+
 async def test_keyed_enqueue_retries_with_a_fresh_request_id() -> None:
     request_ids: list[str] = []
     job_id = uuid4()
