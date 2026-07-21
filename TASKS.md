@@ -32,6 +32,13 @@
 
 ## Now
 
+- [x] **S5-QD-ARTIFACT · Route-deferred decoder correction** — immutable
+  `0.1.0a3.post1` is cut from the exact `v0.1.0a3` source baseline solely to
+  default nullable job-list/detail projections that a conforming facade may
+  omit. It retains migrations `0001`–`0005`, deferred read routes, and the
+  closed bridge contract set; no SQL, wire, capability, or runtime behavior
+  changes.
+
 - [x] **S4-POST-L1-SPEC · Legacy-tools retirement eligibility frozen** — amended the Tier-3 retirement plan to close Round-8 R8-02/03/05 before observation starts: `TASKQ_TOOLS_ALLOWLIST` remains an enrollment gate after `TASKQ_TOOLS_MODE` removal; disabled, not-ready, and registered non-allowlisted tools share the exact fail-closed `503 {"detail":"Queued task processing is unavailable"}` response and never enqueue legacy work; `umami` uses a target access-log counter while the read-only flight lane's host-counter/taskq reconciliation is explicitly non-independent; and the retired 200 response now has an explicit caller-sweep gate. L2 owns the restricted-runtime proof rewrite and compatible settings/documentation update. No host source, taskq SQL/wire/IAM/capability, deployment, database, or producer/consumer behavior changed.
 
 - [ ] **S4-POST-L1 · Seven-day tools-retirement eligibility observation** — Day 0 opened in host commit `b7cda5c`: the authoritative production API is healthy and in taskq mode for `umami,aerolineas`; the frozen legacy oracle is count 2 / max `2026-07-20 11:37:34.886547` / zero active rows. The runtime login's denied raw `taskq.jobs` read is retained as capability evidence, so taskq observations use the authorized canonical read plus the audit oracle. Six further consecutive days, two normal authoritative-host deploys, lane invocation reconciliations, and final caller attestation remain; any legacy insert resets the window. Stop for targeted independent acceptance before S4-POST-L2; no producer or consumer removal is authorized in this task.
