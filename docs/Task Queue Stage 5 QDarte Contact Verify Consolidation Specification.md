@@ -45,8 +45,8 @@ from the isolated pilot.
 
 | Concern | Current incumbent | Consequence for convergence |
 | --- | --- | --- |
-| Catalog owner | API migration `alembic/versions/20260709_0061_add_taskq_schema.py` creates schema `taskq`, six tables, and fifteen direct functions. The local database is PostgreSQL 18.4 and currently has no direct queue rows or queues. | It is a separate, mutable host-owned catalog, not a package migration ledger. It cannot be adopted in place as package SQL. |
-| Privileges | The migration creates `taskq_worker` and grants `PUBLIC EXECUTE` on all direct functions. | This violates the package capability model. The package must be installed into its own database; a grant rewrite is not a migration strategy. |
+| Catalog owner | API migration `alembic/versions/20260709_0061_add_taskq_schema.py` creates schema `taskq`, six tables, and thirteen direct functions. The local database is PostgreSQL 18.4 and currently has no direct queue rows or queues. | It is a separate, mutable host-owned catalog, not a package migration ledger. It cannot be adopted in place as package SQL. |
+| Privileges | Source creates `taskq_worker` and grants `PUBLIC EXECUTE` on all thirteen direct functions. The inspected local cluster currently has the package capability roles but no `taskq_worker`; the direct path still works through `PUBLIC EXECUTE`. | This violates the package capability model. C1 must record the measured source-versus-live role/grant posture before any implementation. The package must be installed into its own database; a grant rewrite is not a migration strategy. |
 | Producer | `app/domains/workers/api/routes.py` plans the scope from live QDarte rows, then calls `TaskqClient.enqueue` into queue `comms`, type `contact_verify_scope`, with a caller key or a derived scope key. `/ops/cutover/jobs/contact-verify-scope` chooses direct or `qdarte_ops` only from the current setting. | A future package producer must choose exactly one backend before planning/enqueueing. It must preserve the public caller response intentionally, not accidentally depend on a copied route. |
 | Worker transport | `qdarte-workers/src/qdarte_workers/worker_loop.py` polls `/worker/taskq/jobs/claim`, heartbeats, completes, fails, and releases through the API; it refuses types other than `contact_verify_scope`. | The future package worker must use the package HTTP worker path and a closed registry. It must not receive a database password or reuse the copied direct worker loop. |
 | Domain effect | `handle_contact_verify_scope` calls a network verifier for each planned entity, then submits the result to `/worker/taskq/jobs/{id}/contact-verify-results`. The API updates a place, optional contact method, and a monthly probe-usage counter. | This is a side-effecting lane. Queue settlement alone is not its correctness oracle. |
@@ -58,6 +58,21 @@ The direct catalog's `taskq` schema contains `queues`, `jobs`,
 identities and result shapes differ from the immutable package catalog. The
 package's fixed schema name and immutable migrations therefore make a shared
 database a catalog collision, not a deployment convenience.
+
+The incumbent worker URL is also an inventory item, not an implementation
+detail to inherit by assumption. C1 must freeze this effective-base-path
+matrix and prove an authenticated claim and result submission in each
+supported topology before any direct-worker compatibility code is changed:
+
+| Supported topology | Configured worker base URL | Joined claim path | Joined result path |
+| --- | --- | --- | --- |
+| Direct API origin | `http://<api-origin>` | `/worker/taskq/jobs/claim` | `/worker/taskq/jobs/{job_id}/contact-verify-results` |
+| Admin-proxy origin | `http://<admin-origin>/content-api` | `/content-api/worker/taskq/jobs/claim` | `/content-api/worker/taskq/jobs/{job_id}/contact-verify-results` |
+
+The direct client appends the worker-relative path once. The source or its
+tests may be corrected only after this matrix determines which supported
+topology each setting represents; a root-relative test expectation is not a
+reason to erase the documented proxy prefix.
 
 ## 3. Target topology and ownership
 
@@ -153,6 +168,36 @@ Contact verification has two independent durable effects:
 2. one or more QDarte domain results update place/contact/usage state after a
    network verification.
 
+### 5.1 Server-owned package result bridge
+
+The package database is separate from QDarte's domain database. A worker
+therefore never validates or applies a result through direct package SQL, and
+the QDarte result service must not trust a worker-supplied queue, job type,
+payload, planned entity, or attempt as authority. The eventual host result
+endpoint uses this fixed order:
+
+1. authenticate the caller as `run` only for the one package queue;
+2. use a server-owned, capability-sized package runtime to heartbeat the
+   supplied `(job_id, attempt_id, worker_id)`, thereby fence-checking and
+   extending the current attempt before any QDarte write;
+3. use a separate server-owned observer capability to read the authoritative
+   package job projection, then verify its queue, job type, planned entity,
+   and QDarte place identity against the result request without trusting a
+   request echo;
+4. apply the domain effect under the stable job-id-plus-entity key in the
+   QDarte transaction; and
+5. return to the worker, which alone performs terminal settlement and its
+   existing replay policy.
+
+The result service owns neither the worker's credential nor a direct package
+database grant. A rejected/lost/settled heartbeat, an absent job, or an
+authoritative projection mismatch performs no QDarte domain write. If the
+domain transaction commits but the response is lost, the same current attempt
+may retry this sequence; the stable effect key makes that replay one domain
+application. If the lease expires and another worker reclaims the job, the old
+attempt's heartbeat is rejected and it performs no write. Terminal package
+state is never used as evidence that the domain effect did not commit.
+
 The later implementation must prove their relationship with a stable
 application-effect key derived from the package **job id and planned entity
 identity, never the attempt id**. Repeated delivery, response loss, reclaim,
@@ -203,9 +248,9 @@ No gate is implicitly satisfied by P0–P5.
 
 | Gate | Required evidence | Blocks |
 | --- | --- | --- |
-| C1 — host contract inventory | caller/API/worker route map, model comparison, direct data high-water, role/grant inventory, and explicitly named compatibility delta | all source changes |
+| C1 — host contract inventory | caller/API/worker route map, the effective-base-path matrix with authenticated claim/result vectors for each supported topology, model comparison, direct data high-water, measured source-versus-live role/grant inventory, and explicitly named compatibility delta | all source changes |
 | C2 — package database preflight | disposable same-topology database, immutable package migrate/verify twice, owner/operator/runtime negative vectors, connection budget, backup/restore rehearsal | package database creation in a lasting environment |
-| C3 — result idempotency | stable job-plus-entity key, retry/reclaim/response-loss vectors, exact domain and usage-counter oracle | any external verification |
+| C3 — result idempotency | server-owned bridge in §5.1; stable job-plus-entity key; wrong-fence, reclaimed-old-attempt, wrong-planned-entity, same-job retry, and committed-domain-write/lost-response vectors; and an exact domain and usage-counter oracle | any external verification |
 | C4 — isolated side-effect canary | one bounded synthetic/controlled real entity with an explicit provider/effect oracle and no direct queue mutation | broader local cohort |
 | C5 — hard kill | process termination past grace at the result boundary, same-id reclaim, no duplicate effect or usage increment | staging or production-like use |
 | C6 — compatibility and rollback | caller suite, exact mode exclusivity, direct drain, package-only keyed pair, pre/post-publish rollback exercises | cutover |
