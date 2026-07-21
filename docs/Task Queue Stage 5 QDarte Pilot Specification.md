@@ -1,9 +1,9 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P0/P0B/P1 accepted. P1 adds only a
-> disabled package boundary; P2 alone may create or provision its dedicated
-> disposable database, but is paused on S5-QD-CQ-02's authorization-topology
-> decision. Round 11 accepted P0–P5 against a stale source
+> **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2 accepted. The isolated
+> P2 database/IAM posture is complete; P3 alone may add the deterministic pure
+> adapter, while P4 alone may start the dedicated pilot worker. Round 11
+> accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
