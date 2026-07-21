@@ -76,9 +76,14 @@ URL and SHA-256. It is the ADR-020 bridge, supports the closed SQL-contract set
 pilot. P4's first live run found that its official a3 client treated omitted
 nullable job-detail fields as required, so its canonical-read completion is
 paused for a new immutable remedial alpha with only that decode correction,
-then an exact local repin. The a3 artifact remains immutable; no migration,
-wire, SQL, capability, or pilot boundary changes are authorized by this
-remediation.
+then an exact local repin. The published `v0.1.0a4` tag is immutable but is
+**not** eligible for this repin: it includes the later read-model range,
+including migration `0006`, and therefore exceeds the pilot's frozen artifact
+surface. The remedial artifact must instead be cut from the exact a3 baseline
+as `0.1.0a3.post1` (or a later equivalently narrow immutable post release),
+with only the nullable-projection decode correction and its regression proof.
+The a3 artifact remains immutable; no migration, wire, SQL, capability, or
+pilot boundary changes are authorized by this remediation.
 
 ```text
 isolated QDarte planner/CLI --producer--> package taskq.qdarte_pilot
