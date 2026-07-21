@@ -127,6 +127,25 @@ revision-1.0.5 flat-PUT statement as a drafting error. The same docs-first ADR r
 SQL contract 0.1.4 and immutable migration 0005 for `list_jobs` existence-before-capability
 conformance; no 0004 edit or new wire identity is authorized.
 
+### S5-CQ-05 — approved `ready` B9 evidence has no frozen activation vehicle
+
+**Blocking evidence:** B9 passed for `read_model_list_ready` on PostgreSQL 16 and 18, while
+`running` and `finished` remain rejected. ADR-021 / Manifest §12 deliberately say migration 0005
+does **not** activate a view, and the manifest exposes no operator function that may mutate
+`taskq.meta.capabilities`. The generated facade and direct SQL now correctly return `TQ501` outside
+the isolated parity vector, but no immutable migration identity or deployment authority says how an
+approved capability becomes active. Updating metadata manually would evade the migration ledger and
+would make verification unable to distinguish the approved posture from drift.
+
+**Decision required:** freeze a docs-first activation vehicle and rollback posture for the
+ready-only capability. The narrow candidate is an immutable metadata-only migration 0006 under the
+existing SQL contract 0.1.4, named in the Manifest before implementation, which asserts 0.1.4
+metadata and sets exactly `{"active":["read_model_list_ready"]}`. It must preserve `running` and
+`finished` inactive, extend fresh/full-chain PG16/18 and `verify()` proofs, and state whether a
+post-0006 database has a new runtime rollback floor. Do not enable the capability through manual
+SQL, an HTTP configuration route, or a facade-side exception before this authority is frozen.
+
+
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
 **Blocking evidence:** before any canary enqueue, production was switched to taskq mode with only
