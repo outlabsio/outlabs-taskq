@@ -162,6 +162,30 @@ were added, and P5 teardown deletes exactly those rows and restores the baseline
 byte-identically. No wildcard, operator grant, API-key substitution, existing-record mutation,
 or ad-hoc authorization bypass is permitted.
 
+### S5-QD-CQ-03 — Option-A pilot IAM cannot meet the byte-identical teardown oracle through QDarte's supported public service
+
+**Blocking evidence:** Option A permits P2 to add the exact
+`taskq_qdarte_pilot:read` and `taskq_qdarte_pilot:run` records through QDarte's
+public OutLabsAuth permission service, while QP-10 requires owner-only teardown
+to delete exactly those pilot records and restore QP-03's full auth content
+digest byte-identically. In the pinned QDarte OutLabsAuth artifact,
+`PermissionService.delete_permission()` is a soft archive: it retains the row,
+sets its status inactive/archived, invalidates caches, and appends a
+permission-definition-history event. It also refuses system permissions
+entirely. Therefore neither `is_system=True` nor `is_system=False` can restore
+the pre-P2 permissions/history digest through the approved public API; direct
+SQL cleanup would violate Option A's no-ad-hoc authorization-bypass rule.
+
+**Decision required:** amend the pilot authority before P2 chooses one explicit
+posture: (A) a disposable pilot-local auth catalog/token verifier so no QDarte
+auth rows are added; (B) a narrowly authorized, public-service-supported hard
+delete/purge lifecycle that really restores the digest; or (C) revise QP-10's
+oracle and retention policy to accept the exact archived/history footprint.
+The decision must preserve the queue-scoped service-token contract and state
+whether the existing QDarte auth database is still allowed to receive pilot
+records. Do not provision pilot permissions, roles, tokens, queues, or database
+objects until this is decided docs-first.
+
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 
 **Blocking evidence:** Protocol v1 §2.5 says canonical `PUT /taskq/v1/queues/{queue}` success
