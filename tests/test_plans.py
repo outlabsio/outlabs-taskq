@@ -350,7 +350,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     assert finished_scans and finished_scans[0]["Actual Rows"] > 101
 
     capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
-    assert json.loads(capabilities) == {"active": []}
+    assert json.loads(capabilities) == {"active": ["read_model_list_ready"]}
 
 
 async def test_plan_binding_detects_rollback_only_function_drift(
