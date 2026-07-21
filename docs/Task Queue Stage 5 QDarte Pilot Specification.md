@@ -133,7 +133,7 @@ digest uses that exact value. The taskq adapter owns its type map exclusively;
 | QP-06 | Keyed canary | Two submissions with one key produce `created` then `existed`, one job id, one handler call, one successful attempt, and a canonical authorized read. |
 | QP-07 | Failure/replay | A committed settlement response loss replays the original settlement only; no second handler invocation occurs. |
 | QP-08 | Hard-kill recovery | A held pure job is terminated past its configured grace, reclaimed as the same id, and reaches one terminal success with audit-conserved attempts/events. |
-| QP-09 | Legacy isolation | Before/after snapshots of `count(*)`, `max(id)`, and `max(updated_at)` are byte-identical for `qdarte_ops.worker_jobs`, `worker_job_events`, `worker_job_attempts`, `worker_artifacts`, `workflow_runs`, and `worker_job_dependencies`; no existing worker process claims the pilot job. |
+| QP-09 | Legacy isolation | Before/after snapshots of `count(*)`, `max(id)`, and the available time high-water (`max(updated_at)` where present; `max(created_at)` for append-only `worker_job_events`) are byte-identical for `qdarte_ops.worker_jobs`, `worker_job_events`, `worker_job_attempts`, `worker_artifacts`, `workflow_runs`, and `worker_job_dependencies`. Each snapshot also includes a canonical in-database digest of every persisted row in stable primary-key order, so an in-place update cannot hide behind unchanged count/id/time high-waters. No existing worker process claims the pilot job. |
 | QP-10 | Disable/rollback | Turning off the pilot stops its runtime/worker without database DML; the existing QDarte API, worker fleet, and isolated smoke remain healthy. |
 
 All QP evidence is local and disposable. A later production or side-effecting
