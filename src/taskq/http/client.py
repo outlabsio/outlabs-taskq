@@ -352,6 +352,7 @@ class AsyncTaskqHttpClient:
         path_params: Mapping[str, Any] | None = None,
         body: BaseModel | Mapping[str, Any] | None = None,
         query: Mapping[str, Any] | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> tuple[str, dict[str, Any], str]:
         spec = HTTP_COMMAND_SPECS[name]
         if spec.surface is HttpSurface.DEFERRED:
@@ -365,6 +366,7 @@ class AsyncTaskqHttpClient:
         retry = _can_retry(spec, encoded)
         for attempt in range(self._config.max_retries + 1):
             request_id, headers = self._config.headers()
+            headers.update(extra_headers or {})
             try:
                 response = await self._http().request(
                     spec.method,
@@ -703,6 +705,22 @@ class AsyncTaskqHttpClient:
         )
         return _decode_domain(HTTP_COMMAND_SPECS[name], outcome, data)
 
+    async def ensure_queue(
+        self, queue: str, profile: Mapping[str, Any], *, expected_version: int | None = None
+    ) -> EnsureQueueResult:
+        headers = (
+            {"If-Match": f'"taskq-profile-{expected_version}"'}
+            if expected_version is not None
+            else None
+        )
+        outcome, data, _ = await self._request(
+            HttpCommandName.ENSURE_QUEUE,
+            path_params={"queue": queue},
+            body={"profile": dict(profile)},
+            extra_headers=headers,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.ENSURE_QUEUE], outcome, data)
+
     async def aclose(self) -> None:
         if self._closed:
             return
@@ -774,6 +792,7 @@ class TaskqHttpClient:
         path_params: Mapping[str, Any] | None = None,
         body: BaseModel | Mapping[str, Any] | None = None,
         query: Mapping[str, Any] | None = None,
+        extra_headers: Mapping[str, str] | None = None,
     ) -> tuple[str, dict[str, Any], str]:
         spec = HTTP_COMMAND_SPECS[name]
         if spec.surface is HttpSurface.DEFERRED:
@@ -788,6 +807,7 @@ class TaskqHttpClient:
         for attempt in range(self._config.max_retries + 1):
             with self._lock:
                 request_id, headers = self._config.headers()
+                headers.update(extra_headers or {})
             try:
                 response = self._http().request(
                     spec.method,
@@ -1109,6 +1129,22 @@ class TaskqHttpClient:
     ) -> Any:
         outcome, data, _ = self._request(name, path_params=path_params, body=body, query=query)
         return _decode_domain(HTTP_COMMAND_SPECS[name], outcome, data)
+
+    def ensure_queue(
+        self, queue: str, profile: Mapping[str, Any], *, expected_version: int | None = None
+    ) -> EnsureQueueResult:
+        headers = (
+            {"If-Match": f'"taskq-profile-{expected_version}"'}
+            if expected_version is not None
+            else None
+        )
+        outcome, data, _ = self._request(
+            HttpCommandName.ENSURE_QUEUE,
+            path_params={"queue": queue},
+            body={"profile": dict(profile)},
+            extra_headers=headers,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.ENSURE_QUEUE], outcome, data)
 
     def metrics(self) -> str:
         spec = HTTP_COMMAND_SPECS[HttpCommandName.METRICS]

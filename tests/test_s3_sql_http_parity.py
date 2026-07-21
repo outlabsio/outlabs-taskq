@@ -197,3 +197,63 @@ async def test_read_oracle_rejects_a_deliberately_mutated_projection(
             _assert_job_matches_raw(mutated, raw)
     finally:
         await transport.aclose()
+
+
+async def test_read_model_sql_http_and_raw_row_parity(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+) -> None:
+    queue = "parity_read_model"
+    await operator.fetchrow(
+        "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'parity-audit')", queue
+    )
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    resources = TaskqFacadeTransports(
+        producer=transport,
+        runner=transport,
+        observer=transport,
+        authorization=transport,
+        claim_wait_hub=ClaimWaitHub(),
+    )
+    app = _mounted(create_taskq_app(resources, authorizer=no_auth_for_tests()))
+    asgi = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    client = AsyncTaskqHttpClient("http://test", bearer_token="parity-test-only", client=asgi)
+    try:
+        created = await transport.enqueue(
+            EnqueueCommand(queue=queue, job_type="tests.read", payload={})
+        )
+        await pg.execute(
+            "UPDATE taskq.meta SET value='{\"active\":[\"read_model_list_ready\"]}'::jsonb "
+            "WHERE key='capabilities'"
+        )
+        sql_page = await transport.list_jobs(queue, "ready")
+        http_page = await client.list_jobs(queue=queue, view="ready")
+        assert [item.model_dump(mode="json") for item in http_page.items] == [
+            item.model_dump(mode="json") for item in sql_page.items
+        ]
+        assert http_page.next_cursor is None
+        raw = await pg.fetchrow(
+            "SELECT id, job_type, status, priority, attempt_count, failure_count, max_attempts, "
+            "created_at, scheduled_at, started_at, finished_at, updated_at FROM taskq.jobs WHERE id=$1",
+            created.job_id,
+        )
+        item = http_page.items[0]
+        assert raw is not None
+        assert item.job_id == raw["id"]
+        assert item.job_type == raw["job_type"]
+        assert item.status.value == raw["status"]
+        assert item.priority == raw["priority"]
+        assert item.attempt_count == raw["attempt_count"]
+        assert item.failure_count == raw["failure_count"]
+        assert item.max_attempts == raw["max_attempts"]
+        assert item.created_at == raw["created_at"]
+        assert item.scheduled_at == raw["scheduled_at"]
+        assert item.started_at == raw["started_at"]
+        assert item.finished_at == raw["finished_at"]
+        assert item.updated_at == raw["updated_at"]
+    finally:
+        await pg.execute("UPDATE taskq.meta SET value='{\"active\":[]}'::jsonb WHERE key='capabilities'")
+        await client.aclose()
+        await asgi.aclose()
+        await transport.aclose()
