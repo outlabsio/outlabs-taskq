@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from threading import Thread
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -115,6 +116,41 @@ async def test_context_checkpoint_generation_never_discards_a_newer_value() -> N
     assert returned == {"cursor": 2}
     returned["cursor"] = 99
     assert context.progress == {"cursor": 2}
+
+
+async def test_context_effect_reporter_is_bounded_and_fence_free() -> None:
+    seen: list[dict[str, Any]] = []
+
+    async def reporter(request: dict[str, Any]) -> dict[str, Any]:
+        seen.append(request)
+        return {"state": "applied"}
+
+    context = JobContext(
+        job_id=uuid4(),
+        queue="worker",
+        job_type="math.double",
+        payload=Input(value=2),
+        headers=None,
+        progress=None,
+        attempt_number=1,
+        failure_count=0,
+        max_attempts=5,
+        effect_reporter=reporter,
+    )
+    assert await context.report_effect({"operation": "apply"}) == {"state": "applied"}
+    assert seen == [{"operation": "apply"}]
+    assert not hasattr(context, "attempt_id")
+    with pytest.raises(TaskqConfigError, match="8KB"):
+        await context.report_effect({"payload": "x" * 8193})
+
+
+async def test_context_effect_reporter_is_absent_and_cancellation_aware() -> None:
+    context = _context()
+    with pytest.raises(TaskqConfigError, match="no trusted effect reporter"):
+        await context.report_effect({"operation": "apply"})
+    context.cancellation.cancel(CancellationReason.OPERATOR)
+    with pytest.raises(TaskCancelled):
+        await context.report_effect({"operation": "apply"})
 
 
 def test_context_checkpoint_and_repr_are_safe() -> None:

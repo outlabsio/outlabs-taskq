@@ -8,6 +8,7 @@ from copy import deepcopy
 from enum import StrEnum
 from threading import Event, Lock
 from types import MappingProxyType
+from collections.abc import Awaitable, Callable
 from typing import Any, TypeAlias
 from uuid import UUID
 
@@ -116,6 +117,22 @@ def _checkpoint_copy(progress: dict[str, Any]) -> dict[str, Any]:
     return deepcopy(progress)
 
 
+def _effect_request_copy(request: dict[str, Any]) -> dict[str, Any]:
+    """Validate the deliberately small handler-to-reporter data boundary."""
+    if not isinstance(request, dict):
+        raise TaskqConfigError("effect request must be a JSON object")
+    try:
+        encoded = json.dumps(request, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise TaskqConfigError("effect request must be JSON serializable") from exc
+    if len(encoded) > 8192:
+        raise TaskqConfigError("effect request exceeds the 8KB limit")
+    return deepcopy(request)
+
+
+EffectReporterCallback: TypeAlias = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
 class JobContext:
     """Fence-free handler context with thread-safe checkpoint staging."""
 
@@ -132,6 +149,7 @@ class JobContext:
         failure_count: int,
         max_attempts: int,
         cancellation: CancellationToken | None = None,
+        effect_reporter: EffectReporterCallback | None = None,
     ) -> None:
         self.job_id = job_id
         self.queue = queue
@@ -142,6 +160,7 @@ class JobContext:
         self.failure_count = failure_count
         self.max_attempts = max_attempts
         self.cancellation = cancellation or CancellationToken()
+        self._effect_reporter = effect_reporter
         self._checkpoint_lock = Lock()
         self._progress = _checkpoint_copy(progress) if progress is not None else None
         self._pending_generation = 0
@@ -181,6 +200,22 @@ class JobContext:
             self._pending_generation += 1
             self._pending_progress = copied
 
+    async def report_effect(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Request one bounded host effect through the runtime-owned reporter.
+
+        The callback is deliberately absent from ordinary workers.  It never
+        exposes an attempt identity to the handler; the supervising runtime
+        binds that identity immediately before invoking its trusted reporter.
+        """
+        self.raise_if_cancelled()
+        reporter = self._effect_reporter
+        if reporter is None:
+            raise TaskqConfigError("JobContext has no trusted effect reporter")
+        copied = _effect_request_copy(request)
+        result = await reporter(copied)
+        self.raise_if_cancelled()
+        return _effect_request_copy(result)
+
     def _pending_checkpoint(self) -> tuple[int, dict[str, Any]] | None:
         with self._checkpoint_lock:
             if self._pending_progress is None:
@@ -198,6 +233,7 @@ __all__ = [
     "CancellationReason",
     "CancellationToken",
     "Complete",
+    "EffectReporterCallback",
     "HANDLER_RESULT_TYPES",
     "HandlerResult",
     "JobContext",

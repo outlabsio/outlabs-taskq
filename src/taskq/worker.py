@@ -56,6 +56,30 @@ class WorkerClock(Protocol):
     async def sleep(self, delay: float) -> None: ...
 
 
+class WorkerEffectAttempt(BaseModel):
+    """Internal active-attempt projection for a trusted effect reporter.
+
+    This model is intentionally never attached to ``JobContext`` or exposed by
+    a handler result.  It exists only at the worker-to-host adapter boundary.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    job_id: UUID
+    attempt_id: UUID
+    worker_id: str
+    queue: str
+    job_type: str
+
+
+class TrustedEffectReporter(Protocol):
+    """Runtime-owned host adapter for one active attempt's durable effect."""
+
+    async def report_effect(
+        self, attempt: WorkerEffectAttempt, request: dict[str, Any]
+    ) -> dict[str, Any]: ...
+
+
 class RealWorkerClock:
     def monotonic(self) -> float:
         return asyncio.get_running_loop().time()
@@ -233,6 +257,7 @@ class WorkerService:
         supervisor_options: WorkerOptions | None = None,
         notifications: NotificationSource | None = None,
         clock: WorkerClock | None = None,
+        effect_reporter: TrustedEffectReporter | None = None,
     ) -> None:
         if options.listen and notifications is None:
             raise TaskqConfigError("listen=True requires a notification source")
@@ -250,6 +275,7 @@ class WorkerService:
             worker_id,
             options=supervisor_options,
             clock=self.clock,
+            effect_reporter=effect_reporter,
         )
         self._state = WorkerServiceState.CONSTRUCTED
         self._stop_requested = asyncio.Event()
@@ -683,6 +709,7 @@ class WorkerSupervisor:
         *,
         options: WorkerOptions | None = None,
         clock: WorkerClock | None = None,
+        effect_reporter: TrustedEffectReporter | None = None,
     ) -> None:
         if not worker_id or len(worker_id) > 200:
             raise TaskqConfigError("worker_id must be non-empty and at most 200 characters")
@@ -691,6 +718,7 @@ class WorkerSupervisor:
         self.worker_id = worker_id
         self.options = options or WorkerOptions()
         self.clock = clock or RealWorkerClock()
+        self.effect_reporter = effect_reporter
         self._executor: ThreadPoolExecutor | None = None
         self._accepting = False
         self._stopping = False
@@ -860,6 +888,14 @@ class WorkerSupervisor:
                 None,
             )
 
+        control = _RunControl(is_sync=not task.handler_is_async)
+
+        async def report_effect(request: dict[str, Any]) -> dict[str, Any]:
+            context.raise_if_cancelled()
+            if control.ownership_lost.is_set() or control.settlement_terminal.is_set():
+                raise TaskCancelled(control.cancellation.reason or CancellationReason.LEASE_LOST)
+            return await self._report_effect(claim, task.name, request, control)
+
         context = JobContext(
             job_id=claim.job_id,
             queue=claim.queue,
@@ -870,8 +906,8 @@ class WorkerSupervisor:
             attempt_number=claim.attempt_number,
             failure_count=claim.failure_count,
             max_attempts=claim.max_attempts,
+            effect_reporter=report_effect if self.effect_reporter is not None else None,
         )
-        control = _RunControl(is_sync=not task.handler_is_async)
         self._controls[key] = control
         if self._stopping:
             control.cancellation.cancel(CancellationReason.SHUTDOWN)
@@ -1278,6 +1314,55 @@ class WorkerSupervisor:
             fatal=True,
         )
 
+    async def _report_effect(
+        self,
+        claim: ClaimedJob,
+        job_type: str,
+        request: dict[str, Any],
+        control: _RunControl,
+    ) -> dict[str, Any]:
+        """Retry a single report payload without owning terminal settlement."""
+        reporter = self.effect_reporter
+        if reporter is None:
+            raise TaskqConfigError("trusted effect reporter is not configured")
+        attempt = WorkerEffectAttempt(
+            job_id=claim.job_id,
+            attempt_id=claim.attempt_id,
+            worker_id=self.worker_id,
+            queue=claim.queue,
+            job_type=job_type,
+        )
+        last_error: BaseException | None = None
+        for number in range(1, self.options.settle_max_attempts + 1):
+            reason = control.cancellation.reason
+            if (
+                reason is not None
+                or control.ownership_lost.is_set()
+                or control.settlement_terminal.is_set()
+            ):
+                raise TaskCancelled(reason or CancellationReason.LEASE_LOST)
+            try:
+                return await reporter.report_effect(attempt, request)
+            except asyncio.CancelledError:
+                raise
+            except TaskqError as exc:
+                if not exc.retryable:
+                    raise
+                last_error = exc
+            except (TimeoutError, ConnectionError) as exc:
+                last_error = exc
+            if number < self.options.settle_max_attempts:
+                delay = min(
+                    self.options.settle_backoff_base * (2 ** (number - 1)),
+                    self.options.settle_backoff_cap,
+                )
+                if await self._settle_delay(delay, control):
+                    raise TaskCancelled(
+                        control.cancellation.reason or CancellationReason.LEASE_LOST
+                    )
+        assert last_error is not None
+        raise last_error
+
     async def _settle_invalid_followup(
         self,
         claim: ClaimedJob,
@@ -1408,8 +1493,10 @@ __all__ = [
     "JobRunState",
     "NotificationSource",
     "RealWorkerClock",
+    "TrustedEffectReporter",
     "WorkerCapacityError",
     "WorkerClock",
+    "WorkerEffectAttempt",
     "WorkerInvariantError",
     "WorkerOptions",
     "WorkerService",
