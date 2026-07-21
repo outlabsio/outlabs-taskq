@@ -134,8 +134,11 @@ def main() -> None:
         "0001_initial",
         "0002_contract_0_1_1",
         "0003_contract_0_1_2",
+        "0004_read_models",
+        "0005_read_model_conformance",
+        "0006_activate_ready_read_model",
     ]
-    assert len(FUNCTIONS) == 40
+    assert len(FUNCTIONS) == 43
 
     if args.mode != "core":
         return
