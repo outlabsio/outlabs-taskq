@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services (Outlabs / Diverse / QDarte).
 
-**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..017](docs/adr/README.md) accepted; six review rounds processed; protocol v1 document revision 1.0.4 + 0.1.2 function manifest canonical). **Stages 1 through 3 are independently accepted; the Stage-4 immutable dependency/managed-platform preflight and disabled-by-default first-host integration are independently accepted, and the allowlisted production canary is open** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, long-poll hub, composable runtime, and explicit OutLabs authorizer/provisioning tools are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
+**Status:** pre-alpha — design complete (spec v1.6, [ADR-001..021](docs/adr/README.md) accepted; ten review rounds processed; Protocol v1 document revision 1.0.7 + 0.1.4 Function Manifest canonical). **Stages 1 through 4 are independently accepted; the first production tools lane is operating under the authoritative host line, and the read-model host-adoption plan is review-gated** — the SQL kernel, typed client, worker/CLI, consumer testing helpers, generated HTTP clients, mounted FastAPI facade, authorization boundary, long-poll hub, composable runtime, explicit OutLabs authorizer/provisioning tools, and ready-only read model are implemented. See the live [`TASKS.md`](TASKS.md) board for current counts and work.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency.
 
@@ -12,7 +12,7 @@ Start here:
 
 | Doc | What it is |
 |---|---|
-| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..017) — override conflicting passages elsewhere** |
+| [`docs/adr/`](docs/adr/README.md) | **Accepted decisions (ADR-001..021) — override conflicting passages elsewhere** |
 | [`docs/design-review/`](docs/design-review/README.md) | Seven-doc design review (2026-07-18) — provenance for the ADRs |
 | [`TASKS.md`](TASKS.md) | **Live execution tracker — start here to contribute** |
 | [`docs/Task Queue Build Plan.md`](docs/Task%20Queue%20Build%20Plan.md) | The stage-by-stage build sequence + exit gates |

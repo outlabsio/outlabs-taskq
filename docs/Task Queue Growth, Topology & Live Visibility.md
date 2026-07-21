@@ -79,8 +79,7 @@ Versioned, read-only, **`read`-scoped** (queue-scoped per ADR-006) diagnostics e
 | `GET /taskq/v1/workers` / `workflows/{id}` | presence / rollup | existing views |
 | `GET /taskq/metrics` | Prometheus text | already specified (§12.2) |
 
-`taskq inspect --json` shares the same read models (one contract, three consumers: CLI, dashboard, MCP-later). The frontend itself stays **out of taskq** in 0.x: first consumer is a page in an existing host admin panel (DiverseAdminPanel / OutlabsAuthUI pattern); a bundled dashboard is a 0.3+ question, only after the JSON contract has survived real use. Staging: stats/jobs/detail endpoints are cheap and belong in **0.1** (they are how the pilot gets debugged); storage stats with the archive in 0.3.
-
+`taskq inspect --json` shares the same read models (one contract, three consumers: CLI, dashboard, MCP-later). The operator UI is **not** part of the Python package: it is a separate Protocol-v1 client. **Stack and packaging are locked by [ADR-018](./adr/ADR-018-operator-ui-tech-stack.md)** (React + Vite + TanStack + Base UI; standalone first, embeddable mount later; AuthUI/qdarte-admin family). This section’s endpoint table remains a **proposal** until accepted via its own ADR / H-11. Staging: stats/jobs/detail endpoints are cheap and belong in **0.1** (they are how the pilot gets debugged); storage stats with the archive in 0.3; do not build the console ahead of those read models.
 
 **ADR-019 reactivation:** the table above is historical direction, not the active
 H-08/H-11 contract. The [Read Model Specification](./Task%20Queue%20Read%20Model%20Specification.md)
@@ -89,6 +88,7 @@ queue-scoped job-page views, profile ETag/conditional-update behavior, field
 redaction, cursor, and B9 plan gates. The old broad `jobs?queue=&status=&job_type=`
 sketch must not be implemented. Unproven views remain typed `TQ501`; the UI
 waits for the accepted implementation, not merely this design decision.
+
 ---
 
 ## 5. Server-sent events (PROPOSAL — an SSE bridge over the events ledger, 0.2)

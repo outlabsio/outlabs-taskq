@@ -27,7 +27,7 @@
 |---|---|
 | Stage | **Post-Stage-4 retirement eligibility · S4-POST-R3 independently accepted** — `main` is the authoritative deployed line; S4-POST-L1-SPEC freezes the legacy-tools observation rules before any producer removal |
 | Suite | 457/457 regular on PG18.3 and PG16.14 with 1 opt-in skip on each; 290/290 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
-| Contracts | Protocol v1 document revision 1.0.7 + Function Manifest 0.1.4 (+ ADR-012..021) |
+| Contracts | Protocol v1 document revision 1.0.7 + Function Manifest 0.1.4 (+ ADR-012..021); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
 | Next review | Targeted L1 eligibility acceptance must close the seven-day/two-deploy ledger and its independent-oracle limits before L2 producer removal |
 
 ## Now
@@ -81,6 +81,13 @@
 - [x] **S4-POST-F01 · Coolify build-secret containment** — every configured API (39) and worker (21) variable is runtime-only in Coolify, so no runtime secret is available during image build; the Dockerfiles contain no secret `ARG` instruction. The restricted runtime PostgreSQL login was re-proven, the runtime DB credential plus host auth-signing and documentation secrets were rotated, API rollout health/public health passed, and the worker replacement started without a recorded deployment failure. The new deployment transcripts contain neither an affected environment-variable name nor a Docker build-argument record; deployment-log access remains restricted. Host evidence is recorded in `outlabsAPI` as `docs/taskq-s4-post-f01-build-secret-remediation.md`. The owner explicitly accepted deferral of Redis, Umami, Telegram, and unused `TOOLS_API_KEY` cleanup for this low-value host; the record makes no claim those older credentials are invalidated. No taskq SQL, wire, capability, or application-source change occurred.
 
 - [ ] **S4-POST-F02 · Deferred low-value-host credential cleanup** — owner-accepted residual from F01: rotate Redis, Umami, and Telegram credentials and remove the unused `TOOLS_API_KEY` configuration. This is nonblocking for the current tools lane, but must be re-evaluated before a host expansion or new side-effecting lane treats the historical build exposure as fully remediated.
+
+- [x] **ADR-018 · Operator UI tech stack locked** — React + Vite + TypeScript + TanStack Router/Query/Table + Base UI (OutlabsAuthUI / qdarte-admin family); Bun + Cloudflare static deploy; standalone app first, embeddable mount later; Nuxt stays docs-only. Does not accept Growth §4/§5 endpoint designs — console waits on read-model ADR/H-11.
+
+*(subsequent stages remain sequenced by the Build Plan)*
+
+## Contract questions (STOP-and-record before coding around)
+
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 
 **Blocking evidence:** Protocol v1 §2.5 says canonical `PUT /taskq/v1/queues/{queue}` success
@@ -95,10 +102,8 @@ or split into a new identity without a Tier-0 compatibility decision. Treating t
 **Decision required:** amend the Protocol docs-first to name the canonical H-11 success shape and
 the explicit compatibility/rollout posture for the existing generated PUT command, including the
 ETag and `If-Match` cases. The decision must say whether clients accept both shapes, whether a new
-
-*(subsequent stages remain sequenced by the Build Plan)*
-
-## Contract questions (STOP-and-record before coding around)
+route/command identity is required, and how old clients behave. Do not add a facade special case or
+make the client decoder permissive until that authority is frozen.
 
 ### S5-CQ-01 — SQL-contract compatibility window for migration 0004 is unspecified
 
@@ -178,7 +183,6 @@ SQL, an HTTP configuration route, or a facade-side exception before this authori
 `{"active":["read_model_list_ready"]}` on the committed `7fe2c6b` B9 evidence; `verify()` and
 the PostgreSQL 16/18 fresh/full-chain transition vectors must assert that exact posture. A future
 deactivation requires a successor metadata migration, never manual DML.
-
 
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
@@ -455,9 +459,9 @@ All seven findings are **accepted as source-backed**; ADR-012 resolved the two C
 
 ## Done
 
-- [x] **S4-POST-R3 · Authoritative-main and deployment-branch cutover** — R8A-01's immediate recheck passed; `main` advanced without force from `7df6b7f` to exact-tree candidate `2ed736b`, and Coolify API plus standing worker now run that identical revision with unchanged settings digests. A keyed read-only Aerolineas request proved `created`→`existed` same-id convergence and authorized canonical `succeeded` readback; a validation-only newsletter probe left all three legacy rows unchanged. The annotated `3f50b7d` rollback tag, pinned to its peeled SHA for a platform-verifiable revision, booted both resources against the unchanged PG16.14/Alembic database, preserved auth, health, worker command, zero active depths, and required no manual DML; both resources were then restored to exact `main@2ed736b`. One simultaneous worker rebuild hit a transient BuildKit snapshot-cache failure and succeeded on sequential retry without replacing the running worker. Host evidence commit `6f566c1` records the complete transcript; independent BR-06..10 acceptance remains the only open gate.
-
 - [x] **T-HARNESS-01 · Capability-fixture ordering pinned** — `role_conn` now explicitly depends on the per-test `pg` truncation fixture, preventing pytest-asyncio from initializing capability sessions before the state reset and erasing a freshly provisioned queue mid-test; the scratch-only truncation also retries a transient deadlock while prior capability connections unwind. This is harness-only: no taskq SQL, wire, capability, application, or production behavior changed.
+
+- [x] **S4-POST-R3 · Authoritative-main and deployment-branch cutover** — R8A-01's immediate recheck passed; `main` advanced without force from `7df6b7f` to exact-tree candidate `2ed736b`, and Coolify API plus standing worker now run that identical revision with unchanged settings digests. A keyed read-only Aerolineas request proved `created`→`existed` same-id convergence and authorized canonical `succeeded` readback; a validation-only newsletter probe left all three legacy rows unchanged. The annotated `3f50b7d` rollback tag, pinned to its peeled SHA for a platform-verifiable revision, booted both resources against the unchanged PG16.14/Alembic database, preserved auth, health, worker command, zero active depths, and required no manual DML; both resources were then restored to exact `main@2ed736b`. One simultaneous worker rebuild hit a transient BuildKit snapshot-cache failure and succeeded on sequential retry without replacing the running worker. Host evidence commit `6f566c1` records the complete transcript; independent BR-06..10 acceptance remains the only open gate.
 
 - [x] **S4-POST-R-AUDIT-RESPONSE · Candidate independently accepted** — registered the targeted response byte-for-byte as immutable Tier 4 (SHA-256 `2e86e692b35d62f70b0aa4d96f103035ac47367c5b002ed432f23b9337c5b78f`). Raw Git regeneration confirms candidate `2ed736b`, exact ordered parents, accepted tree `ded6d43`, empty recursive diff, both histories as ancestors, true fast-forward eligibility, 27/3 ledger counts, all four ledger checksums, source-backed default dispositions, zero forward ports, and all three annotated remote tags. Lock, host 72/72 plus five skips, Ruff, 64-file MyPy, Alembic/import gates, exact dependency pins, and same-tree harness inheritance pass; zero Contract questions. R8A-01 binds an immediate pre-move recheck of refs, Coolify branch/revision, and live health because platform policy state was not inspectable. READY authorizes only `main` fast-forward and frozen deployment cutover; retirement, deletion, side-effecting lanes, and Stage 5 remain closed.
 

@@ -19,7 +19,7 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 
 ## Tier 1 — decisions
 
-[ADR-001..021](./adr/README.md). Accepted 2026-07-18 across the design reviews, contract adjudications, and the Stage-2/Stage-3 gates; ADR-021 (read-model conformance repairs) was accepted 2026-07-20. Reopening one requires new evidence and a new ADR.
+[ADR-001..021](./adr/README.md). Accepted 2026-07-18 across the design reviews, contract adjudications, and the Stage-2/Stage-3 gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), and ADR-021 (read-model conformance repairs) were accepted 2026-07-20. Reopening one requires new evidence and a new ADR.
 
 ## Tier 2 — operating plan
 
@@ -43,7 +43,7 @@ Two living docs: [`TASKS.md`](../TASKS.md) (repo root — the task board, cold-s
 | [Legacy Tools Path Retirement Specification](./Task%20Queue%20Legacy%20Tools%20Path%20Retirement%20Specification.md) | Tools-only fallback/consumer retirement, observation gate, zero-DML rollback | L1 eligibility design amended; shared legacy table and non-tools lanes explicitly remain |
 | [Authorization & Queue Permissions](./Task%20Queue%20Authorization%20%26%20Queue%20Permissions.md) | Queue-scoped authz, `taskq_{queue}:{action}` grammar, provisioning DX | Detail behind ADR-006/011 |
 | [Test & Benchmark Harness](./Task%20Queue%20Test%20%26%20Benchmark%20Harness.md) | Suites T1–T8, exact CI matrix, benchmarks B1–B14 (implemented subset named in the doc) | Implements §16.3 + the review test programs; performance remains report-only |
-| [Growth, Topology & Live Visibility](./Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md) | Retention profiles, dedicated-DB topology, read models, SSE | §1–§2 adopted; **§3–§5 PROPOSALS** (decide via future ADRs; R2-14/15/16 amendments accepted) |
+| [Growth, Topology & Live Visibility](./Task%20Queue%20Growth%2C%20Topology%20%26%20Live%20Visibility.md) | Retention profiles, dedicated-DB topology, read models, SSE | §1–§2 adopted; **§3–§5 PROPOSALS** (endpoint/topology ADRs still pending); **operator UI stack locked by [ADR-018](./adr/ADR-018-operator-ui-tech-stack.md)** |
 | [Borrowed Features 01–14](./taskq-borrowed-features/README.md) | Product feature contracts | Its release-staging table (ADR-009) beats individual headers |
 
 ## Tier 4 — historical (immutable)
