@@ -2,7 +2,8 @@
 
 > **Status:** Tier-3 local-pilot design — P0/P0B/P1 accepted. P1 adds only a
 > disabled package boundary; P2 alone may create or provision its dedicated
-> disposable database. Round 11 accepted P0–P5 against a stale source
+> disposable database, but is paused on S5-QD-CQ-02's authorization-topology
+> decision. Round 11 accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
@@ -190,3 +191,11 @@ A newly created disposable host test database reached head with that posture.
 The repair is incumbent QDarte migration work, not a package or pilot-database
 change: it neither creates nor authorizes `qdarte_pilot_dev`, and it does not
 touch QDarte's direct contact-verify queue.
+
+P2 is paused before any database or IAM action because P1's package authorizer
+uses QDarte's existing `outlabs_auth` session in `qdarteapi_dev`, while the
+frozen P2 boundary simultaneously requires QDarte-issued queue-scoped tokens
+and forbids access to that database. S5-QD-CQ-02 must choose either a narrowly
+enumerated local IAM operation against the existing auth schema or a distinct
+pilot-local OutLabsAuth instance and token lifecycle. Neither topology may be
+improvised during provisioning.

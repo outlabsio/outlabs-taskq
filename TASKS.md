@@ -52,6 +52,8 @@
 
 - [x] **S5-QD-P1 · QDarte disabled host boundary** — exact a3 wheel URL/SHA pins now land separately in fresh API and worker worktrees. The API's optional, disabled-by-default mount accepts only a development `postgresql+asyncpg` DSN for `qdarte_pilot_dev` under a dedicated non-superuser login, uses its own one-connection runtime pool, and never falls back to the incumbent API DSN; disabled boot leaves the facade unmounted and opens no pilot-database connection. The worker has no process or handler yet, but its future pilot configuration has an immutable one-item allowlist: `qdarte.cluster_research.pilot` on queue `qdarte_pilot`; it cannot inherit or widen the broad legacy worker allowlist. Focused API/worker tests, Ruff, format, and MyPy pass. The direct contact-verify queue and copied `/ops/taskq`/`/worker/taskq` surface are untouched; no pilot database, IAM, public producer, or worker started. P2 only may create/provision `qdarte_pilot_dev`.
 
+- [ ] **S5-QD-P2 · QDarte isolated pilot provisioning** — **blocked by S5-QD-CQ-02.** The P1 mounted facade authenticates through QDarte's existing `outlabs_auth` session in `qdarteapi_dev`, while the frozen P2 boundary forbids querying or granting there and simultaneously requires exact queue-scoped QDarte token permissions. Resolve that topology/authority contradiction docs-first before creating `qdarte_pilot_dev`, package roles, IAM records, a queue, or a token.
+
 - [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
 - [x] **S5-RM-DESIGN · H-08/H-11 read-model activation proposal prepared** — added the Tier-3 [Read Model Specification](docs/Task%20Queue%20Read%20Model%20Specification.md): queue-scoped finite `ready|running|finished` keyset pages; fixed safe job projection; observer-safe queue profile; and a real version/ETag conditional-update path that preserves bootstrap `ensure_queue`. It names the docs-first ADR/Protocol/Manifest/migration sequence plus PG16/PG18 B9, SQL/HTTP parity, redaction, authorization, pagination, and conflict evidence. It changes no current contract, SQL, host, UI, producer, consumer, or L1 observation behavior; both deferred routes remain `TQ501` pending ADR acceptance.
@@ -132,6 +134,27 @@ separately reviewed convergence decision may evaluate whether QDarte's active co
 queue should migrate to the package. The immutable Round-11 response remains historical; its
 `no taskq` inventory was based on a stale source baseline and cannot override this
 current-source finding.
+
+### S5-QD-CQ-02 — P2's isolated-database boundary conflicts with P1's QDarte-auth binding *(open)*
+
+**Blocking evidence:** P1's mounted facade deliberately constructs
+`OutlabsQueueAuthorizer(auth=app.auth.auth, session_dependency=get_async_session)`. Both
+objects are bound to QDarte's existing `outlabs_auth` schema and SQLAlchemy engine in
+`qdarteapi_dev`. The adapter resolves that session for every authentication and
+queue-authorization check. P2, however, requires queue-scoped worker/read permissions issued
+through QDarte's existing service-token lifecycle while also forbidding any query or grant
+against `qdarteapi_dev`. Those requirements cannot all hold: the existing authorizer needs that
+database for authorization, and the required permission catalog/token scopes cannot be created
+there without a narrow IAM mutation.
+
+**Decision required:** choose and freeze one bounded topology before any P2 database, role,
+queue, IAM, or token action: either (A) permit an explicitly enumerated local-only
+`outlabs_auth` catalog/role/token operation in `qdarteapi_dev`, while preserving the complete
+ban on its `taskq` and `qdarte_ops` surfaces; or (B) revise P1/P2 to use a separately initialized
+pilot-local OutLabsAuth instance and session in `qdarte_pilot_dev`, including its independent
+token lifecycle. The decision must name the authorization database, the exact principal/token
+issuance path, the allowed schemas/tables, and the negative isolation vectors. Do not silently
+reuse QDarte's broad auth session, add a wildcard, or create an ad-hoc authorization bypass.
 
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 
