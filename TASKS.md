@@ -56,7 +56,7 @@
 
 - [x] **S5-QD-P3 · QDarte deterministic pilot adapter** — factored the incumbent calculation into a side-effect-free `compute_cluster_research_scope(payload)` and registered only `qdarte.cluster_research.pilot` in a closed package registry. The frozen AR synthetic input rejects every alternate shape; its bounded taskq-only output has no payload echo/followups and pins the inherited-result digest `14b7f6ef…63d4971`. Focused source tests prove it remains absent from QDarte’s legacy handler map and default `JobType` set. No worker, producer, HTTP client, database connection, queue claim, legacy enqueue, QDarte domain write, or shared-registry mutation occurred.
 
-- [ ] **S5-QD-P4 · QDarte isolated worker canary** — specify and run exactly one development-only taskq HTTP worker using the closed P3 registry, `qdarte_pilot` queue, and a newly issued ephemeral `run` service token. Add the internal-only keyed harness producer and prove `created` then `existed`, one handler invocation, canonical authorized success, exactly one successful attempt, and zero QDarte legacy-ledger mutation. Stop before replay/hard-kill recovery (P5); no public producer, broad worker, or side-effecting lane is authorized.
+- [ ] **S5-QD-P4 · QDarte isolated worker canary** *(blocked: S5-QD-CQ-04)* — specify and run exactly one development-only taskq HTTP worker using the closed P3 registry, `qdarte_pilot` queue, and a newly issued ephemeral `run` service token. Add the internal-only keyed harness producer and prove `created` then `existed`, one handler invocation, canonical authorized success, exactly one successful attempt, and zero QDarte legacy-ledger mutation. Stop before replay/hard-kill recovery (P5); no public producer, broad worker, or side-effecting lane is authorized.
 
 - [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
@@ -113,6 +113,30 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-CQ-04 — P4 requires a keyed harness producer but freezes no authorized producer identity *(open)*
+
+**Blocking evidence:** P3/P4 require an internal/local keyed harness producer to
+prove the `created` then `existed` canary, while the pilot privilege model
+freezes only two self-contained service-token scopes: the worker receives
+`taskq_qdarte_pilot:run` and the acceptance principal receives
+`taskq_qdarte_pilot:read`. The same section expressly forbids a public enqueue
+route, and P2 evidence proves generic enqueue is rejected by the host-owned
+authorizer. No P3 harness exists in either QDarte checkout. Issuing an
+unmentioned `:enqueue` token, borrowing the facade database login, or writing
+directly through SQL would each introduce a producer path without an accepted
+authority and would weaken the isolated HTTP/capability proof.
+
+**Decision required:** freeze one local-only producer mechanism before P4 may
+start: either (a) a third, short-lived self-contained
+`taskq_qdarte_pilot:enqueue` harness token accepted only by the mounted
+package facade, or (b) a narrowly defined host-owned internal harness whose
+producer authority and invocation boundary are explicit. The decision must
+state the credential lifetime/disposal, prove the path cannot become a public
+producer, retain the worker's `run`-only and acceptance principal's
+`read`-only scopes, and add positive/negative authorization vectors. It must
+not use the facade's PostgreSQL login as a producer bypass or access
+`qdarteapi_dev.taskq` / `qdarte_ops`.
 
 ### S5-QD-CQ-01 — Current QDarte staging already carries an incompatible direct-SQL taskq surface *(resolved: Option B)*
 

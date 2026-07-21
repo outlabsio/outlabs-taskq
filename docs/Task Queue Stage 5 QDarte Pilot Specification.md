@@ -1,8 +1,9 @@
 # taskq — Stage 5 QDarte pilot specification
 
 > **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2/P3 accepted. The
-> isolated database/IAM and deterministic pure adapter are complete; P4 alone
-> may start the dedicated pilot worker. Round 11
+> isolated database/IAM and deterministic pure adapter are complete; P4 is
+> blocked on S5-QD-CQ-04's producer-identity decision and may not start the
+> dedicated pilot worker. Round 11
 > accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
@@ -198,6 +199,14 @@ The downstream question is deliberately separate: after P5 proves package fit,
 QDarte owners may decide whether their direct-SQL contact-verify queue should
 remain, retire, or migrate to taskq. The pilot neither answers nor starts that
 consolidation work.
+
+P4 is additionally stopped at S5-QD-CQ-04. Its keyed `created` then `existed`
+oracle needs an internal producer, but the accepted self-contained credentials
+currently name only a `run` worker and a `read` acceptance principal. The
+pilot must not invent an enqueue token, repurpose the facade's database login,
+or add a public producer route. A docs-first decision must freeze the
+local-only producer identity, authorization vectors, lifetime, and disposal
+before the worker can start.
 
 P1's isolated gate also repaired the current QDarte host's fresh-database
 chain. Migration `20260715_0070_host_native_worker_lanes` now recognizes only
