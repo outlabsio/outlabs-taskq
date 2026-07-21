@@ -1,9 +1,10 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P0/P0B accepted; P1 may proceed only
-> against its dedicated disposable database. Round 11 accepted P0–P5 against a
-> stale source inventory; its safety findings remain binding, while current
-> QDarte direct-taskq co-residency is isolated by database. It is
+> **Status:** Tier-3 local-pilot design — P0/P0B accepted; P1 remains confined
+> to its dedicated disposable database and is paused on the incumbent QDarte
+> fresh-migration gate. Round 11 accepted P0–P5 against a stale source
+> inventory; its safety findings remain binding, while current QDarte
+> direct-taskq co-residency is isolated by database. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
 > [Function Manifest 0.1.4](./Task%20Queue%200.1%20Function%20Manifest.md),
 > ADR-006, ADR-011, ADR-020, and the [Build Plan](./Task%20Queue%20Build%20Plan.md).
@@ -179,3 +180,12 @@ The downstream question is deliberately separate: after P5 proves package fit,
 QDarte owners may decide whether their direct-SQL contact-verify queue should
 remain, retire, or migrate to taskq. The pilot neither answers nor starts that
 consolidation work.
+
+P1 also requires the current QDarte host's own fresh-database migration chain
+to reach head. The isolated P1 gate found that migration
+`20260715_0070_host_native_worker_lanes` rejects nonzero desired replicas even
+though an earlier migration seeds `media=1`. That incumbent migration-chain
+defect is S5-QD-HOST-GATE-01, not a package or pilot-database failure. Its
+owner must repair it through the host's migration discipline before P1 can
+claim a green host suite; it neither authorizes a change to `qdarte_pilot_dev`
+nor a change to QDarte's direct contact-verify queue.
