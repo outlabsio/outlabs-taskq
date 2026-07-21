@@ -27,9 +27,15 @@ or automatic fallback after an ambiguous enqueue, result, or settlement.
 
 ## 2. Fixed local topology
 
-The only mutable queue database is a new disposable package-owned database on
-the guarded local PostgreSQL cluster. It has the immutable package `taskq`
-schema and is distinct from both `qdarteapi_dev` and `qdarte_pilot_dev`.
+The only mutable queue database is `qdarte_contact_verify_dev`, a new
+disposable package-owned database on the guarded local PostgreSQL cluster. It
+has the immutable package `taskq` schema and is distinct from both
+`qdarteapi_dev` and `qdarte_pilot_dev`.
+
+The one package queue is `qdarte_contact_verify`; its one permitted type is
+`qdarte.contact_verify.scope`. These names are package-only and must never be
+registered in QDarte's incumbent direct client, direct worker map, or copied
+`/worker/taskq/*` surface.
 
 ```text
 isolated QDarte API
@@ -46,6 +52,15 @@ The result service uses only server-owned runner and observer transports. An
 owner/admin and an operator credential exist only for explicit local migration,
 verification, and profile provisioning commands; neither joins an API or
 worker pool.
+
+The package Protocol facade is available only inside the checked-in local
+contact harness. The normal QDarte application mounts neither `/taskq` nor a
+generic package producer route. The harness has one unlisted local result
+adapter, `POST /internal/taskq/contact-verify/jobs/{job_id}/results`, and its
+authorizer admits only the exact contact queue scopes. Before CV-04, no
+enqueue credential is issued at all; CV-04 alone may issue a process-local,
+short-lived harness enqueue credential for its one controlled canary. This is
+not a public producer or a replacement for the incumbent direct worker API.
 
 ## 3. Ordered slices and stop conditions
 
@@ -108,7 +123,9 @@ connection budget against the measured local ceiling.
 The disabled configuration must mount no package route and open no package
 connection. Enabled local configuration may expose only the package contact
 adapter and its internal/local harness; it must not expose a generic enqueue
-route or copy the incumbent direct worker API.
+route from the normal QDarte application or copy the incumbent direct worker
+API. The harness's package endpoint is private to the local evidence process
+and remains enqueue-denied until CV-04 issues its one ephemeral credential.
 
 ### CV-04 — closed worker and controlled effect canary
 
