@@ -303,7 +303,7 @@ PUBLIC_ERRORS = {
     "taskq.set_concurrency_limit(text,integer,text)": frozenset({"TQ422"}),
     "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)": frozenset({"TQ422"}),
     "taskq.tick(integer)": frozenset({"TQ422"}),
-    "taskq.update_queue_profile(text,jsonb,text,bigint)": frozenset({"TQ422"}),
+    "taskq.update_queue_profile(text,jsonb,text,bigint)": frozenset({"TQ001", "TQ422"}),
     "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)": frozenset({"TQ422"}),
 }
 

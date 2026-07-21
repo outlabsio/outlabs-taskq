@@ -649,7 +649,12 @@ class _FacadeDispatcher:
                 raise TaskqValidationError(details={"field": "view"})
             limit = _parse_page_limit(request.query_params.get("limit"))
             after = _decode_cursor(request.query_params.get("cursor"), queue=queue, view=view)
-            page = await r.observer.list_jobs(queue, view, limit=limit, after=after)
+            try:
+                page = await r.observer.list_jobs(queue, view, limit=limit, after=after)
+            except TaskqCapabilityError as exc:
+                raise TaskqCapabilityError(
+                    details={"reason": "read_model_view_inactive", "view": view}, cause=exc
+                ) from exc
             return _command_response(
                 request,
                 spec,
@@ -744,7 +749,10 @@ class _FacadeDispatcher:
             result, profile, current_version = await operator.update_queue_profile(
                 str(path["queue"]), body.profile, actor, expected_version
             )
+            if result == "missing":
+                raise TaskqNotFoundError()
             if result == "profile_version_conflict":
+                assert current_version is not None
                 raise TaskqConflictError(
                     details={"reason": "profile_version_conflict", "current_version": current_version}
                 )

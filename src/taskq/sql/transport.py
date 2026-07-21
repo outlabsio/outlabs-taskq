@@ -620,8 +620,8 @@ class SqlTaskqTransport:
 
     async def update_queue_profile(
         self, name: str, profile: Mapping[str, Any], actor: str, expected_version: int
-    ) -> tuple[str, QueueProfile | None, int]:
-        async def operation(conn: AsyncConnection) -> tuple[str, QueueProfile | None, int]:
+    ) -> tuple[str, QueueProfile | None, int | None]:
+        async def operation(conn: AsyncConnection) -> tuple[str, QueueProfile | None, int | None]:
             row = await self._one(
                 conn,
                 "SELECT * FROM taskq.update_queue_profile(:name, CAST(:profile AS jsonb), :actor, :expected_version)",
@@ -634,6 +634,8 @@ class SqlTaskqTransport:
             )
             assert row is not None
             profile_row = row["profile"]
+            if row["result"] is None:
+                return "missing", None, None
             return (
                 str(row["result"]),
                 (QueueProfile.model_validate(profile_row) if profile_row else None),

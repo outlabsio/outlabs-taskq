@@ -194,7 +194,7 @@ class OperatorTransport(ClosableTransport, Protocol):
 
     async def update_queue_profile(
         self, name: str, profile: Mapping[str, Any], actor: str, expected_version: int
-    ) -> tuple[str, QueueProfile | None, int]: ...
+    ) -> tuple[str, QueueProfile | None, int | None]: ...
 
     async def pause_queue(
         self, name: str, actor: str, reason: str | None = None

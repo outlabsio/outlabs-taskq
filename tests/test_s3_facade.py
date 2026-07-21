@@ -12,6 +12,7 @@ import httpx
 import pytest
 from fastapi import FastAPI, HTTPException
 
+from taskq.errors import TaskqCapabilityError
 from taskq.http import (
     AuthContext,
     ClaimWaitHub,
@@ -48,6 +49,7 @@ class FacadeTransport:
         self.claims: list[ClaimResult] = []
         self.projections: dict[UUID, AuthorizationProjection] = {}
         self.shutdown_requested = False
+        self.inactive_views: set[str] = set()
 
     async def enqueue(self, command: Any) -> EnqueueCreatedResult:
         self.calls.append(("enqueue", command))
@@ -119,6 +121,8 @@ class FacadeTransport:
 
     async def list_jobs(self, queue: str, view: str, **kwargs: Any) -> JobPage:
         self.calls.append(("list_jobs", (queue, view, kwargs)))
+        if view in self.inactive_views:
+            raise TaskqCapabilityError()
         return JobPage(as_of=datetime.now(UTC), items=())
 
     async def get_contract_meta(self) -> ContractMeta:
@@ -136,6 +140,7 @@ class FacadeTransport:
 class OperatorFake:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
+        self.missing_profiles: set[str] = set()
 
     async def ensure_queue(
         self, name: str, profile: dict[str, Any] | None = None, actor: str | None = None
@@ -145,8 +150,10 @@ class OperatorFake:
 
     async def update_queue_profile(
         self, name: str, profile: dict[str, Any], actor: str, expected_version: int
-    ) -> tuple[str, QueueProfile | None, int]:
+    ) -> tuple[str, QueueProfile | None, int | None]:
         self.calls.append(("update_queue_profile", (name, profile, actor, expected_version)))
+        if name in self.missing_profiles:
+            return "missing", None, None
         updated = _profile(name).model_copy(update={"profile_version": expected_version + 1})
         return "updated", updated, updated.profile_version
 
@@ -460,6 +467,39 @@ async def test_queue_profile_get_and_conditional_put_use_etag_envelope() -> None
         "update_queue_profile",
         ("emails", {"default_priority": 5}, "test", 1),
     )
+
+
+async def test_conditional_queue_update_missing_and_inactive_view_are_typed() -> None:
+    transport = FacadeTransport()
+    transport.inactive_views.add("running")
+    operator = OperatorFake()
+    operator.missing_profiles.add("missing")
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport),
+            authorizer=no_auth_for_tests(),
+            operator_transport=operator,  # type: ignore[arg-type]
+            operator_authorizer=no_auth_for_tests(),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        missing = await client.put(
+            "/taskq/v1/queues/missing",
+            headers=_headers(**{"If-Match": '"taskq-profile-1"'}),
+            json={"profile": {}},
+        )
+        inactive = await client.get(
+            "/taskq/v1/jobs?queue=emails&view=running", headers=_headers()
+        )
+    assert missing.status_code == 404
+    assert missing.json()["error"]["code"] == "TQ001"
+    assert inactive.status_code == 501
+    assert inactive.json()["error"]["details"] == {
+        "reason": "read_model_view_inactive",
+        "view": "running",
+    }
 
 
 async def test_bearer_and_legacy_adapters_preserve_simple_mounts() -> None:

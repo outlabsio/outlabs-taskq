@@ -253,6 +253,11 @@ async def test_operator_transport_complete_surface(
     assert await operator.pause_queue(queue, "s2-test") == "already_paused"
     assert await operator.resume_queue(queue, "s2-test") == "resumed"
     assert await operator.set_concurrency_limit("resource", 2, "s2-test") == "created"
+    assert await operator.update_queue_profile("s2_missing", {}, "s2-test", 1) == (
+        "missing",
+        None,
+        None,
+    )
 
     await transports["runner"].worker_heartbeat("shutdown-worker", [queue])
     assert (

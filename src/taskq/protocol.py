@@ -985,7 +985,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.update_queue_profile(text,jsonb,text,bigint)",
             _OPERATOR,
             ("updated", "profile_version_conflict"),
-            (TqCode.VALIDATION,),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION),
         ),
         CommandName.PAUSE_QUEUE: _spec(
             "taskq.pause_queue(text,text,text)",
