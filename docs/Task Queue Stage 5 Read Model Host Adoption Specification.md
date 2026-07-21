@@ -39,10 +39,14 @@ raises the database rollback floor: `0.1.0a2` must never be restarted against
 that database. This is ADR-020's deliberate expand → migrate → contract rule,
 not an operational exception.
 
-The full generated facade cannot be the first bridge artifact: on a 0.1.2
-database its new observer functions do not exist. Serving those routes before
-migration would turn a valid request into an implementation failure. This
-specification therefore separates the runtime bridge from route exposure.
+The bridge retains the reserved read-model command identities as **DEFERRED**
+responders. They answer typed `TQ501`, are absent from OpenAPI, and have no
+generated client method; they do not expose a read-model success path on either
+database state. The full generated facade cannot be the first deployed success
+artifact: on a 0.1.2 database its new observer functions do not exist. Serving
+them as active routes before migration would turn a valid request into an
+implementation failure. This specification therefore separates the runtime
+bridge from route exposure.
 
 ## 3. Two-artifact release and migration sequence
 
@@ -52,40 +56,42 @@ reused release tag is allowed.
 
 | Step | Artifact/database posture | Permitted effect | Required proof |
 |---|---|---|---|
-| A | Publish **bridge** release `0.1.0a3` from audited source `40aa9b5` plus an isolated package-version release commit. That source supports `{0.1.2,0.1.3,0.1.4}` but predates the H-08/H-11 facade/client addition and exposes no read-model route. | Package release only. | Wheel/sdist, optional-extra, closed-set acceptance/rejection, and no read-model route/OpenAPI assertion. |
-| B | Repin and deploy the first host to exact `a3` while the database remains 0.1.2. | A normal host deployment; no database DML. | Health, existing tools-worker service, canonical existing-job read, `/meta` reporting 0.1.2, and no H-08/H-11 route success path. This is the new rollback baseline. |
-| C | Run `taskq migrate` then `taskq verify` directly under the PostgreSQL owner/admin identity using the exact `a3` artifact. Apply only immutable `0004`, `0005`, and `0006`; never run manual metadata DML. | The separately authorized production schema migration. | Pre/post backup checkpoint, migration ledger checksums, contract metadata exactly 0.1.4, capabilities exactly `{"active":["read_model_list_ready"]}`, `verify()` twice, existing tools queue/profile unchanged, and runtime health under `a3`. |
-| D | Publish full read-model release `0.1.0a4` from the independently accepted library tip, then repin/deploy the host to exact `a4`. | Route exposure only after C. | Wheel/sdist plus source and OpenAPI proof that only the generated observer routes are newly exposed; no host-owned read route or operator transport. |
+| A | Publish **bridge** release `0.1.0a3` from audited source `40aa9b5` plus an isolated package-version release commit. That source supports `{0.1.2,0.1.3,0.1.4}` and keeps H-08/H-11 **DEFERRED**. | Package release only. | Wheel/sdist, optional-extra, closed-set acceptance/rejection, and exact deferred-responder/OpenAPI/client proof. |
+| B | Repin and deploy the first host to exact `a3` while the database remains 0.1.2. | A normal host deployment; no database DML. | Health, existing tools-worker service, canonical existing-job read, `/meta` reporting 0.1.2, and H-08/H-11 reserved paths returning TQ501 while remaining OpenAPI-hidden/client-absent. This is the new rollback baseline. |
+| C | Run `taskq migrate` then `taskq verify` directly under the PostgreSQL owner/admin identity using the exact `a3` artifact. Apply only immutable `0004` and `0005`; never run manual metadata DML. | The separately authorized contract migration to 0.1.4, with ready still inactive. | A current backup test-restored once to a disposable target before migration; migration ledger checksums; contract metadata exactly 0.1.4 with capabilities exactly `{"active":[]}`; `verify()` twice; existing tools queue/profile unchanged; and runtime health under `a3`. |
+| D | Publish full read-model release `0.1.0a4` from accepted source `1610b5a` plus an isolated package-version release commit. Before the `a4` host deployment, use that exact artifact under the PostgreSQL owner/admin identity to apply immutable `0006` and `verify()` twice. Then repin/deploy the host to exact `a4`. | The metadata-only ready activation and generated observer-route exposure form one gated step. | Wheel/sdist plus source/OpenAPI proof that only generated observer GET routes are newly exposed; 0006 checksum; contract metadata 0.1.4 with capabilities exactly `{"active":["read_model_list_ready"]}`; no host-owned read route or operator transport. |
 | E | Run the read-only production acceptance vectors in §6. | Read-only requests only. | Authorized profile/ready reads and all negative authorization/capability/envelope checks. |
 
-The owner/admin credential is used only for C. The app runtime credential remains non-superuser,
-has no operator membership, cannot `SET ROLE taskq_operator`, and never executes migration or
-profile-update functions. The existing separate operator credential is not used by this slice.
+The owner/admin credential is used only for C and D. The app runtime credential remains
+non-superuser, has no operator membership, cannot `SET ROLE taskq_operator`, and never executes
+migration or profile-update functions. The existing separate operator credential is not used by
+this slice.
 
 ## 4. Rollback floor and stop rules
 
 Before C, the pre-existing `a2` deployment remains a valid zero-DML rollback.
 After C, it is permanently below the database's rollback floor and must not be
 booted. The only valid application rollback is the deployed `a3` bridge
-artifact: it supports 0.1.4 while intentionally exposing no read-model route.
-The old Stage-4 rollback tag is retained as historical evidence but is not a
-post-C boot target.
+artifact: it supports 0.1.4 while its reserved read-model paths remain typed
+TQ501. The old Stage-4 rollback tag is retained as historical evidence but is
+not a post-C boot target.
 
 The host must rehearse both boundaries:
 
 1. **Pre-C:** an `a3` → `a2` deployment rollback while metadata remains 0.1.2;
    no migration or queue/job DML.
-2. **Post-C:** an `a4` → `a3` deployment rollback while metadata remains 0.1.4;
-   existing tools processing and health recover, `ready` is no longer exposed,
-   and no database mutation occurs.
+2. **Post-D:** an `a4` → `a3` deployment rollback while metadata remains 0.1.4
+   with ready-active metadata; existing tools processing and health recover,
+   `ready` returns the bridge's typed TQ501 responder, and no database mutation
+   occurs.
 
 Stop rather than improvise if the owner cannot reproduce the migration ledger,
-the app cannot start under the declared set, `verify()` differs from the exact
-0.1.4/ready-only posture, a required artifact hash differs, a route would be
-exposed before C, a legacy tools row appears, or a request would require an
-operator/runtime privilege broadening. A new SQL contract or metadata change
-requires a new ADR/migration path; no setting may activate or deactivate a
-view.
+the app cannot start under the declared set, `verify()` differs from the
+phase-specific 0.1.4 capability posture, a required artifact hash differs, a
+route would be exposed before D, a legacy tools row appears, or a request would
+require an operator/runtime privilege broadening. A new SQL contract or metadata
+change requires a new ADR/migration path; no setting may activate or deactivate
+a view.
 
 ## 5. First-host surface and authorization
 
@@ -124,20 +130,23 @@ creating a production job solely for visibility testing:
   host `pyproject.toml`/lock pins, and artifact-isolation proof for `a3` and
   `a4`;
 - `a3` starts on a representative 0.1.2 database and rejects an unsupported
-  metadata value; it has no read-model route or generated client method;
-- `a4` starts on 0.1.4 after C; its facade OpenAPI exposes the generated GET
+  metadata value; its reserved read-model paths answer TQ501, are absent from
+  OpenAPI, and have no generated client method;
+- `a4` starts on 0.1.4 after D; its facade OpenAPI exposes the generated GET
   paths but no operator/profile-write surface in the host; and
 - a fresh/full local 0001→0006 proof on PostgreSQL 16.14 and 18.x remains
   green before any production action.
 
 ### B. Production migration evidence
 
-- a successful current backup/checkpoint is recorded before C; restore/PITR is
-  still an independently owned durability gate and is not falsely claimed here;
-- migration ledger contains the immutable 0004/0005/0006 checksums, owner/
-  grant/catalog verification passes twice, and no manual table or metadata DML
-  occurred;
-- `get_contract_meta()` returns exactly 0.1.4 with
+- a successful current backup/checkpoint is test-restored to a disposable
+  target once before C. This proves that backup artifact only; it does not
+  claim general restore/PITR completion, which remains independently owned;
+- C's ledger contains immutable 0004/0005 checksums, owner/grant/catalog
+  verification passes twice, and metadata is exactly 0.1.4 with
+  `{"active":[]}`;
+- D's ledger adds immutable 0006; the `a4` owner/grant/catalog verification
+  passes twice with metadata exactly 0.1.4 and
   `{"active":["read_model_list_ready"]}`; `running` and `finished` are absent;
 - the existing tools queue profile is unchanged before/after C, and the host's
   existing tools canary/worker health evidence remains successful; and
