@@ -145,6 +145,36 @@ During cutover, hosts keep their existing catalogs; the adapter accepts **extra 
         },
     )
 
+### 3.3 Host service-token pre-checks
+
+`OutlabsQueueAuthorizer` deliberately uses an OutLabsAuth installation's
+generic `require_auth()` / `require_permission()` dependency surface. A host
+that validates self-contained service tokens in an explicit pre-check before
+those generic dependencies must supply its own small `QueueAuthorizer` rather
+than bypassing authorization or weakening the queue grammar. The adapter stays
+host-owned and uses the host's supported token verifier plus exact queue-scoped
+permission checks:
+
+```python
+class HostServiceTokenQueueAuthorizer:
+    async def authenticate(self, request):
+        principal = host_service_tokens.validate_request(request)
+        return AuthContext(actor=principal.actor, principal=principal)
+
+    async def authorize_context(self, request, context, action, queue):
+        assert queue is not None
+        host_service_tokens.check_permission(
+            context.principal,
+            f"taskq_{queue}:{action.value}",
+        )
+```
+
+The host still authenticates before parsing queue-dependent input, must retain
+the facade's normal hiding/error behavior, and may grant only exact names. It
+does not add a wildcard, generic credential bypass, or package-level dependency
+on a host's service-token implementation. The QDarte local pilot is the first
+documented use of this extension point.
+
 This replaces the brief's static read/write/operator mapping tables — same hosts, now with a path to per-queue tightening lane by lane (tighten = mint new tokens with `taskq_{queue}:run`, drop the legacy candidate when the lane is done).
 
 ---

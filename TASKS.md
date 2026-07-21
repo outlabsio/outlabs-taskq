@@ -52,7 +52,7 @@
 
 - [x] **S5-QD-P1 · QDarte disabled host boundary** — exact a3 wheel URL/SHA pins now land separately in fresh API and worker worktrees. The API's optional, disabled-by-default mount accepts only a development `postgresql+asyncpg` DSN for `qdarte_pilot_dev` under a dedicated non-superuser login, uses its own one-connection runtime pool, and never falls back to the incumbent API DSN; disabled boot leaves the facade unmounted and opens no pilot-database connection. The worker has no process or handler yet, but its future pilot configuration has an immutable one-item allowlist: `qdarte.cluster_research.pilot` on queue `qdarte_pilot`; it cannot inherit or widen the broad legacy worker allowlist. Focused API/worker tests, Ruff, format, and MyPy pass. The direct contact-verify queue and copied `/ops/taskq`/`/worker/taskq` surface are untouched; no pilot database, IAM, public producer, or worker started. P2 only may create/provision `qdarte_pilot_dev`.
 
-- [ ] **S5-QD-P2 · QDarte isolated pilot provisioning** — **blocked by S5-QD-CQ-02.** The P1 mounted facade authenticates through QDarte's existing `outlabs_auth` session in `qdarteapi_dev`, while the frozen P2 boundary forbids querying or granting there and simultaneously requires exact queue-scoped QDarte token permissions. In addition, QDarte's source documents that its generic OutLabsAuth dependency rejects its self-contained service tokens, while the mounted package adapter uses that generic dependency rather than QDarte's corrective host wrapper. Resolve both topology and credential-path contradictions docs-first before creating `qdarte_pilot_dev`, package roles, IAM records, a queue, or a token.
+- [ ] **S5-QD-P2 · QDarte isolated pilot provisioning** — S5-QD-CQ-02 is resolved as Option A: package queue data is created only in `qdarte_pilot_dev`; QDarte's existing supported service-token verifier plus an additive, exact-name-only `qdarteapi_dev.outlabs_auth` catalog provide the host authorization boundary. P2 must use a host-owned service-token `QueueAuthorizer`, prove an auth before/after digest changed only pilot-namespaced records, and have teardown restore it byte-identically. It must never access `qdarteapi_dev.taskq` or `qdarte_ops`, modify/delete an existing auth row, use a wildcard/operator/public producer, or start a worker.
 
 - [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
@@ -135,7 +135,7 @@ queue should migrate to the package. The immutable Round-11 response remains his
 `no taskq` inventory was based on a stale source baseline and cannot override this
 current-source finding.
 
-### S5-QD-CQ-02 — P2's isolated-database boundary conflicts with P1's QDarte-auth binding *(open)*
+### S5-QD-CQ-02 — P2's isolated-database boundary conflicts with P1's QDarte-auth binding *(resolved: Option A)*
 
 **Blocking evidence:** P1's mounted facade deliberately constructs
 `OutlabsQueueAuthorizer(auth=app.auth.auth, session_dependency=get_async_session)`. Both
@@ -151,16 +151,16 @@ and reject it before its service-token backend runs; its host routes use a separ
 service-token wrapper to compensate. `OutlabsQueueAuthorizer` invokes the generic dependency,
 so the frozen worker-service-token path cannot be assumed to authenticate at the mounted facade.
 
-**Decision required:** choose and freeze one bounded topology before any P2 database, role,
-queue, IAM, or token action: either (A) permit an explicitly enumerated local-only
-`outlabs_auth` catalog/role/token operation in `qdarteapi_dev` and adapt the mounted facade to
-QDarte's supported service-token verification path, while preserving the complete ban on its
-`taskq` and `qdarte_ops` surfaces; or (B) revise P1/P2 to use a separately initialized
-pilot-local OutLabsAuth instance and session in `qdarte_pilot_dev`, including its independent
-token lifecycle. The decision must name the authorization database, the exact principal/token
-issuance path, the allowed schemas/tables, and the negative isolation vectors. Do not silently
-reuse QDarte's broad auth session, add a wildcard, substitute an API key for the contracted
-service token, or create an ad-hoc authorization bypass.
+**Decision adopted — Option A:** P2 may make a local-only, additive operation against
+`qdarteapi_dev.outlabs_auth` through QDarte's public OutLabsAuth services, creating only
+`taskq_qdarte_pilot:run` / `:read` and a pilot-namespaced role/token record only when the public
+service requires it. It must use a host-owned `QueueAuthorizer` that calls QDarte's supported
+service-token verifier, never the generic dependency that rejects those tokens. Queue data,
+migrations, roles, and metadata remain only in `qdarte_pilot_dev`; `qdarteapi_dev.taskq` and
+`qdarte_ops` remain forbidden. A canonical auth content digest must prove that only pilot rows
+were added, and P5 teardown deletes exactly those rows and restores the baseline digest
+byte-identically. No wildcard, operator grant, API-key substitution, existing-record mutation,
+or ad-hoc authorization bypass is permitted.
 
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 
