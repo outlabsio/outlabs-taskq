@@ -1,6 +1,6 @@
 # taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.4 — 2026-07-20. Closes R2-08 and incorporates ADR-012/013/019/021: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.4 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.4 — 2026-07-21. Closes R2-08 and incorporates ADR-012/013/019/021: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 + 0006 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.4 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -706,3 +706,25 @@ Migration `0005_read_model_conformance.sql` is an immutable conformance repair:
    metadata 0.1.4 or later. This migration does not itself activate a view.
 4. **SQL parity.** A direct SQL client must not get a wider projection or a different
    unknown/inactive/empty disposition merely because it bypasses HTTP.
+
+## 13. Ready read-model activation — migration 0006 (2026-07-21)
+
+Migration `0006_activate_ready_read_model.sql` is the immutable, metadata-only activation
+vehicle required by ADR-019 decision #3. It does not change the SQL contract revision, function
+catalog, composites, grants, indexes, or Protocol surface.
+
+1. **Precondition and exact result.** The migration requires the database metadata revision to be
+   exactly `0.1.4`, then writes the complete capability value
+   `{"active":["read_model_list_ready"]}`. `read_model_list_running` and
+   `read_model_list_finished` are therefore inactive, rather than merely not asserted active.
+2. **Evidence and scope.** The sole activation is justified by the committed B9 evidence
+   `7fe2c6b` (`bench: add read model B9 evidence`): `ready` is bounded on PostgreSQL 16 and 18
+   using the existing claim index; `running` and `finished` were rejected and remain `TQ501`.
+   This migration contains no manual-DML substitute or configuration switch.
+3. **Verification and upgrade transition.** `verify()` compares the capability set by exact
+   equality. Fresh installation and the full `0001 → 0002 → 0003 → 0004 → 0005 → 0006` chain on
+   PostgreSQL 16 and 18 prove that `ready` returns `TQ501` at 0005 and its bounded 200 page after
+   0006.
+4. **Deactivation.** A future deactivation requires its own immutable metadata migration
+   (a 0007-class successor); operations must never edit `taskq.meta` manually to reverse this
+   activation.

@@ -145,6 +145,12 @@ metadata and sets exactly `{"active":["read_model_list_ready"]}`. It must preser
 post-0006 database has a new runtime rollback floor. Do not enable the capability through manual
 SQL, an HTTP configuration route, or a facade-side exception before this authority is frozen.
 
+**Resolution:** S5-CQ-05 is approved. Manifest §13 reserves immutable, metadata-only migration
+0006 under unchanged SQL contract 0.1.4. It asserts 0.1.4 metadata and writes exactly
+`{"active":["read_model_list_ready"]}` on the committed `7fe2c6b` B9 evidence; `verify()` and
+the PostgreSQL 16/18 fresh/full-chain transition vectors must assert that exact posture. A future
+deactivation requires a successor metadata migration, never manual DML.
+
 
 ### S4-CQ-04 — Canonical OutLabs authorization rejects the live system-integration API key
 
