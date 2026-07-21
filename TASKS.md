@@ -130,7 +130,7 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(open)*
+### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
 **Blocking evidence:** CV-02's server-owned bridge correctly requires the
 package `job_id`, current `attempt_id`, and `worker_id` to heartbeat before it
@@ -143,18 +143,17 @@ result adapter. A raw HTTP claim loop could see the attempt, but it would make
 QDarte reimplement worker supervision, cancellation, heartbeat, and
 settlement-replay behavior that the package already owns.
 
-**Required adjudication:** choose a package-owned extension that preserves the
-fence-free user-handler boundary while letting a *trusted, host-owned*
-side-effect reporter receive the active attempt only at the result boundary;
-or explicitly approve and specify a different worker integration with
-equivalent replay/cancellation/process-exit evidence. Do not expose an attempt
-or fence through `JobContext`, weaken the bridge heartbeat, or add an ad-hoc
-QDarte raw claim/settle loop before the lifecycle and authority are frozen.
-
-CV-04 and CV-05 are blocked on this decision. CV-01–CV-03, the direct queue,
-the package contact database, and the disabled local harness remain intact;
-no contact worker, enqueue credential, provider call, or direct-queue mutation
-has occurred.
+**Decision adopted:** ADR-022 adds a runtime-owned trusted side-effect reporter
+plus bounded async `JobContext.report_effect()`. The worker passes the current
+attempt only to that configured reporter; user handlers never receive a fence.
+The reporter does not settle, while `WorkerService` retains heartbeat,
+cancellation, ownership-loss, unsafe-sync exit, and fixed-verb settlement
+replay. QDarte must use the reporter to ask its stable-effect ledger before an
+external probe and to apply the result afterwards. Do not expose an attempt or
+fence through `JobContext`, weaken the bridge heartbeat, or add an ad-hoc
+QDarte raw claim/settle loop. CV-04 may implement this package extension and
+one closed local contact worker; CV-05 remains its response-loss/hard-kill
+gate.
 
 ### S5-QD-CQ-05 — The run-only pilot worker cannot negotiate its mandatory HTTP metadata read *(resolved: metadata-bootstrap exception)*
 

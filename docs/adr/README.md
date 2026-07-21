@@ -27,5 +27,6 @@
 | [019](./ADR-019-safe-read-model-reactivation.md) | Safe read-model reactivation: bounded job pages and versioned queue profiles | H-08, H-11, R2-16, R5-29 |
 | [020](./ADR-020-supported-sql-contract-sets.md) | Supported SQL-contract sets for additive migrations | S5-CQ-01 |
 | [021](./ADR-021-read-model-conformance-repairs.md) | Read-model conformance repairs and release compatibility | S5-CQ-02, S5-CQ-03, S5-CQ-04 |
+| [022](./ADR-022-trusted-worker-side-effect-reporter.md) | Trusted worker side-effect reporter | S5-QD-CV-CQ-01 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

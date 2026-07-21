@@ -311,3 +311,21 @@ These are package-owned harness utilities, not the S2-06 consumer testing API.
 ## 12. Definition of complete
 
 S2-04 is complete only when S2-04A through S2-04D each land as a separate green commit with `TASKS.md`, S2-04-AUDIT makes every acceptance row permanent, the final worktree is clean, and no S2-05 or Stage-3 module exists. The natural round-4 external review boundary is the completed Stage 2B worker kernel plus the contract-0.1.2 upgrade path.
+
+## 13. Trusted host side-effect reporter (ADR-022)
+
+An optional reporter is a worker-runtime capability for a host-owned domain
+effect that must be authorized against the current package attempt. It is not
+a registry task, transport credential, or public handler field. The service
+owns the current attempt record and invokes the reporter through a bounded
+`JobContext.report_effect()` request; handlers never receive an attempt id or
+fence. The service retains all heartbeat, cancellation, ownership-loss,
+process-exit, and settlement replay ownership. A reporter failure cannot
+invent a settlement verb or cause a handler rerun during settlement replay.
+
+The reporter's host must perform authoritative stable-effect lookup before an
+external action and idempotent application afterwards. This makes a reclaimed
+attempt able to observe the earlier committed effect rather than repeat the
+external action. Any host adoption requires its own real SQL/HTTP race,
+response-loss, hard-kill, and resource evidence; the generic worker extension
+alone authorizes no external-effect lane.
