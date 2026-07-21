@@ -148,7 +148,9 @@ class OperatorFake:
         self, name: str, profile: dict[str, Any] | None = None, actor: str | None = None
     ) -> EnsureQueueResult:
         self.calls.append(("ensure_queue", (name, profile, actor)))
-        return EnsureQueueResult(result=ConfigChangeOutcome.CREATED, profile=_profile(name).model_dump())
+        return EnsureQueueResult(
+            result=ConfigChangeOutcome.CREATED, profile=_profile(name).model_dump()
+        )
 
     async def update_queue_profile(
         self, name: str, profile: dict[str, Any], actor: str, expected_version: int
@@ -164,10 +166,19 @@ class OperatorFake:
 
 def _profile(name: str) -> QueueProfile:
     return QueueProfile(
-        name=name, profile_version=1, default_priority=0, default_lease_seconds=60,
-        default_max_attempts=1, default_backoff_mode="fixed", default_backoff_base=1,
-        default_backoff_cap=1, retention_hours=24, failed_retention_hours=168,
-        max_depth=1000, notify_enabled=True, paused=False,
+        name=name,
+        profile_version=1,
+        default_priority=0,
+        default_lease_seconds=60,
+        default_max_attempts=1,
+        default_backoff_mode="fixed",
+        default_backoff_base=1,
+        default_backoff_cap=1,
+        retention_hours=24,
+        failed_retention_hours=168,
+        max_depth=1000,
+        notify_enabled=True,
+        paused=False,
     )
 
 
@@ -494,9 +505,7 @@ async def test_conditional_queue_update_missing_and_inactive_view_are_typed() ->
             headers=_headers(**{"If-Match": '"taskq-profile-1"'}),
             json={"profile": {}},
         )
-        inactive = await client.get(
-            "/taskq/v1/jobs?queue=emails&view=running", headers=_headers()
-        )
+        inactive = await client.get("/taskq/v1/jobs?queue=emails&view=running", headers=_headers())
     assert missing.status_code == 404
     assert missing.json()["error"]["code"] == "TQ001"
     assert inactive.status_code == 501
@@ -564,12 +573,20 @@ async def test_list_jobs_wire_cursor_validation_and_pagination_round_trip() -> N
 
     transport = PagingTransport()
     app = _mounted(create_taskq_app(_resources(transport), authorizer=no_auth_for_tests()))
-    foreign_queue = base64.urlsafe_b64encode(
-        json.dumps({"v": 1, "queue": "other", "view": "ready", "id": str(uuid4())}).encode()
-    ).decode().rstrip("=")
-    foreign_view = base64.urlsafe_b64encode(
-        json.dumps({"v": 1, "queue": "emails", "view": "finished", "id": str(uuid4())}).encode()
-    ).decode().rstrip("=")
+    foreign_queue = (
+        base64.urlsafe_b64encode(
+            json.dumps({"v": 1, "queue": "other", "view": "ready", "id": str(uuid4())}).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
+    foreign_view = (
+        base64.urlsafe_b64encode(
+            json.dumps({"v": 1, "queue": "emails", "view": "finished", "id": str(uuid4())}).encode()
+        )
+        .decode()
+        .rstrip("=")
+    )
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
@@ -756,9 +773,7 @@ async def test_openapi_exposes_generated_surface_but_hides_deferred_routes() -> 
     schema = app.openapi()
     assert schema["servers"] == [{"url": "/taskq"}]
     assert "/v1/workers" in schema["paths"]
-    assert "/v1/queues/{queue}" in {
-        path for path, item in schema["paths"].items() if "get" in item
-    }
+    assert "/v1/queues/{queue}" in {path for path, item in schema["paths"].items() if "get" in item}
     assert "/v1/jobs" in schema["paths"]
     complete = schema["paths"]["/v1/jobs/{job_id}/complete"]["post"]
     attempt = complete["requestBody"]["content"]["application/json"]["schema"]["properties"][

@@ -754,7 +754,10 @@ class _FacadeDispatcher:
             if result == "profile_version_conflict":
                 assert current_version is not None
                 raise TaskqConflictError(
-                    details={"reason": "profile_version_conflict", "current_version": current_version}
+                    details={
+                        "reason": "profile_version_conflict",
+                        "current_version": current_version,
+                    }
                 )
             assert profile is not None
             return _command_response(
