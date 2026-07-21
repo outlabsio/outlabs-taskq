@@ -1,9 +1,9 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P1 blocked by S5-QD-CQ-01. Round 11
-> accepted P0–P5 against a stale source inventory; its safety findings remain
-> binding, but current-source direct-taskq overlap must be adjudicated before
-> P1. It is
+> **Status:** Tier-3 local-pilot design — P0/P0B accepted; P1 may proceed only
+> against its dedicated disposable database. Round 11 accepted P0–P5 against a
+> stale source inventory; its safety findings remain binding, while current
+> QDarte direct-taskq co-residency is isolated by database. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
 > [Function Manifest 0.1.4](./Task%20Queue%200.1%20Function%20Manifest.md),
 > ADR-006, ADR-011, ADR-020, and the [Build Plan](./Task%20Queue%20Build%20Plan.md).
@@ -13,12 +13,14 @@
 
 ## 1. Purpose and boundary
 
-QDarte already has a durable PostgreSQL worker ledger in `qdarte_ops` and an
-HTTP-controlled worker fleet. It is not a safe or useful first move to replace
-that ledger wholesale. The first pilot instead proves that taskq can be mounted
-inside QDarte, provisioned with least privilege, driven by a real QDarte worker
-process, and recovered after worker loss **without** altering an existing
-content, provider, browser, communication, or writeback lane.
+QDarte already has a durable PostgreSQL worker ledger in `qdarte_ops`, an
+HTTP-controlled worker fleet, and current staging also carries a separate
+direct-SQL `taskq` implementation for its contact-verify lane. It is not a
+safe or useful first move to replace either incumbent wholesale. The first
+pilot instead proves that taskq can be mounted inside QDarte, provisioned with
+least privilege, driven by a real QDarte worker process, and recovered after
+worker loss **without** altering an existing content, provider, browser,
+communication, writeback, or contact-verify lane.
 
 The pilot is local to the isolated `qdarte-dev` compose project. It uses one
 new queue, `qdarte_pilot`, and one non-chaining task type,
@@ -35,14 +37,16 @@ taskq worker claim a legacy job.
 
 ## 2. Source-backed starting state
 
-The plan is based on the checked local QDarte repositories as inspected on
-2026-07-21:
+The plan is based on the current authoritative QDarte staging sources inspected
+on 2026-07-21:
 
-- `qdarteAPI` owns `qdarte_ops.worker_jobs`, attempts, events, generic enqueue,
-  claim, heartbeat, completion, failure, release, and maintenance routes.
-- `qdarte-workers` polls that API and owns concrete handlers. Its
-  `cluster_research_scope` handler is pure for the empty synthetic payload used
-  by the existing local-production worker drill.
+- `qdarteAPI@9364dd0` owns `qdarte_ops.worker_jobs`, attempts, events, generic
+  enqueue, claim, heartbeat, completion, failure, release, and maintenance
+  routes. It also contains a direct-SQL `taskq` migration/client and copied
+  `/ops/taskq/*` plus `/worker/taskq/*` routes for contact verification.
+- `qdarte-workers@02ea8fe` polls that API, owns concrete handlers, and includes
+  the matching direct HTTP contact-verify worker loop. Its
+  `cluster_research_scope` handler is pure for the fixed synthetic payload.
 - `qdarte-runtime` owns the shared payload registry and the isolated compose
   harness. That harness already proves a no-network `cluster_research_scope`
   completion in `qdarte-dev` without production mounts or secrets.
@@ -50,11 +54,14 @@ The plan is based on the checked local QDarte repositories as inspected on
   API/workers are denied the Docker socket and production backup paths; source
   environment files are masked. It is the only permitted initial target.
 
-taskq is therefore additive in the same local PostgreSQL cluster, under schema
-`taskq`; the existing QDarte tables remain untouched. Co-residency is chosen
-for the pilot because there is no domain write to pair with enqueue. The pilot
-must not claim that a future dedicated queue database would retain a
-transactional enqueue guarantee.
+The package is additive only in a newly created disposable database named
+`qdarte_pilot_dev` on that same local PostgreSQL cluster, under its fixed
+`taskq` schema. QDarte's incumbent direct queue remains in `qdarteapi_dev` and
+is never migrated, queried, routed through, or credential-shared by the pilot.
+Separate databases give the immutable package migration chain its own catalog
+and ledger without renaming its schema or changing anything QDarte owns. There
+is no cross-database transaction claim: the pure pilot has no QDarte domain
+write to pair with enqueue.
 
 ## 3. Artifact, topology, and privilege model
 
@@ -65,13 +72,13 @@ URL and SHA-256. It is the ADR-020 bridge, supports the closed SQL-contract set
 pilot.
 
 ```text
-isolated QDarte planner/CLI --producer--> taskq.qdarte_pilot
+isolated QDarte planner/CLI --producer--> package taskq.qdarte_pilot
                                           |
-QDarte API: mounted taskq facade <--------+---- HTTP, queue-scoped token ---- pilot worker
+QDarte API: mounted package facade <------+---- HTTP, queue-scoped token ---- pilot worker
                                           |
-                                  isolated qdarte-dev PostgreSQL
+                           `qdarte_pilot_dev` (package-owned `taskq` schema)
 
-existing qdarte_ops worker ledger <------ unchanged; no bridge or dual publish
+`qdarteapi_dev` direct-SQL `taskq` + `qdarte_ops` <--- unchanged; no bridge or dual publish
 ```
 
 The QDarte API mounts the package-owned lifespan-free `/taskq` facade. It owns
@@ -109,8 +116,8 @@ token issuance and revocation.
 | Slice | Permitted work | Required evidence | Stop condition |
 |---|---|---|---|
 | P0 — preflight | Reproduce the guarded isolated core stack and the existing no-network QDarte-only worker drill; inventory API/runtime/worker package pins, DB version, connection ceiling, actual role attributes, and existing QDarte queue high-water state. | PG18, Redis, qdarteAPI, and MinIO are healthy; source env is masked; Docker socket and production backups are absent; the pure `cluster_research_scope` drill passes with no production path or mount. The unrelated multi-worker smoke is explicitly excluded: it requires `intake-worker`, whose broad non-pilot lanes retain un-sandboxed egress and storage/write effects. | Any unmasked source env, production volume/socket exposure, superuser runtime login, stale compose topology, or any attempt to start a non-pilot worker to satisfy this pilot baseline. |
-| P1 — host boundary | Add the exact a3 dependency pin, a disabled-by-default QDarte taskq settings block, the mounted package facade, a capability-sized local runtime constructor, and a separate pilot worker whose fixed allowlist is only `qdarte.cluster_research.pilot`. | Core import remains optional outside the enabled integration; disabled boot leaves no `taskq` schema access or worker task; the pilot worker cannot widen on restart/cleanup; API and worker resource budgets are measured. | A public producer endpoint, copied taskq route/model, direct worker database access, reuse of the broad legacy worker configuration, or a widened runtime role. |
-| P2 — local provisioning | In a newly created isolated database only, run immutable 0001–0005 under the owner/admin; verify twice; provision `qdarte_pilot` and the exact local authorization catalog. | Migration ledger/checksums; `verify: ok` twice; non-superuser negative vectors for operator, role creation, and base-table reads. | Manual metadata DML, a migration run as the app/worker identity, a permission wildcard, or any mutation of `qdarte_ops` queue state. |
+| P1 — host boundary | Add the exact a3 dependency pin, a disabled-by-default package-taskq settings block, the mounted package facade, a capability-sized local runtime constructor, and a separate pilot worker whose fixed allowlist is only `qdarte.cluster_research.pilot`. Its dedicated non-superuser DSN names `qdarte_pilot_dev` only. | Core import remains optional outside the enabled integration; disabled boot leaves no contact with `qdarte_pilot_dev` or pilot worker task; the pilot worker cannot widen on restart/cleanup; API and worker resource budgets are measured. | A public producer endpoint, reuse of the copied direct-taskq route/model, direct worker database access, reuse of the broad legacy worker configuration, a widened runtime role, or any `qdarteapi_dev` mutation. |
+| P2 — local provisioning | Create `qdarte_pilot_dev` only, then run immutable 0001–0005 under the owner/admin; verify twice; provision `qdarte_pilot` and the exact local authorization catalog. | Migration ledger/checksums in `qdarte_pilot_dev`; `verify: ok` twice; non-superuser negative vectors for operator, role creation, and base-table reads. | Creating, migrating, querying, or granting against `qdarteapi_dev`; manual metadata DML; a migration run as the app/worker identity; a permission wildcard; or any mutation of an incumbent QDarte queue state. |
 | P3 — deterministic adapter | Register only `qdarte.cluster_research.pilot`; adapt the existing pure synthetic cluster calculation to a bounded result. Add an internal/local harness producer, never a user-facing generic enqueue route. | Pure shadow computation and taskq-handler computation have the same canonical result digest; the adapter has no followups and no external I/O. | A taskq job invokes a provider, browser, filesystem/media write, QDarte domain write, child job, legacy enqueue, or adds the pilot type to QDarte's legacy `JobType` literal or shared `_REGISTRY`. |
 | P4 — worker canary | Start one uniquely named pilot worker using the HTTP transport and queue-scoped service token; enqueue one keyed pilot job through the internal harness. | `created` then `existed` yields the same id; exactly one handler invocation; canonical authorized read reaches `succeeded`; raw taskq ledger has one successful attempt and no secret/fence exposure. | A legacy `worker_jobs` row is inserted, a second producer path fires, or the worker can claim a queue/job type outside the pilot allowlist. |
 | P5 — recovery and rollback | Exercise response-loss settlement replay and a local hard process termination while the pure pilot handler is held; let lease expiry/reap reclaim the same job id to a second worker; then disable the pilot and prove zero-DML rollback. | Same-id terminal convergence, correct budget/event accounting, no remaining owned resources, API/legacy worker health, and no `qdarte_ops` mutation. | Any result is non-deterministic, any side effect escapes, a rollback needs table edits, or taskq process exit is hidden/ignored. |
@@ -132,8 +139,8 @@ digest uses that exact value. The taskq adapter owns its type map exclusively;
 | ID | Vector | Required result |
 |---|---|---|
 | QP-01 | Guarded isolated core + QDarte-only pure drill | PG18, Redis, qdarteAPI, and MinIO are healthy; source env is masked; no Docker socket or production backup mount is visible; the existing no-network `cluster_research_scope` drill passes. `intake-worker` and the broad multi-worker smoke are excluded because their non-pilot lanes have un-sandboxed side effects. |
-| QP-02 | Disabled application boot | No taskq migration, connection, listener, worker, or public route side effect. |
-| QP-03 | Owner/admin fresh install and rerun | Immutable 0001–0005 ledger and `verify()` pass twice; app/worker identities are denied owner/operator actions. |
+| QP-02 | Disabled application boot | No package migration, connection, listener, worker, or public route side effect against `qdarte_pilot_dev`; incumbent direct-QDarte behavior is neither exercised nor changed. |
+| QP-03 | Owner/admin fresh install and rerun | Immutable 0001–0005 ledger and `verify()` pass twice in `qdarte_pilot_dev`; app/worker identities are denied owner/operator actions. |
 | QP-04 | Authorization | Worker token can run only `qdarte_pilot`; wrong queue/token follows the generated hiding/error posture; no wildcard scope is granted. |
 | QP-05 | Shadow computation | Empty synthetic input produces the same canonical digest through the existing pure function and the taskq adapter. |
 | QP-06 | Keyed canary | Two submissions with one key produce `created` then `existed`, one job id, one handler call, one successful attempt, and a canonical authorized read. |
@@ -148,11 +155,12 @@ effect oracle, hard-kill gate, and review; this plan grants none of those.
 
 ## 6. Explicit non-goals
 
-This plan does not migrate or retire QDarte's existing worker ledger, alter its
-generic enqueue or worker API, add workflow/dependency/followup semantics,
-touch content/provider/browser/communication/publish/translation lanes, build a
-UI, expose taskq read models, activate a read-model capability, or deploy to a
-Mac mini, cloud, or production database. It does not unblock the independent
+This plan does not migrate, query, route through, or retire QDarte's incumbent
+worker ledger or direct-SQL contact-verify queue; alter its generic enqueue or
+worker API; add workflow/dependency/followup semantics; touch
+content/provider/browser/communication/publish/translation lanes; build a UI;
+expose taskq read models; activate a read-model capability; or deploy to a Mac
+mini, cloud, or production database. It does not unblock the independent
 outlabsAPI read-model rollout or the tools-retirement observation.
 
 ## 7. Review gate and next decision
@@ -160,8 +168,14 @@ outlabsAPI read-model rollout or the tools-retirement observation.
 Round 11 independently verified handler purity, legacy-ledger isolation,
 artifact posture, role boundary, compose isolation, recovery semantics, and
 the explicit absence of side effects against the source baseline it inspected.
-Its four docs-first refinements above remain binding. P0's current-source
-inspection then found a separate disabled direct-SQL taskq surface in the
-authoritative QDarte API/worker staging sources. This is S5-QD-CQ-01: until an
-explicit posture retires, isolates, or proves compatibility with that surface,
-P1–P5 are closed. No adapter may be added around it.
+Its four docs-first refinements remain binding. Current-source P0 inspection
+then found the separate direct-SQL contact-verify surface in newer QDarte
+staging sources, superseding Round 11's greenfield/no-collision premise but not
+its safety findings. S5-QD-CQ-01 adopts Option B: P1–P5 are permitted only
+through `qdarte_pilot_dev`, whose package `taskq` schema, credentials, routes,
+and migration ledger cannot overlap the incumbent `qdarteapi_dev` surface.
+
+The downstream question is deliberately separate: after P5 proves package fit,
+QDarte owners may decide whether their direct-SQL contact-verify queue should
+remain, retire, or migrate to taskq. The pilot neither answers nor starts that
+consolidation work.

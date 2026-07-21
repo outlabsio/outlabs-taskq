@@ -46,7 +46,11 @@
 
 - [x] **S5-QD-P0 · QDarte isolated-dev preflight accepted** — the amended baseline is intentionally QDarte-only: guarded PG18/Redis/qdarteAPI/MinIO health plus the pure no-network `cluster_research_scope` drill. `intake-worker` and the broad multi-worker smoke are excluded because their non-pilot lanes have un-sandboxed egress/storage/write effects; it was never started. The guarded local PostgreSQL is 18.4 with `max_connections=100`, and the API currently uses the `postgres` superuser, confirming R11-01’s dedicated-facade-role requirement. The pure drill passed while its worker was temporarily narrowed; because cleanup restored the broad legacy allowlist, it was stopped immediately. QP-09 now uses a stable complete-row digest as the six-table mutation oracle (with high-waters diagnostic only). P1 must use current-source local checkouts, a distinct non-superuser facade DSN/pool, and a pilot-only worker allowlist fixed by construction.
 
-- [ ] **S5-QD-P1 · QDarte disabled host boundary** — **blocked by S5-QD-CQ-01:** current `qdarteAPI@9364dd0` and `qdarte-workers@02ea8fe` already contain an older direct-SQL `taskq` migration/client plus `/ops/taskq` and `/worker/taskq` routes, while the isolated dev database already has its schema. That conflicts with the accepted package-owned-facade/no-copied-SQL boundary and makes a3's immutable 0001→0005 installer unsafe to apply by assumption. Do not pin/mount/migrate/provision or start a pilot worker until the direct implementation is explicitly retired, isolated, or superseded through a docs-first adjudication.
+- [x] **S5-QD-P0B · QDarte direct-queue disposition frozen** — S5-QD-CQ-01 is resolved as Option B, not a cleanup or compatibility project: the current QDarte direct-SQL contact-verify queue remains untouched in `qdarteapi_dev`; the package pilot owns only a newly created disposable `qdarte_pilot_dev` database on the same guarded local cluster. The fixed `taskq` schema therefore remains package-owned within its database, without a schema/catalog overlap or a renamed schema. Round 11's safety findings remain binding, but its greenfield/no-collision inventory is superseded by current staging source. P0B's targeted re-check confirms the old schema is confined to `qdarteapi_dev` and the pilot database is absent until P2; it creates no database, role, queue, IAM, migration, worker, or source change.
+
+- [ ] **S5-QD-P1 · QDarte disabled host boundary** — on current isolated local QDarte sources only, add the exact a3 pin, disabled-by-default package-facade/runtime settings, and the dedicated non-superuser facade DSN/pool targeting only `qdarte_pilot_dev`. Preserve the existing direct contact-verify queue and copied `/ops/taskq`/`/worker/taskq` surface untouched and do not reuse it for the pilot. Prove disabled boot makes no contact with `qdarte_pilot_dev`; the distinct pilot worker's lifecycle-fixed allowlist remains exactly `qdarte.cluster_research.pilot`. Stop before P2 database creation/provisioning, any public producer, or any non-pilot worker.
+
+- [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
 - [x] **S5-RM-DESIGN · H-08/H-11 read-model activation proposal prepared** — added the Tier-3 [Read Model Specification](docs/Task%20Queue%20Read%20Model%20Specification.md): queue-scoped finite `ready|running|finished` keyset pages; fixed safe job projection; observer-safe queue profile; and a real version/ETag conditional-update path that preserves bootstrap `ensure_queue`. It names the docs-first ADR/Protocol/Manifest/migration sequence plus PG16/PG18 B9, SQL/HTTP parity, redaction, authorization, pagination, and conflict evidence. It changes no current contract, SQL, host, UI, producer, consumer, or L1 observation behavior; both deferred routes remain `TQ501` pending ADR acceptance.
 
@@ -102,7 +106,7 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-CQ-01 — Current QDarte staging already carries an incompatible direct-SQL taskq surface
+### S5-QD-CQ-01 — Current QDarte staging already carries an incompatible direct-SQL taskq surface *(resolved: Option B)*
 
 **Blocking evidence:** the fresh authoritative staging checkouts contradict the Round-11 source
 inventory. `qdarteAPI@9364dd0` contains migration
@@ -114,14 +118,18 @@ matching direct HTTP worker loop. The guarded local `qdarteapi_dev` database alr
 a package-owned mounted facade, and no copied taskq SQL or wire surface. Treating the two as
 compatible without proof risks a catalog collision and violates the explicit pilot boundary.
 
-**Decision required:** choose and specify one pre-P1 posture: (a) a bounded, separately reviewed
-cleanup that retires the disabled direct implementation from the current local pilot baseline;
-(b) an explicitly isolated disposable database/host path whose route, schema, and credential
-surfaces cannot overlap the direct implementation; or (c) a new migration/supersession design
-that proves direct-to-package compatibility against Tier 0. Do not pin a3, mount the facade, run
-its migrations, provision a queue/IAM, reuse the copied worker routes, or add an adapter until
-that posture is frozen. The immutable Round-11 response remains historical; its `no taskq`
-inventory was based on a stale source baseline and cannot override this current-source finding.
+**Decision adopted — Option B:** retain QDarte's direct implementation untouched in
+`qdarteapi_dev`; the package pilot uses only a newly created, disposable `qdarte_pilot_dev`
+database on the same guarded local cluster. The package keeps its fixed `taskq` schema name,
+but the two schemas are in different databases and therefore never share a catalog, route
+ownership, credentials, worker, or migration ledger. The dedicated non-superuser facade DSN
+targets the pilot database only. P0B confirms the current direct schema remains confined to
+`qdarteapi_dev` and the pilot database is absent before P2; P2 alone may create and migrate it.
+The existing direct client/routes are neither reused nor retired by this pilot. A later,
+separately reviewed convergence decision may evaluate whether QDarte's active contact-verify
+queue should migrate to the package. The immutable Round-11 response remains historical; its
+`no taskq` inventory was based on a stale source baseline and cannot override this
+current-source finding.
 
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 
