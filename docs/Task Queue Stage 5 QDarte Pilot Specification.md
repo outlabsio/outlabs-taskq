@@ -1,8 +1,8 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2 accepted. The isolated
-> P2 database/IAM posture is complete; P3 alone may add the deterministic pure
-> adapter, while P4 alone may start the dedicated pilot worker. Round 11
+> **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2/P3 accepted. The
+> isolated database/IAM and deterministic pure adapter are complete; P4 alone
+> may start the dedicated pilot worker. Round 11
 > accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
