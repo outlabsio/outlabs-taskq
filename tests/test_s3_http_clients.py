@@ -261,7 +261,7 @@ async def test_claim_transport_failure_is_never_replayed_after_negotiation() -> 
     assert claim_calls == 1
 
 
-async def test_gated_method_is_generated_and_deferred_methods_are_absent() -> None:
+async def test_gated_and_read_model_methods_are_generated() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return _error(request, "TQ501", status=501)
 
@@ -272,10 +272,10 @@ async def test_gated_method_is_generated_and_deferred_methods_are_absent() -> No
         with pytest.raises(TaskqCapabilityError):
             await client.list_workers()
     assert hasattr(AsyncTaskqHttpClient, HttpCommandName.LIST_WORKERS.value)
-    assert not hasattr(AsyncTaskqHttpClient, HttpCommandName.GET_QUEUE.value)
-    assert not hasattr(AsyncTaskqHttpClient, HttpCommandName.LIST_JOBS.value)
-    assert not hasattr(TaskqHttpClient, HttpCommandName.GET_QUEUE.value)
-    assert not hasattr(TaskqHttpClient, HttpCommandName.LIST_JOBS.value)
+    assert hasattr(AsyncTaskqHttpClient, HttpCommandName.GET_QUEUE.value)
+    assert hasattr(AsyncTaskqHttpClient, HttpCommandName.LIST_JOBS.value)
+    assert hasattr(TaskqHttpClient, HttpCommandName.GET_QUEUE.value)
+    assert hasattr(TaskqHttpClient, HttpCommandName.LIST_JOBS.value)
 
 
 def test_sync_client_is_thread_safe_at_request_id_boundary() -> None:

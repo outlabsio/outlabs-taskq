@@ -195,8 +195,8 @@ EXPECTED_HTTP_IDENTITIES = {
         "active",
     ),
     "list_workers": ("GET", "/taskq/v1/workers", "read", "global", "gated"),
-    "get_queue": ("GET", "/taskq/v1/queues/{queue}", "read", "path", "deferred"),
-    "list_jobs": ("GET", "/taskq/v1/jobs", "read", "global", "deferred"),
+    "get_queue": ("GET", "/taskq/v1/queues/{queue}", "read", "path", "active"),
+    "list_jobs": ("GET", "/taskq/v1/jobs", "read", "query", "active"),
 }
 
 # Independently transcribed from the Tier-0 outcome tables, including negative-only rows.
@@ -235,8 +235,8 @@ EXPECTED_HTTP_OUTCOMES = {
     "set_concurrency_limit": {"created": 201, "updated": 200, "unchanged": 200},
     "request_worker_shutdown": {"accepted": 202},
     "list_workers": {},
-    "get_queue": {},
-    "list_jobs": {},
+    "get_queue": {"ok": 200},
+    "list_jobs": {"ok": 200},
 }
 
 
@@ -343,8 +343,8 @@ def test_http_catalog_excludes_db_only_commands_and_has_honest_gates() -> None:
         CommandName.JANITOR,
     }.isdisjoint(active_sql)
     for name in (HttpCommandName.GET_QUEUE, HttpCommandName.LIST_JOBS):
-        assert HTTP_COMMAND_SPECS[name].surface is HttpSurface.DEFERRED
-        assert not HTTP_COMMAND_SPECS[name].outcomes
+        assert HTTP_COMMAND_SPECS[name].surface is HttpSurface.ACTIVE
+        assert HTTP_COMMAND_SPECS[name].outcomes == {"ok": 200}
     worker_list = HTTP_COMMAND_SPECS[HttpCommandName.LIST_WORKERS]
     assert worker_list.surface is HttpSurface.GATED
     assert not worker_list.outcomes
@@ -356,8 +356,8 @@ def test_http_catalog_excludes_db_only_commands_and_has_honest_gates() -> None:
     }
     for client_type in (AsyncTaskqHttpClient, TaskqHttpClient):
         assert all(hasattr(client_type, method) for method in generated)
-        assert not hasattr(client_type, HttpCommandName.GET_QUEUE.value)
-        assert not hasattr(client_type, HttpCommandName.LIST_JOBS.value)
+        assert hasattr(client_type, HttpCommandName.GET_QUEUE.value)
+        assert hasattr(client_type, HttpCommandName.LIST_JOBS.value)
 
 
 def test_retry_classes_are_command_specific_and_settlement_is_worker_owned() -> None:

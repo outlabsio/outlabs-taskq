@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import base64
 import json
 import re
 import time
@@ -21,6 +22,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from taskq.errors import (
     TaskqCapabilityError,
     TaskqConfigError,
+    TaskqConflictError,
     TaskqError,
     TaskqInternalError,
     TaskqNotFoundError,
@@ -59,6 +61,7 @@ from taskq.protocol import (
     HttpSurface,
     PROTOCOL_MAJOR,
     PurgeWireRequest,
+    QueueProfile,
     QueueSource,
     ReasonWireRequest,
     RedriveWireRequest,
@@ -79,6 +82,7 @@ from taskq.transport import (
 )
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_PROFILE_ETAG_RE = re.compile(r'^"taskq-profile-([1-9][0-9]*)"$')
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _OPERATOR_COMMANDS = frozenset(
     name
@@ -171,6 +175,8 @@ def _command_response(
     spec: HttpCommandSpec,
     outcome: str,
     data: BaseModel | Mapping[str, Any] | Sequence[Any] | None,
+    *,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     if outcome not in spec.outcomes:
         raise TaskqInternalError(details={"reason": "unregistered_http_outcome"})
@@ -187,6 +193,7 @@ def _command_response(
             "data": encoded,
         },
         status_code=spec.outcomes[outcome],
+        headers=dict(headers or {}),
     )
 
 
@@ -205,6 +212,59 @@ def _parse_bool(request: Request, name: str) -> bool:
     if value.lower() in {"0", "false"}:
         return False
     raise TaskqValidationError(details={"field": name})
+
+
+def _profile_etag(version: int) -> str:
+    return f'"taskq-profile-{version}"'
+
+
+def _parse_if_match(value: str | None) -> int | None:
+    if value is None:
+        return None
+    match = _PROFILE_ETAG_RE.fullmatch(value)
+    if match is None:
+        raise TaskqValidationError(details={"header": "If-Match"})
+    return int(match.group(1))
+
+
+def _parse_page_limit(value: str | None) -> int:
+    if value is None:
+        return 50
+    try:
+        limit = int(value)
+    except ValueError as exc:
+        raise TaskqValidationError(details={"field": "limit"}, cause=exc) from exc
+    if not 1 <= limit <= 100:
+        raise TaskqValidationError(details={"field": "limit"})
+    return limit
+
+
+def _decode_cursor(value: str | None, *, queue: str, view: str) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if len(value) > 1366 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise TaskqValidationError(details={"field": "cursor"})
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        decoded = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskqValidationError(details={"field": "cursor"}, cause=exc) from exc
+    if (
+        len(raw) > 1024
+        or not isinstance(decoded, dict)
+        or decoded.get("v") != 1
+        or decoded.get("queue") != queue
+        or decoded.get("view") != view
+    ):
+        raise TaskqValidationError(details={"field": "cursor"})
+    return decoded
+
+
+def _encode_cursor(value: Mapping[str, Any] | None) -> str | None:
+    if value is None:
+        return None
+    raw = json.dumps({"v": 1, **value}, sort_keys=True, separators=(",", ":")).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
 def _path_uuid(request: Request, name: str = "job_id") -> UUID:
@@ -295,8 +355,6 @@ class _FacadeDispatcher:
         self._validate_headers(request)
         body = await self._body(request, spec)
         self._validate_query(request, name)
-        if name is HttpCommandName.ENSURE_QUEUE and "If-Match" in request.headers:
-            raise TaskqCapabilityError(details={"capability": "queue_profile_version"})
         queue = await self._authorize(request, name, spec, body, context, authorizer, public_meta)
 
         if spec.surface is not HttpSurface.ACTIVE:
@@ -315,9 +373,13 @@ class _FacadeDispatcher:
         allowed = (
             {"include_error", "include_result", "include_progress", "include_payload"}
             if name is HttpCommandName.GET_JOB
+            else {"queue", "view", "limit", "cursor"}
+            if name is HttpCommandName.LIST_JOBS
             else set()
         )
-        if set(request.query_params) - allowed:
+        if set(request.query_params) - allowed or any(
+            len(request.query_params.getlist(key)) != 1 for key in request.query_params
+        ):
             raise TaskqValidationError(details={"reason": "unexpected_query_parameter"})
 
     async def _body(self, request: Request, spec: HttpCommandSpec) -> BaseModel | None:
@@ -364,6 +426,12 @@ class _FacadeDispatcher:
             return None
         if spec.queue_source is QueueSource.PATH:
             queue = str(request.path_params["queue"])
+            await self._check_authorization(authorizer, request, context, spec.action, queue)
+            return queue
+        if spec.queue_source is QueueSource.QUERY:
+            queue = request.query_params.get("queue")
+            if queue is None:
+                raise TaskqValidationError(details={"field": "queue"})
             await self._check_authorization(authorizer, request, context, spec.action, queue)
             return queue
         if spec.queue_source is QueueSource.DECLARED_QUEUES:
@@ -562,6 +630,36 @@ class _FacadeDispatcher:
             if result is None:
                 raise TaskqNotFoundError()
             return _command_response(request, spec, "ok", result)
+        if name is HttpCommandName.GET_QUEUE:
+            assert queue is not None
+            profile = await r.observer.get_queue_profile(queue)
+            if profile is None:
+                raise TaskqNotFoundError()
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                profile,
+                headers={"ETag": _profile_etag(profile.profile_version)},
+            )
+        if name is HttpCommandName.LIST_JOBS:
+            assert queue is not None
+            view = request.query_params.get("view")
+            if view not in {"ready", "running", "finished"}:
+                raise TaskqValidationError(details={"field": "view"})
+            limit = _parse_page_limit(request.query_params.get("limit"))
+            after = _decode_cursor(request.query_params.get("cursor"), queue=queue, view=view)
+            page = await r.observer.list_jobs(queue, view, limit=limit, after=after)
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                {
+                    "as_of": page.as_of,
+                    "items": page.items,
+                    "next_cursor": _encode_cursor(page.next_after),
+                },
+            )
         if name in {HttpCommandName.GET_QUEUE_STATS, HttpCommandName.LIST_QUEUE_STATS}:
             # Empty is the honest snapshot-lag/unknown configuration posture in 0.1.
             items = await r.observer.get_queue_stats(queue)
@@ -632,9 +730,31 @@ class _FacadeDispatcher:
         actor = context.actor
         if name is HttpCommandName.ENSURE_QUEUE:
             assert isinstance(body, EnsureQueueWireRequest)
-            result = await operator.ensure_queue(str(path["queue"]), body.profile, actor)
+            expected_version = _parse_if_match(request.headers.get("If-Match"))
+            if expected_version is None:
+                result = await operator.ensure_queue(str(path["queue"]), body.profile, actor)
+                profile = QueueProfile.model_validate(result.profile)
+                return _command_response(
+                    request,
+                    spec,
+                    result.result.value,
+                    {"profile": profile},
+                    headers={"ETag": _profile_etag(profile.profile_version)},
+                )
+            result, profile, current_version = await operator.update_queue_profile(
+                str(path["queue"]), body.profile, actor, expected_version
+            )
+            if result == "profile_version_conflict":
+                raise TaskqConflictError(
+                    details={"reason": "profile_version_conflict", "current_version": current_version}
+                )
+            assert profile is not None
             return _command_response(
-                request, spec, result.result.value, {"profile": result.profile}
+                request,
+                spec,
+                result,
+                {"profile": profile},
+                headers={"ETag": _profile_etag(profile.profile_version)},
             )
         if name is HttpCommandName.PAUSE_QUEUE:
             assert isinstance(body, ReasonWireRequest)

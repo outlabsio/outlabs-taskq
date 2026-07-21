@@ -176,7 +176,9 @@ def _decode_domain(spec: HttpCommandSpec, outcome: str, data: dict[str, Any]) ->
     command = spec.sql_command
     if command is CommandName.ENSURE_QUEUE:
         wire = EnsureQueueWireData.model_validate(data)
-        return EnsureQueueResult(result=ConfigChangeOutcome(outcome), profile=wire.profile)
+        return EnsureQueueResult(
+            result=ConfigChangeOutcome(outcome), profile=wire.profile.model_dump(mode="json")
+        )
     if command in {CommandName.PAUSE_QUEUE, CommandName.RESUME_QUEUE}:
         return QueueControlOutcome(outcome)
     if command is CommandName.CANCEL:

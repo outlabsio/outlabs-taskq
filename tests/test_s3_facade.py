@@ -33,8 +33,10 @@ from taskq.protocol import (
     ContractMeta,
     EnqueueCreatedResult,
     EnsureQueueResult,
+    JobPage,
     JobStatus,
     Metric,
+    QueueProfile,
     SettleOkResult,
     TaskqAction,
 )
@@ -111,6 +113,14 @@ class FacadeTransport:
         self.calls.append(("stats", queue))
         return []
 
+    async def get_queue_profile(self, queue: str) -> QueueProfile | None:
+        self.calls.append(("profile", queue))
+        return _profile(queue)
+
+    async def list_jobs(self, queue: str, view: str, **kwargs: Any) -> JobPage:
+        self.calls.append(("list_jobs", (queue, view, kwargs)))
+        return JobPage(as_of=datetime.now(UTC), items=())
+
     async def get_contract_meta(self) -> ContractMeta:
         self.calls.append(("meta", None))
         return ContractMeta(contract_version="0.1.2", capabilities={})
@@ -131,7 +141,23 @@ class OperatorFake:
         self, name: str, profile: dict[str, Any] | None = None, actor: str | None = None
     ) -> EnsureQueueResult:
         self.calls.append(("ensure_queue", (name, profile, actor)))
-        return EnsureQueueResult(result=ConfigChangeOutcome.CREATED, profile=profile or {})
+        return EnsureQueueResult(result=ConfigChangeOutcome.CREATED, profile=_profile(name).model_dump())
+
+    async def update_queue_profile(
+        self, name: str, profile: dict[str, Any], actor: str, expected_version: int
+    ) -> tuple[str, QueueProfile | None, int]:
+        self.calls.append(("update_queue_profile", (name, profile, actor, expected_version)))
+        updated = _profile(name).model_copy(update={"profile_version": expected_version + 1})
+        return "updated", updated, updated.profile_version
+
+
+def _profile(name: str) -> QueueProfile:
+    return QueueProfile(
+        name=name, profile_version=1, default_priority=0, default_lease_seconds=60,
+        default_max_attempts=1, default_backoff_mode="fixed", default_backoff_base=1,
+        default_backoff_cap=1, retention_hours=24, failed_retention_hours=168,
+        max_depth=1000, notify_enabled=True, paused=False,
+    )
 
 
 def _resources(
@@ -400,6 +426,42 @@ async def test_operator_routes_require_both_configs_and_never_fallback() -> None
     assert operator.calls == [("ensure_queue", ("emails", {"default_priority": 5}, "test"))]
 
 
+async def test_queue_profile_get_and_conditional_put_use_etag_envelope() -> None:
+    transport = FacadeTransport()
+    operator = OperatorFake()
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport),
+            authorizer=no_auth_for_tests(),
+            operator_transport=operator,  # type: ignore[arg-type]
+            operator_authorizer=no_auth_for_tests(),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        got = await client.get("/taskq/v1/queues/emails", headers=_headers())
+        updated = await client.put(
+            "/taskq/v1/queues/emails",
+            headers=_headers(**{"If-Match": '"taskq-profile-1"'}),
+            json={"profile": {"default_priority": 5}},
+        )
+        malformed = await client.put(
+            "/taskq/v1/queues/emails",
+            headers=_headers(**{"If-Match": "*"}),
+            json={"profile": {}},
+        )
+    assert got.headers["etag"] == '"taskq-profile-1"'
+    assert set(got.json()["data"]) == set(_profile("emails").model_dump(mode="json"))
+    assert updated.headers["etag"] == '"taskq-profile-2"'
+    assert updated.json()["data"]["profile"]["profile_version"] == 2
+    assert malformed.status_code == 422
+    assert operator.calls[-1] == (
+        "update_queue_profile",
+        ("emails", {"default_priority": 5}, "test", 1),
+    )
+
+
 async def test_bearer_and_legacy_adapters_preserve_simple_mounts() -> None:
     transport = FacadeTransport()
     bearer_app = _mounted(
@@ -462,8 +524,11 @@ async def test_hidden_and_gated_routes_return_typed_capability_envelopes() -> No
             await client.get("/taskq/v1/jobs", headers=_headers()),
             await client.get("/taskq/v1/workers", headers=_headers()),
         ]
-    assert all(response.status_code == 501 for response in responses)
-    assert all(response.json()["error"]["code"] == "TQ501" for response in responses)
+    assert responses[0].status_code == 200
+    assert responses[1].status_code == 422
+    assert responses[2].status_code == 501
+    assert responses[1].json()["error"]["code"] == "TQ422"
+    assert responses[2].json()["error"]["code"] == "TQ501"
 
 
 async def test_unknown_wrong_method_validation_and_metrics_are_owned() -> None:
@@ -550,10 +615,10 @@ async def test_openapi_exposes_generated_surface_but_hides_deferred_routes() -> 
     schema = app.openapi()
     assert schema["servers"] == [{"url": "/taskq"}]
     assert "/v1/workers" in schema["paths"]
-    assert "/v1/queues/{queue}" not in {
+    assert "/v1/queues/{queue}" in {
         path for path, item in schema["paths"].items() if "get" in item
     }
-    assert "/v1/jobs" not in schema["paths"]
+    assert "/v1/jobs" in schema["paths"]
     complete = schema["paths"]["/v1/jobs/{job_id}/complete"]["post"]
     attempt = complete["requestBody"]["content"]["application/json"]["schema"]["properties"][
         "attempt_id"

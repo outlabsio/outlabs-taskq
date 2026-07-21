@@ -440,7 +440,7 @@ class EmptyWireRequest(BaseModel):
 class EnsureQueueWireData(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    profile: dict[str, Any]
+    profile: QueueProfile
 
 
 class QueueProfile(BaseModel):
@@ -1158,6 +1158,7 @@ _ADMIN = TaskqAction.ADMIN
 _PATH = QueueSource.PATH
 _LOOKUP = QueueSource.JOB_LOOKUP
 _GLOBAL = QueueSource.GLOBAL
+_QUERY = QueueSource.QUERY
 _SAFE = RetryClass.SAFE_IDEMPOTENT
 _NEVER = RetryClass.NEVER
 _SETTLE = RetryClass.WORKER_SETTLEMENT
@@ -1461,13 +1462,20 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             "/taskq/v1/queues/{queue}",
             _READ,
             _PATH,
-            {},
-            _NEVER,
-            None,
-            surface=HttpSurface.DEFERRED,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_QUEUE_PROFILE,
+            data_model=QueueProfile,
         ),
         HttpCommandName.LIST_JOBS: _http(
-            "GET", "/taskq/v1/jobs", _READ, _GLOBAL, {}, _NEVER, None, surface=HttpSurface.DEFERRED
+            "GET",
+            "/taskq/v1/jobs",
+            _READ,
+            _QUERY,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.LIST_JOBS,
+            data_model=JobPageWireData,
         ),
     }
 )
