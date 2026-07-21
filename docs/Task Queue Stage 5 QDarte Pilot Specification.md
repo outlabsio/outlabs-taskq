@@ -1,8 +1,8 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 local-pilot design — P0/P0B accepted; P1 remains confined
-> to its dedicated disposable database and is paused on the incumbent QDarte
-> fresh-migration gate. Round 11 accepted P0–P5 against a stale source
+> **Status:** Tier-3 local-pilot design — P0/P0B/P1 accepted. P1 adds only a
+> disabled package boundary; P2 alone may create or provision its dedicated
+> disposable database. Round 11 accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
 > subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
@@ -181,11 +181,12 @@ QDarte owners may decide whether their direct-SQL contact-verify queue should
 remain, retire, or migrate to taskq. The pilot neither answers nor starts that
 consolidation work.
 
-P1 also requires the current QDarte host's own fresh-database migration chain
-to reach head. The isolated P1 gate found that migration
-`20260715_0070_host_native_worker_lanes` rejects nonzero desired replicas even
-though an earlier migration seeds `media=1`. That incumbent migration-chain
-defect is S5-QD-HOST-GATE-01, not a package or pilot-database failure. Its
-owner must repair it through the host's migration discipline before P1 can
-claim a green host suite; it neither authorizes a change to `qdarte_pilot_dev`
-nor a change to QDarte's direct contact-verify queue.
+P1's isolated gate also repaired the current QDarte host's fresh-database
+chain. Migration `20260715_0070_host_native_worker_lanes` now recognizes only
+the exact inherited `media=1` seed from revisions 0044/0053 before performing
+its already-contracted replacement with six zero-desired host-native lanes;
+every other nonzero state still fails closed and needs an explicit scale-down.
+A newly created disposable host test database reached head with that posture.
+The repair is incumbent QDarte migration work, not a package or pilot-database
+change: it neither creates nor authorizes `qdarte_pilot_dev`, and it does not
+touch QDarte's direct contact-verify queue.
