@@ -467,15 +467,15 @@ class JobListItem(BaseModel):
     job_id: UUID
     job_type: str
     status: JobStatus
-    outcome: str | None
+    outcome: str | None = None
     priority: int
     attempt_count: int
     failure_count: int
     max_attempts: int
     created_at: datetime
     scheduled_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     updated_at: datetime
 
 
@@ -631,15 +631,15 @@ class JobDetail(BaseModel):
     queue: str
     job_type: str
     status: JobStatus
-    outcome: str | None
+    outcome: str | None = None
     priority: int
     attempt_count: int
     failure_count: int
     max_attempts: int
     created_at: datetime
     scheduled_at: datetime
-    started_at: datetime | None
-    finished_at: datetime | None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     updated_at: datetime
     error: str | None = None
     result: dict[str, Any] | None = None
