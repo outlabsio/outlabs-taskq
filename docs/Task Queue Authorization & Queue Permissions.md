@@ -175,6 +175,15 @@ does not add a wildcard, generic credential bypass, or package-level dependency
 on a host's service-token implementation. The QDarte local pilot is the first
 documented use of this extension point.
 
+When the host's service tokens are self-contained signed credentials, an exact
+queue scope can be embedded at issuance and verified without reading or writing
+the host's permission catalog. That is a host-topology choice, not a relaxation:
+the adapter still accepts only the fixed `taskq_{queue}:{action}` grammar and
+the token must be short-lived or explicitly disposed by the host. The QDarte
+local pilot uses this form so its disposable queue experiment leaves the host
+auth database byte-identical; a deployment that needs catalog-managed revocation
+must define a reversible record lifecycle before it provisions anything.
+
 This replaces the brief's static read/write/operator mapping tables — same hosts, now with a path to per-queue tightening lane by lane (tighten = mint new tokens with `taskq_{queue}:run`, drop the legacy candidate when the lane is done).
 
 ---

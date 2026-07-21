@@ -52,7 +52,7 @@
 
 - [x] **S5-QD-P1 · QDarte disabled host boundary** — exact a3 wheel URL/SHA pins now land separately in fresh API and worker worktrees. The API's optional, disabled-by-default mount accepts only a development `postgresql+asyncpg` DSN for `qdarte_pilot_dev` under a dedicated non-superuser login, uses its own one-connection runtime pool, and never falls back to the incumbent API DSN; disabled boot leaves the facade unmounted and opens no pilot-database connection. The worker has no process or handler yet, but its future pilot configuration has an immutable one-item allowlist: `qdarte.cluster_research.pilot` on queue `qdarte_pilot`; it cannot inherit or widen the broad legacy worker allowlist. Focused API/worker tests, Ruff, format, and MyPy pass. The direct contact-verify queue and copied `/ops/taskq`/`/worker/taskq` surface are untouched; no pilot database, IAM, public producer, or worker started. P2 only may create/provision `qdarte_pilot_dev`.
 
-- [ ] **S5-QD-P2 · QDarte isolated pilot provisioning** — S5-QD-CQ-02 is resolved as Option A: package queue data is created only in `qdarte_pilot_dev`; QDarte's existing supported service-token verifier plus an additive, exact-name-only `qdarteapi_dev.outlabs_auth` catalog provide the host authorization boundary. P2 must use a host-owned service-token `QueueAuthorizer`, prove an auth before/after digest changed only pilot-namespaced records, and have teardown restore it byte-identically. It must never access `qdarteapi_dev.taskq` or `qdarte_ops`, modify/delete an existing auth row, use a wildcard/operator/public producer, or start a worker.
+- [ ] **S5-QD-P2 · QDarte isolated pilot provisioning** — S5-QD-CQ-02/03 are resolved as the verifier-only posture: package queue data is created only in `qdarte_pilot_dev`; QDarte's existing supported service-token verifier checks the exact self-contained `read`/`run` scopes, while `qdarteapi_dev.outlabs_auth` receives no mutation. P2 may read it only for the canonical before/after digest, must create no auth catalog record, and use a host-owned service-token `QueueAuthorizer`. It must never access `qdarteapi_dev.taskq` or `qdarte_ops`, use a wildcard/operator/public producer, or start a worker.
 
 - [ ] **S5-QD-CONSOLIDATION · QDarte direct-queue convergence decision** — after P5 independently proves package fit, decide separately whether QDarte's active direct-SQL contact-verify queue should remain, be retired, or be migrated to taskq. That future decision must inventory the incumbent migration/client/routes/worker/evidence and define compatibility, ownership, failure, rollback, and production evidence; it is not implied by the isolated pilot and authorizes no current QDarte change.
 
@@ -151,18 +151,11 @@ and reject it before its service-token backend runs; its host routes use a separ
 service-token wrapper to compensate. `OutlabsQueueAuthorizer` invokes the generic dependency,
 so the frozen worker-service-token path cannot be assumed to authenticate at the mounted facade.
 
-**Decision adopted — Option A:** P2 may make a local-only, additive operation against
-`qdarteapi_dev.outlabs_auth` through QDarte's public OutLabsAuth services, creating only
-`taskq_qdarte_pilot:run` / `:read` and a pilot-namespaced role/token record only when the public
-service requires it. It must use a host-owned `QueueAuthorizer` that calls QDarte's supported
-service-token verifier, never the generic dependency that rejects those tokens. Queue data,
-migrations, roles, and metadata remain only in `qdarte_pilot_dev`; `qdarteapi_dev.taskq` and
-`qdarte_ops` remain forbidden. A canonical auth content digest must prove that only pilot rows
-were added, and P5 teardown deletes exactly those rows and restores the baseline digest
-byte-identically. No wildcard, operator grant, API-key substitution, existing-record mutation,
-or ad-hoc authorization bypass is permitted.
+**Superseded by S5-QD-CQ-03:** the former additive-catalog branch is retained here as
+the evidence that exposed the lifecycle mismatch. P2 now uses the verifier-only posture
+adopted below; it performs only QP-03's read-only digest against `qdarteapi_dev.outlabs_auth`.
 
-### S5-QD-CQ-03 — Option-A pilot IAM cannot meet the byte-identical teardown oracle through QDarte's supported public service
+### S5-QD-CQ-03 — Option-A pilot IAM cannot meet the byte-identical teardown oracle through QDarte's supported public service *(resolved: verifier-only self-contained tokens)*
 
 **Blocking evidence:** Option A permits P2 to add the exact
 `taskq_qdarte_pilot:read` and `taskq_qdarte_pilot:run` records through QDarte's
@@ -176,15 +169,18 @@ entirely. Therefore neither `is_system=True` nor `is_system=False` can restore
 the pre-P2 permissions/history digest through the approved public API; direct
 SQL cleanup would violate Option A's no-ad-hoc authorization-bypass rule.
 
-**Decision required:** amend the pilot authority before P2 chooses one explicit
-posture: (A) a disposable pilot-local auth catalog/token verifier so no QDarte
-auth rows are added; (B) a narrowly authorized, public-service-supported hard
-delete/purge lifecycle that really restores the digest; or (C) revise QP-10's
-oracle and retention policy to accept the exact archived/history footprint.
-The decision must preserve the queue-scoped service-token contract and state
-whether the existing QDarte auth database is still allowed to receive pilot
-records. Do not provision pilot permissions, roles, tokens, queues, or database
-objects until this is decided docs-first.
+**Decision adopted — verifier-only self-contained tokens:** QDarte's supported
+service-token verifier is retained, but P2 does not provision a QDarte auth
+catalog, role, API key, or persisted token record. The future local worker and
+read principal receive distinct ephemeral credentials carrying only the exact
+`taskq_qdarte_pilot:run` or `:read` scope; the host-owned `QueueAuthorizer`
+validates and checks that embedded scope through QDarte's supported service.
+No wildcard, generic-dependency bypass, or operator permission is introduced.
+The QDarte auth database is mutation-out-of-scope: QP-03 and QP-10 prove its
+digest byte-identical before and after the pilot by construction, using only
+the canonical read-only digest. P2 may resume only for the disposable queue
+database and its package IAM; P4 alone may issue the ephemeral local credentials
+after P3 opens.
 
 ### S5-CQ-02 — H-11 flat profile response conflicts with the existing generated PUT envelope
 

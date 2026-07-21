@@ -114,25 +114,29 @@ actual connection arithmetic are measured from the resulting compose
 configuration; they are not inferred from this document.
 
 Queue data and authorization are deliberately split: package roles, migrations,
-metadata, and the sole `qdarte_pilot` queue live only in `qdarte_pilot_dev`;
-the existing QDarte service-token verifier and a minimal, additive catalog live
-only in `qdarteapi_dev.outlabs_auth`. P2 may create no more than the namespaced
-`taskq_qdarte_pilot:run` and `taskq_qdarte_pilot:read` permissions plus a
-pilot-namespaced role/token record only if QDarte's public service requires it.
-It may not modify or delete any existing QDarte auth record, nor access
-`qdarteapi_dev.taskq` or `qdarte_ops`. The worker token receives only `run`;
-the read-only local acceptance principal receives only `read`. No wildcard,
-global queue browser, operator permission, or public enqueue route is
-introduced. QDarte's existing service-token lifecycle remains the source of
-token issuance and revocation.
+metadata, and the sole `qdarte_pilot` queue live only in `qdarte_pilot_dev`.
+QDarte's existing service-token verifier remains the host-authentication
+boundary, but P2 writes **no** `qdarteapi_dev.outlabs_auth` record; its sole
+permitted schema access is QP-03's bounded read-only digest.
+Its service tokens are self-contained signed credentials with the exact
+`taskq_qdarte_pilot:run` or `taskq_qdarte_pilot:read` scope embedded at
+issuance; the host-owned adapter checks that embedded scope through QDarte's
+supported verifier. The pilot does not add a permission catalog row, role,
+API key, or persisted token record. It may not modify or delete any existing
+QDarte auth record, nor access `qdarteapi_dev.taskq` or `qdarte_ops`. The worker
+token receives only `run`; the read-only local acceptance principal receives
+only `read`. No wildcard, global queue browser, operator permission, or public
+enqueue route is introduced. P4 issues ephemeral local credentials only after
+P3 opens; P5 disposes them with the local pilot configuration, while QP-03's
+auth digest remains byte-identical because the pilot never mutates that schema.
 
 ## 4. Controlled implementation sequence
 
 | Slice | Permitted work | Required evidence | Stop condition |
 |---|---|---|---|
 | P0 — preflight | Reproduce the guarded isolated core stack and the existing no-network QDarte-only worker drill; inventory API/runtime/worker package pins, DB version, connection ceiling, actual role attributes, and existing QDarte queue high-water state. | PG18, Redis, qdarteAPI, and MinIO are healthy; source env is masked; Docker socket and production backups are absent; the pure `cluster_research_scope` drill passes with no production path or mount. The unrelated multi-worker smoke is explicitly excluded: it requires `intake-worker`, whose broad non-pilot lanes retain un-sandboxed egress and storage/write effects. | Any unmasked source env, production volume/socket exposure, superuser runtime login, stale compose topology, or any attempt to start a non-pilot worker to satisfy this pilot baseline. |
-| P1 — host boundary | Add the exact a3 dependency pin, a disabled-by-default package-taskq settings block, the mounted package facade, a capability-sized local runtime constructor, and a separate pilot worker whose fixed allowlist is only `qdarte.cluster_research.pilot`. Its dedicated non-superuser DSN names `qdarte_pilot_dev` only. | Core import remains optional outside the enabled integration; disabled boot leaves no contact with `qdarte_pilot_dev` or pilot worker task; the pilot worker cannot widen on restart/cleanup; API and worker resource budgets are measured. | A public producer endpoint, reuse of the copied direct-taskq route/model, direct worker database access, reuse of the broad legacy worker configuration, a widened runtime role, or any `qdarteapi_dev.taskq` / `qdarte_ops` mutation. P2 alone may use the exact additive `outlabs_auth` exception in §3. |
-| P2 — local provisioning | Create `qdarte_pilot_dev` only, then run immutable 0001–0005 under the owner/admin; verify twice; provision `qdarte_pilot` and the exact local authorization catalog. | Migration ledger/checksums in `qdarte_pilot_dev`; `verify: ok` twice; non-superuser negative vectors for operator, role creation, and base-table reads; a QDarte-auth before/after digest proves only namespaced pilot records were added. | Any access to `qdarteapi_dev.taskq` or `qdarte_ops`; any non-additive change outside the exact namespaced `outlabs_auth` records; manual metadata DML; a migration run as the app/worker identity; a permission wildcard; or any mutation of an incumbent QDarte queue state. |
+| P1 — host boundary | Add the exact a3 dependency pin, a disabled-by-default package-taskq settings block, the mounted package facade, a capability-sized local runtime constructor, and a separate pilot worker whose fixed allowlist is only `qdarte.cluster_research.pilot`. Its dedicated non-superuser DSN names `qdarte_pilot_dev` only. | Core import remains optional outside the enabled integration; disabled boot leaves no contact with `qdarte_pilot_dev` or pilot worker task; the pilot worker cannot widen on restart/cleanup; API and worker resource budgets are measured. | A public producer endpoint, reuse of the copied direct-taskq route/model, direct worker database access, reuse of the broad legacy worker configuration, a widened runtime role, or any `qdarteapi_dev.taskq` / `qdarte_ops` mutation. P2 may not access QDarte's auth schema; its verifier-only exception is defined in §3. |
+| P2 — local provisioning | Create `qdarte_pilot_dev` only, then run immutable 0001–0005 under the owner/admin; verify twice; provision `qdarte_pilot` and prove the host-owned verifier accepts only the exact self-contained pilot scopes. | Migration ledger/checksums in `qdarte_pilot_dev`; `verify: ok` twice; non-superuser negative vectors for operator, role creation, and base-table reads; a QDarte-auth before/after **read-only** digest is byte-identical, proving no QDarte auth record was added or changed. | Any mutation of `qdarteapi_dev.outlabs_auth`, or any access to `qdarteapi_dev.taskq` or `qdarte_ops`; manual metadata DML; a migration run as the app/worker identity; a permission wildcard; or any mutation of an incumbent QDarte queue state. |
 | P3 — deterministic adapter | Register only `qdarte.cluster_research.pilot`; adapt the existing pure synthetic cluster calculation to a bounded result. Add an internal/local harness producer, never a user-facing generic enqueue route. | Pure shadow computation and taskq-handler computation have the same canonical result digest; the adapter has no followups and no external I/O. | A taskq job invokes a provider, browser, filesystem/media write, QDarte domain write, child job, legacy enqueue, or adds the pilot type to QDarte's legacy `JobType` literal or shared `_REGISTRY`. |
 | P4 — worker canary | Start one uniquely named pilot worker using the HTTP transport and queue-scoped service token; enqueue one keyed pilot job through the internal harness. | `created` then `existed` yields the same id; exactly one handler invocation; canonical authorized read reaches `succeeded`; raw taskq ledger has one successful attempt and no secret/fence exposure. | A legacy `worker_jobs` row is inserted, a second producer path fires, or the worker can claim a queue/job type outside the pilot allowlist. |
 | P5 — recovery and rollback | Exercise response-loss settlement replay and a local hard process termination while the pure pilot handler is held; let lease expiry/reap reclaim the same job id to a second worker; then disable the pilot and prove zero-DML rollback. | Same-id terminal convergence, correct budget/event accounting, no remaining owned resources, API/legacy worker health, and no `qdarte_ops` mutation. | Any result is non-deterministic, any side effect escapes, a rollback needs table edits, or taskq process exit is hidden/ignored. |
@@ -155,14 +159,14 @@ digest uses that exact value. The taskq adapter owns its type map exclusively;
 |---|---|---|
 | QP-01 | Guarded isolated core + QDarte-only pure drill | PG18, Redis, qdarteAPI, and MinIO are healthy; source env is masked; no Docker socket or production backup mount is visible; the existing no-network `cluster_research_scope` drill passes. `intake-worker` and the broad multi-worker smoke are excluded because their non-pilot lanes have un-sandboxed side effects. |
 | QP-02 | Disabled application boot | No package migration, connection, listener, worker, or public route side effect against `qdarte_pilot_dev`; incumbent direct-QDarte behavior is neither exercised nor changed. |
-| QP-03 | Owner/admin fresh install, rerun, and auth isolation | Immutable 0001–0005 ledger and `verify()` pass twice in `qdarte_pilot_dev`; app/worker identities are denied owner/operator actions. A canonical before/after digest of QDarte's `outlabs_auth` permissions, roles, API keys, service tokens, and users proves only the exact pilot-namespaced records were added. |
+| QP-03 | Owner/admin fresh install, rerun, and auth isolation | Immutable 0001–0005 ledger and `verify()` pass twice in `qdarte_pilot_dev`; app/worker identities are denied owner/operator actions. A canonical before/after digest of QDarte's `outlabs_auth` permissions, roles, API keys, service tokens, and users is byte-identical, proving the pilot added and changed no QDarte auth record. |
 | QP-04 | Authorization | The host-owned service-token adapter authenticates through QDarte's supported verifier; worker token can run only `qdarte_pilot`, the acceptance principal can read only `qdarte_pilot`, and wrong queue/token follows the generated hiding/error posture. No wildcard scope or generic-dependency bypass is granted. |
 | QP-05 | Shadow computation | Empty synthetic input produces the same canonical digest through the existing pure function and the taskq adapter. |
 | QP-06 | Keyed canary | Two submissions with one key produce `created` then `existed`, one job id, one handler call, one successful attempt, and a canonical authorized read. |
 | QP-07 | Failure/replay | A committed settlement response loss replays the original settlement only; no second handler invocation occurs. |
 | QP-08 | Hard-kill recovery | A held pure job is terminated past its configured grace, reclaimed as the same id, and reaches one terminal success with audit-conserved attempts/events. |
 | QP-09 | Legacy isolation | Before/after snapshots use a canonical in-database full-row content digest in stable primary-key order for `qdarte_ops.worker_jobs`, `worker_job_events`, `worker_job_attempts`, `worker_artifacts`, `workflow_runs`, and `worker_job_dependencies`; the digest is the primary oracle and must include every persisted column, so inserts, updates, and deletes cannot hide. Count/id/time high-waters are retained only as diagnostics (`updated_at` where present; `created_at` for append-only events). No existing worker process claims the pilot job. |
-| QP-10 | Disable, teardown, and rollback | Turning off the pilot runtime/worker is zero-DML. The separate owner-only pilot teardown deletes exactly the namespaced pilot auth records, then proves the QP-03 auth digest is byte-identical to its pre-P2 value; the disposable pilot database may then be dropped. The existing QDarte API, worker fleet, and isolated smoke remain healthy throughout. |
+| QP-10 | Disable, teardown, and rollback | Turning off the pilot runtime/worker is zero-DML. Teardown disposes the local ephemeral pilot credentials and proves the QP-03 auth digest remains byte-identical; the disposable pilot database may then be dropped. The existing QDarte API, worker fleet, and isolated smoke remain healthy throughout. |
 
 All QP evidence is local and disposable. A later production or side-effecting
 lane needs its own specification, preflight, backup/restore evidence, external
@@ -205,9 +209,12 @@ The repair is incumbent QDarte migration work, not a package or pilot-database
 change: it neither creates nor authorizes `qdarte_pilot_dev`, and it does not
 touch QDarte's direct contact-verify queue.
 
-S5-QD-CQ-02 is resolved as Option A: QDarte's existing supported service-token
-verifier and a narrowly enumerated additive `outlabs_auth` catalog are the
-pilot's authorization boundary, while package queue data remains isolated in
-`qdarte_pilot_dev`. The generic OutLabsAuth dependency is not used for pilot
-service tokens. QP-03's before/after digest and QP-10's exact cleanup prevent
-this narrow auth operation from silently widening into a QDarte mutation.
+S5-QD-CQ-02/03 resolve together: QDarte's existing supported service-token
+verifier is the pilot's authorization boundary, while package queue data remains
+isolated in `qdarte_pilot_dev`. The generic OutLabsAuth dependency is not used
+for pilot service tokens, and no QDarte auth catalog row is created: the exact
+scope lives only inside each self-contained local token. This replaces CQ-02's
+additive-catalog branch because the public permission lifecycle can archive but
+cannot delete records or erase its history, making its former QP-10 oracle
+unreachable. QP-03 and QP-10 instead require a byte-identical auth digest by
+construction.
