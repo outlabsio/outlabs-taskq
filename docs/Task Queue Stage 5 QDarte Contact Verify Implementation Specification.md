@@ -57,7 +57,15 @@ The package Protocol facade is available only inside the checked-in local
 contact harness. The normal QDarte application mounts neither `/taskq` nor a
 generic package producer route. The harness has one unlisted local result
 adapter, `POST /internal/taskq/contact-verify/jobs/{job_id}/results`, and its
-authorizer admits only the exact contact queue scopes. Before CV-04, no
+authorizer admits only the exact contact queue scopes. Its reporter-only body
+has exactly two operations: `inspect` first validates the current package
+attempt and authoritative planned entity, then returns either the already
+committed stable domain effect or `pending`; `apply` repeats that validation
+and performs the existing single stable effect application. The reporter, not
+the handler, supplies the active attempt identity; the handler may supply only
+the bounded entity/effect request through ADR-022's fence-free capability. No
+operation settles a package job, and neither mounts a generic worker-fence or
+package-producer endpoint. Before CV-04, no
 enqueue credential is issued at all; CV-04 alone may issue a process-local,
 short-lived harness enqueue credential for its one controlled canary. This is
 not a public producer or a replacement for the incumbent direct worker API.
@@ -132,6 +140,15 @@ and remains enqueue-denied until CV-04 issues its one ephemeral credential.
 Register exactly one package task type and allow it only on the package contact
 queue. The worker uses the package HTTP path, a run-only ephemeral credential,
 and a fixed one-item allowlist that no setup or cleanup operation can widen.
+It installs only ADR-022's trusted reporter: for each planned entity the
+handler asks the private adapter to inspect the durable result identity before
+the provider call, skips the provider when it receives the committed result,
+and otherwise applies the provider result through the same adapter. The
+reporter receives the active attempt internally and retries an ambiguous
+adapter response with the identical request while it still owns that attempt;
+it never settles the job. The registry handler receives neither attempt nor
+fence and must not call the copied direct worker API or use a package database
+credential.
 The local harness receives a separate short-lived enqueue credential and a
 read-only credential for canonical observation; none persists in QDarte auth
 storage or reaches a command line or log.
