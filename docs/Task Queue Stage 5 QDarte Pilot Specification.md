@@ -1,9 +1,10 @@
 # taskq — Stage 5 QDarte pilot specification
 
 > **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2/P3 accepted. The
-> isolated database/IAM and deterministic pure adapter are complete; P4 alone
-> may start the dedicated pilot worker. S5-QD-CQ-04 resolves its local-only
-> harness producer identity, and S5-QD-CQ-05 resolves its metadata bootstrap.
+> isolated database/IAM, deterministic pure adapter, and the P4 worker canary
+> are complete; P5 alone may start recovery work. S5-QD-CQ-04 resolves its
+> local-only harness producer identity, and S5-QD-CQ-05 resolves its metadata
+> bootstrap.
 > Round 11
 > accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
@@ -69,21 +70,19 @@ write to pair with enqueue.
 
 ## 3. Artifact, topology, and privilege model
 
-The first integration pins immutable `outlabs-taskq` `v0.1.0a3` by exact release
-URL and SHA-256. It is the ADR-020 bridge, supports the closed SQL-contract set
+The first integration originally pinned immutable `outlabs-taskq` `v0.1.0a3`.
+Its P4 canonical read exposed a client-only decode omission, so the actual
+pilot pin is now immutable `v0.1.0a3.post1`, exact release URL and wheel
+SHA-256 `bbf5c1fa0e52ad9eb8a97e0fdd0b5ed7be57f6cb24170ac346d6bf056764aecf`.
+It is the ADR-020 bridge, supports the closed SQL-contract set
 `{0.1.2, 0.1.3, 0.1.4}`, and contains migrations `0001`–`0005`. Migration
 `0006` and read-model activation are neither needed nor permitted for this
-pilot. P4's first live run found that its official a3 client treated omitted
-nullable job-detail fields as required, so its canonical-read completion is
-paused for a new immutable remedial alpha with only that decode correction,
-then an exact local repin. The published `v0.1.0a4` tag is immutable but is
-**not** eligible for this repin: it includes the later read-model range,
-including migration `0006`, and therefore exceeds the pilot's frozen artifact
-surface. The remedial artifact must instead be cut from the exact a3 baseline
-as `0.1.0a3.post1` (or a later equivalently narrow immutable post release),
-with only the nullable-projection decode correction and its regression proof.
-The a3 artifact remains immutable; no migration, wire, SQL, capability, or
-pilot boundary changes are authorized by this remediation.
+pilot. The post release is cut from the exact a3 baseline and defaults only
+nullable job-list/detail projection fields that a conforming facade may omit.
+The published `v0.1.0a4` tag remains immutable but is **not** eligible for this
+pilot: it includes the later read-model range, including migration `0006`, and
+therefore exceeds the frozen artifact surface. No migration, wire, SQL,
+capability, or pilot boundary changed for this correction.
 
 ```text
 isolated QDarte planner/CLI --producer--> package taskq.qdarte_pilot
@@ -98,6 +97,20 @@ QDarte service-token verifier + additive `outlabs_auth` catalog
 
 `qdarteapi_dev` direct-SQL `taskq` + `qdarte_ops` <--- unchanged; no bridge or dual publish
 ```
+
+P4 used that exact post-release pin in both QDarte components. The local
+harness issued three one-day self-contained credentials only in process
+environment: `enqueue`, `read`, and `run`; no token reached an argument list,
+setting, route, or persistent store. The run credential negotiated only
+deployment metadata and drove worker `qdarte-pilot-p4-002`; it could not read
+job data. The final keyed command `qdarte-pilot:p4-canary-20260721-002`
+returned `created` then `existed` for job
+`019f8651-966e-7492-8a0e-5668defb33b5`, and the independent read credential
+reached `succeeded`. Its raw ledger is one succeeded attempt, three events,
+and zero failures, releases, or expiry streak. Before/after ordered full-row
+digest vectors of `qdarte_ops.worker_jobs`, attempts, events, artifacts,
+dependencies, and workflow runs were byte-identical; no incumbent QDarte row
+changed.
 
 The QDarte API mounts the package-owned lifespan-free `/taskq` facade. It owns
 no copied routes, SQL, wire models, or queue read models. Its pilot-specific
