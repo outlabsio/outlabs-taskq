@@ -195,7 +195,11 @@ touch QDarte's direct contact-verify queue.
 P2 is paused before any database or IAM action because P1's package authorizer
 uses QDarte's existing `outlabs_auth` session in `qdarteapi_dev`, while the
 frozen P2 boundary simultaneously requires QDarte-issued queue-scoped tokens
-and forbids access to that database. S5-QD-CQ-02 must choose either a narrowly
-enumerated local IAM operation against the existing auth schema or a distinct
-pilot-local OutLabsAuth instance and token lifecycle. Neither topology may be
-improvised during provisioning.
+and forbids access to that database. QDarte's source also documents that its
+generic OutLabsAuth dependency rejects its self-contained service tokens before
+the service-token backend runs, while the mounted package adapter calls that
+generic dependency instead of QDarte's corrective wrapper. S5-QD-CQ-02 must
+choose either a narrowly enumerated local IAM operation plus supported
+service-token adapter against the existing auth schema or a distinct pilot-local
+OutLabsAuth instance and token lifecycle. Neither topology may be improvised
+during provisioning.
