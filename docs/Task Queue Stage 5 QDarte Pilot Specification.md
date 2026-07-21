@@ -73,7 +73,12 @@ The first integration pins immutable `outlabs-taskq` `v0.1.0a3` by exact release
 URL and SHA-256. It is the ADR-020 bridge, supports the closed SQL-contract set
 `{0.1.2, 0.1.3, 0.1.4}`, and contains migrations `0001`–`0005`. Migration
 `0006` and read-model activation are neither needed nor permitted for this
-pilot.
+pilot. P4's first live run found that its official a3 client treated omitted
+nullable job-detail fields as required, so its canonical-read completion is
+paused for a new immutable remedial alpha with only that decode correction,
+then an exact local repin. The a3 artifact remains immutable; no migration,
+wire, SQL, capability, or pilot boundary changes are authorized by this
+remediation.
 
 ```text
 isolated QDarte planner/CLI --producer--> package taskq.qdarte_pilot
