@@ -1,9 +1,9 @@
 # taskq — Stage 5 QDarte pilot specification
 
 > **Status:** Tier-3 local-pilot design — P0/P0B/P1/P2/P3 accepted. The
-> isolated database/IAM and deterministic pure adapter are complete; P4 alone
-> may start the dedicated pilot worker. S5-QD-CQ-04 resolves its local-only
-> harness producer identity. Round 11
+> isolated database/IAM and deterministic pure adapter are complete; P4 is
+> blocked on S5-QD-CQ-05's worker-bootstrap authorization decision. S5-QD-CQ-04
+> resolves its local-only harness producer identity. Round 11
 > accepted P0–P5 against a stale source
 > inventory; its safety findings remain binding, while current QDarte
 > direct-taskq co-residency is isolated by database. It is
@@ -214,6 +214,14 @@ verb. Its issuance, positive enqueue vector, and run/read negative vectors
 are P4 evidence, and P5 disposes it with the other ephemeral credentials. The
 facade database login remains a transport implementation detail, never a
 producer bypass.
+
+P4 is stopped at S5-QD-CQ-05. The official HTTP worker negotiates
+`GET /taskq/v1/meta` before claiming, but Tier-0 maps that deployment-scoped
+route to `read` while the pilot's worker token is intentionally `run`-only.
+The host adapter correctly returned `AUTH403`; no worker or job may start
+until a docs-first decision chooses either an explicitly read-capable worker
+credential or a narrowly reviewed metadata-bootstrap exception that preserves
+denial for every queue/job read.
 
 P1's isolated gate also repaired the current QDarte host's fresh-database
 chain. Migration `20260715_0070_host_native_worker_lanes` now recognizes only
