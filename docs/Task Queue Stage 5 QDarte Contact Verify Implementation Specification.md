@@ -91,6 +91,11 @@ same effect identity. Tests must prove wrong fence, wrong entity, old reclaimed
 attempt, same-job retry, and commit-then-lost-response behavior with exact
 domain/usage row oracles.
 
+CV-02 delivers this bridge as a server-owned, injectable host component plus
+the durable QDarte application ledger. CV-03 alone binds it to the newly
+provisioned package runtime and mounts the local-only endpoint; no package
+database access, worker process, or public route is implied by CV-02.
+
 ### CV-03 — isolated package database and facade preflight
 
 Only after CV-01/CV-02 pass, create the disposable package contact database.
