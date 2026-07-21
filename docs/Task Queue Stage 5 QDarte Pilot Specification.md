@@ -1,7 +1,8 @@
 # taskq — Stage 5 QDarte pilot specification
 
-> **Status:** Tier-3 proposal — 2026-07-21. This is a local-first integration
-> design only. It is subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
+> **Status:** Tier-3 accepted local-pilot design — 2026-07-21. Round 11 accepts
+> P0–P5 only in the isolated disposable `qdarte-dev` environment. It is
+> subordinate to the [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md),
 > [Function Manifest 0.1.4](./Task%20Queue%200.1%20Function%20Manifest.md),
 > ADR-006, ADR-011, ADR-020, and the [Build Plan](./Task%20Queue%20Build%20Plan.md).
 > It changes no contract, library package, QDarte source, database, IAM,
@@ -77,13 +78,18 @@ models. The pilot worker uses the taskq HTTP worker/client path with a distinct
 service token; it does not acquire a PostgreSQL password or direct table grant.
 
 The local owner/admin identity alone runs `taskq migrate` and `taskq verify`.
-The long-lived API runtime login is non-superuser, has only the required
+The facade has a **dedicated non-superuser taskq DSN and its own pool**: it
+must never reuse QDarte API's existing `postgres` superuser engine/session.
+Its long-lived runtime login has only the required
 producer/observer/housekeeper/runner memberships, has no operator membership,
 cannot `SET ROLE taskq_operator`, and never performs migrations or
-`ensure_queue`. Operator-only provisioning is a one-off local command using a
-separate credential. The final capability set and actual connection arithmetic
-are measured from the resulting compose configuration; they are not inferred
-from this document.
+`ensure_queue`. P0 records the actual role attributes for both the existing
+QDarte API connection and this distinct facade connection; P2's negative
+vectors must prove the facade identity has no superuser, operator,
+role-creation, or base-table-read bypass. Operator-only provisioning is a
+one-off local command using a separate credential. The final capability set and
+actual connection arithmetic are measured from the resulting compose
+configuration; they are not inferred from this document.
 
 The authorization catalog contains only the queue-specific permissions required
 for `qdarte_pilot`: the worker token receives `taskq_qdarte_pilot:run`; the
@@ -99,13 +105,21 @@ token issuance and revocation.
 | P0 — preflight | Reproduce the existing isolated-dev readiness and worker smoke; inventory API/runtime/worker package pins, DB version, connection ceiling, actual role attributes, and existing QDarte queue high-water state. | Fresh isolated stack; all existing smoke checks pass; no production path or mount is present. | Any unmasked source env, production volume/socket exposure, superuser runtime login, or stale compose topology. |
 | P1 — host boundary | Add the exact a3 dependency pin, a disabled-by-default QDarte taskq settings block, the mounted package facade, and a capability-sized local runtime constructor. | Core import remains optional outside the enabled integration; disabled boot leaves no `taskq` schema access or worker task; API and worker resource budgets are measured. | A public producer endpoint, copied taskq route/model, direct worker database access, or a widened runtime role. |
 | P2 — local provisioning | In a newly created isolated database only, run immutable 0001–0005 under the owner/admin; verify twice; provision `qdarte_pilot` and the exact local authorization catalog. | Migration ledger/checksums; `verify: ok` twice; non-superuser negative vectors for operator, role creation, and base-table reads. | Manual metadata DML, a migration run as the app/worker identity, a permission wildcard, or any mutation of `qdarte_ops` queue state. |
-| P3 — deterministic adapter | Register only `qdarte.cluster_research.pilot`; adapt the existing pure empty-input cluster calculation to a bounded result. Add an internal/local harness producer, never a user-facing generic enqueue route. | Pure shadow computation and taskq-handler computation have the same canonical result digest; the adapter has no followups and no external I/O. | A taskq job invokes a provider, browser, filesystem/media write, QDarte domain write, child job, or legacy enqueue. |
+| P3 — deterministic adapter | Register only `qdarte.cluster_research.pilot`; adapt the existing pure synthetic cluster calculation to a bounded result. Add an internal/local harness producer, never a user-facing generic enqueue route. | Pure shadow computation and taskq-handler computation have the same canonical result digest; the adapter has no followups and no external I/O. | A taskq job invokes a provider, browser, filesystem/media write, QDarte domain write, child job, legacy enqueue, or adds the pilot type to QDarte's legacy `JobType` literal or shared `_REGISTRY`. |
 | P4 — worker canary | Start one uniquely named pilot worker using the HTTP transport and queue-scoped service token; enqueue one keyed pilot job through the internal harness. | `created` then `existed` yields the same id; exactly one handler invocation; canonical authorized read reaches `succeeded`; raw taskq ledger has one successful attempt and no secret/fence exposure. | A legacy `worker_jobs` row is inserted, a second producer path fires, or the worker can claim a queue/job type outside the pilot allowlist. |
 | P5 — recovery and rollback | Exercise response-loss settlement replay and a local hard process termination while the pure pilot handler is held; let lease expiry/reap reclaim the same job id to a second worker; then disable the pilot and prove zero-DML rollback. | Same-id terminal convergence, correct budget/event accounting, no remaining owned resources, API/legacy worker health, and no `qdarte_ops` mutation. | Any result is non-deterministic, any side effect escapes, a rollback needs table edits, or taskq process exit is hidden/ignored. |
 
 The P5 hard-kill vector is intentionally run on the pure lane. It is evidence
 for this integration only; it does not satisfy or waive the separate hard-kill
 gate for a future side-effecting QDarte lane.
+
+The P3 synthetic payload is fixed, rather than an ambiguous empty object:
+`scope_kind: "country"`, `scope_key: "ar"`, `country_code: "AR"`, empty
+`candidate_regions`, `existing_clusters`, and `proposed_clusters`, empty
+`warnings`, and `input_summary: {"pilot": "taskq-stage5"}`. The canonical
+digest uses that exact value. The taskq adapter owns its type map exclusively;
+`qdarte.cluster_research.pilot` must never appear in QDarte's legacy closed
+`JobType` literal or the shared runtime `_REGISTRY`.
 
 ## 5. Local acceptance matrix
 
@@ -119,7 +133,7 @@ gate for a future side-effecting QDarte lane.
 | QP-06 | Keyed canary | Two submissions with one key produce `created` then `existed`, one job id, one handler call, one successful attempt, and a canonical authorized read. |
 | QP-07 | Failure/replay | A committed settlement response loss replays the original settlement only; no second handler invocation occurs. |
 | QP-08 | Hard-kill recovery | A held pure job is terminated past its configured grace, reclaimed as the same id, and reaches one terminal success with audit-conserved attempts/events. |
-| QP-09 | Legacy isolation | Before/after row counts and high-water values for QDarte's worker ledger are equal; no existing worker process claims the pilot job. |
+| QP-09 | Legacy isolation | Before/after snapshots of `count(*)`, `max(id)`, and `max(updated_at)` are byte-identical for `qdarte_ops.worker_jobs`, `worker_job_events`, `worker_job_attempts`, `worker_artifacts`, `workflow_runs`, and `worker_job_dependencies`; no existing worker process claims the pilot job. |
 | QP-10 | Disable/rollback | Turning off the pilot stops its runtime/worker without database DML; the existing QDarte API, worker fleet, and isolated smoke remain healthy. |
 
 All QP evidence is local and disposable. A later production or side-effecting
@@ -137,11 +151,12 @@ outlabsAPI read-model rollout or the tools-retirement observation.
 
 ## 7. Review gate and next decision
 
-Before P1, a targeted independent review must verify the source inventory,
-artifact/version choice, SQL-contract bridge posture, role and authorization
-split, compose isolation, handler purity, no-dual-publish architecture, test
-oracles, resource/connection arithmetic, recovery semantics, and explicit
-absence of all non-goals. It may authorize only P0–P5 local implementation.
+Round 11 independently verified the source inventory, artifact/version choice,
+SQL-contract bridge posture, role and authorization split, compose isolation,
+handler purity, no-dual-publish architecture, test oracles, resource/connection
+arithmetic posture, recovery semantics, and explicit absence of all non-goals.
+Its four docs-first refinements above are binding. It authorizes only P0–P5
+local implementation.
 
 No Contract question is recorded by this proposal: it uses existing queue,
 authorization, worker, and settlement contracts. If source inspection shows
