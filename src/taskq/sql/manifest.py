@@ -326,4 +326,7 @@ REPLAY_RULES = {
 # Mutable values are deliberately not frozen; only required seed identities and
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
-META_SEEDS = {"contract_version": '"0.1.4"', "capabilities": '{"active": []}'}
+META_SEEDS = {
+    "contract_version": '"0.1.4"',
+    "capabilities": '{"active": ["read_model_list_ready"]}',
+}

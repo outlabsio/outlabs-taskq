@@ -223,10 +223,6 @@ async def test_read_model_sql_http_and_raw_row_parity(
         created = await transport.enqueue(
             EnqueueCommand(queue=queue, job_type="tests.read", payload={})
         )
-        await pg.execute(
-            "UPDATE taskq.meta SET value='{\"active\":[\"read_model_list_ready\"]}'::jsonb "
-            "WHERE key='capabilities'"
-        )
         sql_page = await transport.list_jobs(queue, "ready")
         http_page = await client.list_jobs(queue=queue, view="ready")
         assert [item.model_dump(mode="json") for item in http_page.items] == [
@@ -253,7 +249,6 @@ async def test_read_model_sql_http_and_raw_row_parity(
         assert item.finished_at == raw["finished_at"]
         assert item.updated_at == raw["updated_at"]
     finally:
-        await pg.execute("UPDATE taskq.meta SET value='{\"active\":[]}'::jsonb WHERE key='capabilities'")
         await client.aclose()
         await asgi.aclose()
         await transport.aclose()

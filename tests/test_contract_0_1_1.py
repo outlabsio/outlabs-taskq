@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate
@@ -55,7 +56,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same full 0.1.4 ledger and version."""
+    """Both supported paths end at the same full 0.1.4 ledger and activation posture."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -72,6 +73,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             "0003_contract_0_1_2",
             "0004_read_models",
             "0005_read_model_conformance",
+            "0006_activate_ready_read_model",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -105,12 +107,59 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 "0003_contract_0_1_2",
                 "0004_read_models",
                 "0005_read_model_conformance",
+                "0006_activate_ready_read_model",
             ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname='taskq' AND p.prokind='f'"
             )
             assert count.scalar_one() == 43
+    finally:
+        await engine.dispose()
+        admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+        try:
+            await admin.execute(f'DROP DATABASE "{database}"')
+        finally:
+            await admin.close()
+
+
+async def test_ready_view_transitions_from_tq501_to_page_at_0006(taskq_dsn: str) -> None:
+    """The immutable upgrade, not manual DML, is the only ready activation vehicle."""
+    database = f"taskq_adr019_activation_{uuid4().hex}"
+    admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+    try:
+        await admin.execute(f'CREATE DATABASE "{database}"')
+    finally:
+        await admin.close()
+
+    engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
+    try:
+        migrations = discover_migrations()
+        async with engine.connect() as conn:
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[:5])
+            )
+            assert applied[-1] == "0005_read_model_conformance"
+            await conn.exec_driver_sql(
+                "SELECT * FROM taskq.ensure_queue('adr019_activation', '{}'::jsonb, 'adr019')"
+            )
+            await conn.commit()
+            with pytest.raises(DBAPIError) as inactive:
+                await conn.exec_driver_sql(
+                    "SELECT * FROM taskq.list_jobs('adr019_activation', 'ready')"
+                )
+            assert getattr(inactive.value, "orig", inactive.value).sqlstate == "TQ501"
+            await conn.rollback()
+
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[5:])
+            )
+            assert applied == ["0006_activate_ready_read_model"]
+            page = await conn.exec_driver_sql(
+                "SELECT * FROM taskq.list_jobs('adr019_activation', 'ready')"
+            )
+            assert page.first() is not None
+            await conn.commit()
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))

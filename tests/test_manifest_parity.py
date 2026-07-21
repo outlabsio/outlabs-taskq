@@ -227,7 +227,7 @@ async def test_observer_projections_metrics_and_views(
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
     assert meta["contract_version"] == "0.1.4"
-    assert _json(meta["capabilities"]) == {"active": []}
+    assert _json(meta["capabilities"]) == {"active": ["read_model_list_ready"]}
 
     await runner.fetchrow(
         "SELECT * FROM taskq.worker_heartbeat('view-worker', ARRAY[$1])", "r3_observe"

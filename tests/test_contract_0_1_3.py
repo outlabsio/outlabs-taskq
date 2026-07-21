@@ -71,22 +71,28 @@ async def test_profile_version_and_observer_projection_are_bounded(
     assert profile["profile_version"] == 2
 
 
-@pytest.mark.parametrize("view", ["ready", "running", "finished"])
-async def test_all_read_model_views_remain_explicitly_inactive(
-    operator: asyncpg.Connection, observer: asyncpg.Connection, view: str
+@pytest.mark.parametrize(
+    ("view", "active"), [("ready", True), ("running", False), ("finished", False)]
+)
+async def test_read_model_capability_posture_is_exact(
+    operator: asyncpg.Connection, observer: asyncpg.Connection, view: str, active: bool
 ) -> None:
     await operator.fetchrow(
         "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'rm01')", "rm01_profile"
     )
-    with pytest.raises(asyncpg.PostgresError) as exc_info:
-        await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_profile', $1)", view)
-    assert exc_info.value.sqlstate == "TQ501"
-    assert "read_model_view_inactive" in (exc_info.value.detail or "")
+    if active:
+        page = await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_profile', $1)", view)
+        assert page is not None and page["items"] == [] and page["next_after"] is None
+    else:
+        with pytest.raises(asyncpg.PostgresError) as exc_info:
+            await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_profile', $1)", view)
+        assert exc_info.value.sqlstate == "TQ501"
+        assert "read_model_view_inactive" in (exc_info.value.detail or "")
 
 
 @pytest.mark.parametrize("view", ["ready", "running", "finished"])
 async def test_list_jobs_distinguishes_unknown_inactive_and_empty(
-    pg: asyncpg.Connection, operator: asyncpg.Connection, observer: asyncpg.Connection, view: str
+    operator: asyncpg.Connection, observer: asyncpg.Connection, view: str
 ) -> None:
     with pytest.raises(asyncpg.PostgresError) as missing:
         await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_missing', $1)", view)
@@ -95,22 +101,13 @@ async def test_list_jobs_distinguishes_unknown_inactive_and_empty(
     await operator.fetchrow(
         "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'rm01')", "rm01_empty"
     )
-    with pytest.raises(asyncpg.PostgresError) as inactive:
-        await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_empty', $1)", view)
-    assert inactive.value.sqlstate == "TQ501"
-
     if view == "ready":
-        await pg.execute(
-            "UPDATE taskq.meta SET value='{\"active\":[\"read_model_list_ready\"]}'::jsonb "
-            "WHERE key='capabilities'"
-        )
-        try:
-            page = await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_empty', $1)", view)
-            assert page is not None and page["items"] == [] and page["next_after"] is None
-        finally:
-            await pg.execute(
-                "UPDATE taskq.meta SET value='{\"active\":[]}'::jsonb WHERE key='capabilities'"
-            )
+        page = await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_empty', $1)", view)
+        assert page is not None and page["items"] == [] and page["next_after"] is None
+    else:
+        with pytest.raises(asyncpg.PostgresError) as inactive:
+            await observer.fetchrow("SELECT * FROM taskq.list_jobs('rm01_empty', $1)", view)
+        assert inactive.value.sqlstate == "TQ501"
 
 
 async def test_observer_has_no_base_table_read_grant(observer: asyncpg.Connection) -> None:
