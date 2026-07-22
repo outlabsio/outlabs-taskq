@@ -1,6 +1,6 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library with Stages 1–3 independently accepted; the Stage-4 preflight and disabled-by-default host integration are independently accepted, and the S4-03 production canary is open.
+Postgres-native task queue library with Stages 1–4 and the durable-admission slice independently accepted; the first production host is live and the isolated QDarte C6 admission proof is open.
 
 **Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 
