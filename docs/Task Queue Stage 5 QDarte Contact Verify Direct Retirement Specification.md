@@ -1,9 +1,9 @@
 # Task Queue Stage 5 — QDarte contact-verify direct retirement specification
 
-> **Status:** proposal frozen by S5-QD-C8-SPEC and amended docs-first for
-> Round-20 findings R20-01/02/03; targeted delta review required before any
-> caller, source, configuration, service, database, IAM, worker, or production
-> change.
+> **Status:** proposal frozen by S5-QD-C8-SPEC, amended docs-first for
+> R20-01/02/03, and accepted by the owner-authorized internal Round-20 delta.
+> C8-R1 still requires every §4 eligibility item, including the next naturally
+> scheduled 03:15 backup, before any implementation or production action.
 >
 > **Authority:** Tier 3, subordinate to Transport Protocol v1 revision 1.0.8,
 > Function Manifest / SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, the

@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte production pilot** — internal Round 19 accepts C7; C8's source-backed direct-retirement proposal is frozen and awaits targeted review. The legacy-tools observation continues independently |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte production pilot** — C8's direct-retirement design is internally delta-accepted; C8-R1 waits on the scheduled-backup and remaining eligibility evidence. The legacy-tools observation continues independently |
 | Suite | taskq 505/505 regular with 1 opt-in skip on local PG18.3 using CI-shaped authenticated Redis, Ruff/format clean; QDarte runtime 1144/1144 + MyPy 192; workers 628/628 + Ruff/format/MyPy clean across 53 source files; expanded API C7/contact boundary 60/60 + Ruff/MyPy clean on the owned surface (broad local baseline remains separately recorded) |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | Round-20 targeted delta review must accept the docs remediation before C8-R1 caller migration; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | C8-R1 caller/status implementation may begin only after the next scheduled 03:15 backup and §4 eligibility packet; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -119,7 +119,7 @@
 
 - [x] **S5-QD-C8-R20-DELTA-REQUEST · Targeted retirement-design recheck assembled** — pins only `a355f47..39100fa` and the immutable Round-20 response hash. It checks the exact safe transition/unwind, reproduced `[1,25,86,100,176,293]` aggregate, explicit-limit pre-reservation rejection, one-depth/one-concurrency/one-worker controls, 25/100/300 staged gates, and the exact-ID/operator-only UI posture. READY may open C8-R1 only after the scheduled 03:15 backup gate; it cannot authorize enablement, a cohort, producer/consumer removal, data/schema deletion, another lane, or Stage 6.
 
-- [ ] **S5-QD-C8-R20-DELTA · Targeted retirement-design disposition** — record the delta response immutably. Only READY with all R20 findings closed and zero Contract questions may open C8-R1 after the remaining eligibility evidence.
+- [x] **S5-QD-C8-R20-DELTA · Retirement design internally accepted** — registered the owner-authorized internal/non-independent delta response byte-for-byte (SHA-256 `431fdc036b314acf71117f137a49c9065fc3bef08d10bf356bf3eaf7b633a90f`). It accepts the exact draining/paused→serving→safe-unwind choreography, reproduced `[1,25,86,100,176,293]` historical envelope, explicit-limit pre-reservation refusal, one-depth/one-concurrency/one-worker controls, independently accepted 25/100/300 cap stages, and exact-ID/operator-only UI posture. Zero Contract questions. C8-R1 opens only after the next naturally scheduled 03:15 backup and all remaining §4 eligibility evidence; no service enablement, cohort, producer/consumer removal, data/schema deletion, another lane, or Stage 6 is authorized by this acceptance.
 
 - [ ] **S5-QD-C8-R1 · Package caller and status floor** — after review READY and the scheduled-backup eligibility gate, migrate every active caller to backend-neutral package admission and exact-ID status using enqueue+read only; deploy and independently accept the caller floor before a direct producer changes.
 
