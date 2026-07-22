@@ -117,6 +117,15 @@ fields are `job_type`, `payload`, `priority`, `scheduled_at`,
 `backoff_mode`, `backoff_base`, `backoff_cap`, and `headers`. Existing H-09
 bounds and queue defaults apply exactly.
 
+The finish identity is the literal JSONB content supplied for `{job,
+receipt}`. An omitted optional job field and the same field supplied explicitly
+as JSON `null` are therefore different identities. A writer must keep one
+null/omission style across every replay of a handle; the official typed clients
+canonicalize their style by omitting optional fields whose value is `None`.
+Cross-writer replay is safe only when both writers submit the same literal JSONB
+identity. Migration 0007 remains immutable; a future contract revision may
+adopt a different normalization only through the ordinary docs-first process.
+
 ### 4.3 Cancel
 
 `cancel_admission(queue, key, handle)` returns:

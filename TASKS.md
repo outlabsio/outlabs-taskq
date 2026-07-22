@@ -25,7 +25,7 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; the 0.1.5 SQL kernel and typed SQL/HTTP admission surface are complete, with S5-AR-AUDIT now the only gate before local QDarte C6 may resume |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; Round 13 accepts the 0.1.5 primitive's architecture and blocks only on R13-01..04 remediation plus published-CI proof before local QDarte C6 may resume |
 | Suite | 502/502 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 308/308 DB-free on Python 3.12; 289/289 last Python 3.13 run; million-row plan gate 2/2 on both PostgreSQL majors; current wheel/sdist × core/HTTP/OutLabs × Python 3.12/3.13 artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
 | Next review | S5-AR-AUDIT must accept the dual-PG admission primitive before QDarte repins; targeted L1 acceptance separately gates legacy-tools L2 |
@@ -43,6 +43,10 @@
 - [x] **S5-AR-AUDIT-ORACLES · Admission wire disposition matrix completed** — a mounted real-SQL vector now covers unknown queue/admission, competing-handle `pending`, wrong-handle conflict, cancelled/idempotent-cancel, reacquisition, created, finish mismatch, intent mismatch, already-admitted cancellation with stored receipt, and database-time expiry. Every conflict detail is asserted as its exact one-key safe reason, and all reserve/cancel outcome variants cross the generated client/facade boundary. No source, SQL, migration, contract, host, QDarte, production, provider, credential, or existing queue changed.
 
 - [x] **S5-AR-REVIEW-REQUEST · Round-13 admission completion gate assembled** — the targeted request pins `8d520d2..7f6f662` and requires independent catalog derivation, migration/checksum immutability, SQL linearization and raw-row oracles, response-loss replay, cancellation/finish races, expiry/retention, privilege walls, authenticate/authorize-before-decode ordering, SQL/HTTP/client/fake parity, exact runtime mount gating, resource closure, dual-PG plans, and the 12-way artifact boundary. Final tip evidence is 502 passed with 1 opt-in skip on each PostgreSQL major and 22 admission tests under warnings-as-errors on each. Its response alone decides S5-AR-AUDIT; READY can open only the isolated QDarte repin and C6-03 proof, never production migration, retirement, existing-queue mutation, deployment, provider work, or Stage 6.
+
+- [x] **S5-AR-R13-RESPONSE · Round-13 BLOCKED response recorded docs-first** — registered the immutable response byte-for-byte (SHA-256 `7ce717e60e39e0dace15d635c8c5959876cad9433015c051fab002d9cd43ffd7`). The reviewer independently reproduced the full dual-PG, race, privilege, plan, DB-free, and artifact evidence and found the primitive sound, with zero Contract questions. R13-02 is clarified without SQL or wire change: finish identity is literal JSONB, omitted and explicit-null fields differ, each writer must preserve one style, and official clients omit `None`. Owner confirmation for R13-07(a): Round 12 was performed by a separate parallel external-review session, not the implementation agent; its response and remediation were intentionally recorded together in `b854f46`. R13-01/03/04 remain the targeted delta preconditions.
+
+- [ ] **S5-AR-R13-FOLLOWUPS · Nonblocking admission hardening** — own R13-05/06/07(c,d): add live unmounted-route, facade-backpressure, recycle, janitor-class/bound, and async mint-once vectors; extend safe-detail defense-in-depth for handle/receipt/intent hash; and label fake hashes as non-comparable to SQL hashes while keeping admission-specific replay prose authoritative. These do not open QDarte or production scope and must not be represented as Round-13 preconditions.
 
 - [ ] **S5-AR-AUDIT · Admission primitive completion gate** — dual-PG race/resource/packaging/plan evidence and targeted independent review. Acceptance opens only an isolated QDarte repin and C6-03 replay proof; it authorizes no production migration or direct retirement.
 
@@ -172,7 +176,7 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-C6-CQ-01 — Static closed modes cannot consume a process-owned drain attestation *(open)*
+### S5-QD-C6-CQ-01 — Static closed modes cannot consume a process-owned drain attestation *(resolved)*
 
 **Blocking evidence:** C6-01 freezes `QDARTE_CONTACT_VERIFY_MODE` as a
 startup-validated `legacy | draining | package` selector. C6-02 correctly
