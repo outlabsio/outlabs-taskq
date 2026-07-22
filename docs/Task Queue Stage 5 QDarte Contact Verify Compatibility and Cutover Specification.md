@@ -90,6 +90,30 @@ authoritative host-planned scope; it must not expose a generic producer,
 worker-fence operation, copied direct worker model, or worker database
 credential.
 
+#### C6-01 configuration decision
+
+The package-lane selector is a new, contact-only
+`QDARTE_CONTACT_VERIFY_MODE` setting. Its unset value is exactly `legacy`.
+Only the exact lowercase values `legacy`, `draining`, and `package` are valid;
+whitespace, aliases, comma-separated values, and any simultaneous package
+selector fail startup. It must not read, reinterpret, or inherit any
+`QDARTE_TASKQ_*` setting.
+
+Those older settings and their `/ops/taskq`/`/ops/cutover` routes belong to
+the incumbent host-owned direct catalog recorded in the C6-00 ledger. They
+are neither the package database nor a package migration bridge. C6-01 first
+adds the separate mode parser and local routing seam. Until C6-02 has a fresh
+drain attestation and C6-03 supplies the scoped package adapter, `package`
+is deliberately unavailable and fails closed before admission. `draining`
+refuses new contact enqueue with a fixed host-owned `503` detail that contains
+no queue identity, SQL text, credential, payload, or fallback instruction.
+
+The existing `/ops/cutover/jobs/contact-verify-scope` response discriminator
+is an explicit compatibility decision for C6-03: it cannot silently survive
+as an indicator of backend choice. C6-01 must pin the legacy route behavior
+and prove the new mode seam never calls either direct or package producer when
+it refuses an invalid, draining, or not-yet-admissible package configuration.
+
 Required local vectors:
 
 - each valid mode reaches only its named producer/consumer seam;
