@@ -1,7 +1,7 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** C7-01 disabled production preflight internally accepted; the
-frozen one-place C7-02 cohort is open as a separately tracked slice
+**Status:** C7-03 production continuity evidence complete; C7-AUDIT is the only
+open gate and may open only a separate direct-retirement specification
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
 Compatibility and Cutover Specification
@@ -22,8 +22,11 @@ execution record lives in QDarte API's
 `docs/taskq-contact-c7-01-production-preflight-evidence.md`. That preflight
 created the reviewed disabled production posture but admitted no package job
 and made no provider call. Owner-authorized internal Round 17 accepted that
-boundary. C7-02 must still execute its exact bounded choreography and stop for
-targeted acceptance before C7-03.
+boundary; Round 18 accepted the exact C7-02 one-place cohort. C7-03 then
+completed the two-cycle, zero-insert, recurring-backup/restore, and zero-DML
+rollback program recorded in QDarte API's
+`docs/taskq-contact-c7-03-continuity-evidence.md`. C7-AUDIT remains mandatory
+before any direct-retirement specification.
 
 C7 keeps the C6 rules intact:
 
