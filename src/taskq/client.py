@@ -7,12 +7,17 @@ from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from taskq.errors import TaskqConfigError
 from taskq.protocol import (
     ENQUEUE_MANY_ITEMS_ADAPTER,
+    AdmissionCancelResult,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
     EnqueueCommand,
     EnqueueResult,
 )
@@ -184,6 +189,85 @@ class TaskQ:
         sql_connection = await self._sql_connection(supplied)
         assert isinstance(self.transport, SqlTaskqTransport)
         return await self.transport.enqueue(command, connection=sql_connection)
+
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+        session: AsyncSession | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionReservationResult:
+        supplied = self._supplied_sql_object(session, connection)
+        if supplied is None:
+            return await self.transport.reserve_admission(
+                queue,
+                idempotency_key,
+                intent_hash,
+                handle=handle,
+                reservation_ttl_seconds=reservation_ttl_seconds,
+                receipt_ttl_seconds=receipt_ttl_seconds,
+            )
+        sql_connection = await self._sql_connection(supplied)
+        assert isinstance(self.transport, SqlTaskqTransport)
+        return await self.transport.reserve_admission(
+            queue,
+            idempotency_key,
+            intent_hash,
+            handle=handle,
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+            connection=sql_connection,
+        )
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+        *,
+        session: AsyncSession | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionFinishResult:
+        supplied = self._supplied_sql_object(session, connection)
+        if supplied is None:
+            return await self.transport.finish_admission(
+                queue, idempotency_key, handle, job, receipt
+            )
+        sql_connection = await self._sql_connection(supplied)
+        assert isinstance(self.transport, SqlTaskqTransport)
+        return await self.transport.finish_admission(
+            queue,
+            idempotency_key,
+            handle,
+            job,
+            receipt,
+            connection=sql_connection,
+        )
+
+    async def cancel_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        *,
+        session: AsyncSession | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionCancelResult:
+        supplied = self._supplied_sql_object(session, connection)
+        if supplied is None:
+            return await self.transport.cancel_admission(queue, idempotency_key, handle)
+        sql_connection = await self._sql_connection(supplied)
+        assert isinstance(self.transport, SqlTaskqTransport)
+        return await self.transport.cancel_admission(
+            queue, idempotency_key, handle, connection=sql_connection
+        )
 
     async def enqueue_many(
         self,

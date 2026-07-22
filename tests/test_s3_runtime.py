@@ -14,7 +14,12 @@ from fastapi import Depends, FastAPI
 from pydantic import ValidationError
 
 from taskq import TaskQ
-from taskq.errors import TaskqConfigError, TaskqUnavailableError, TaskqVersionError
+from taskq.errors import (
+    TaskqCapabilityError,
+    TaskqConfigError,
+    TaskqUnavailableError,
+    TaskqVersionError,
+)
 from taskq.http import (
     ClaimWaitHub,
     EmbeddedWorkerOptions,
@@ -31,14 +36,21 @@ from taskq.protocol import ContractMeta
 
 
 class _Transport:
-    def __init__(self, *, version: str = "0.1.2", ticks: list[object] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        version: str = "0.1.2",
+        capabilities: dict[str, Any] | None = None,
+        ticks: list[object] | None = None,
+    ) -> None:
         self.version = version
+        self.capabilities = dict(capabilities or {})
         self.ticks = list(ticks or [{}])
         self.tick_calls = 0
         self.close_calls = 0
 
     async def get_contract_meta(self) -> ContractMeta:
-        return ContractMeta(contract_version=self.version, capabilities={})
+        return ContractMeta(contract_version=self.version, capabilities=self.capabilities)
 
     async def tick(self, reap_limit: int = 100) -> dict[str, Any]:
         del reap_limit
@@ -122,6 +134,7 @@ def _runtime(
         observer=transport,  # type: ignore[arg-type]
         authorization=transport,  # type: ignore[arg-type]
         claim_wait_hub=hub,
+        admission_enabled=bool(options and options.admission_enabled),
     )
     kwargs: dict[str, Any] = {}
     if process_exit is not None:
@@ -217,6 +230,32 @@ async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_re
     with pytest.raises(TaskqVersionError) as exc_info:
         _require_supported_sql_contract("0.1.5", supported_versions=frozenset({"0.1.2"}))
     assert exc_info.value.details == {"contract_version": "0.1.5"}
+
+
+async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capability() -> None:
+    options = TaskqRuntimeOptions(
+        housekeeper_enabled=False,
+        long_poll_listener_enabled=False,
+        admission_enabled=True,
+    )
+    wrong_version = _runtime(_Transport(version="0.1.4"), options=options)
+    with pytest.raises(TaskqVersionError):
+        await wrong_version.start()
+
+    missing = _runtime(_Transport(version="0.1.5"), options=options)
+    with pytest.raises(TaskqCapabilityError):
+        await missing.start()
+
+    active = _runtime(
+        _Transport(
+            version="0.1.5",
+            capabilities={"active": ["admission_reservations", "read_model_list_ready"]},
+        ),
+        options=options,
+    )
+    await active.start()
+    assert active.state is TaskqRuntimeState.RUNNING
+    await active.stop()
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:

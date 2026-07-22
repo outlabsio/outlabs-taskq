@@ -17,7 +17,7 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from taskq.client import TaskQ
-from taskq.errors import TaskqConfigError, TaskqError, TaskqVersionError
+from taskq.errors import TaskqCapabilityError, TaskqConfigError, TaskqError, TaskqVersionError
 from taskq.http.facade import TaskqFacadeTransports
 from taskq.http.hub import ClaimWaitHub
 from taskq.registry import TaskRegistry
@@ -79,6 +79,7 @@ class TaskqRuntimeOptions(BaseModel):
     housekeeper_enabled: bool = True
     long_poll_listener_enabled: bool = True
     embedded_worker: EmbeddedWorkerOptions | None = None
+    admission_enabled: bool = False
     request_pool_max: int = Field(default=10, ge=1, le=1000)
     operator_pool_max: int = Field(default=0, ge=0, le=1000)
     housekeeper_pool_max: int = Field(default=1, ge=1, le=1000)
@@ -317,6 +318,7 @@ class TaskqRuntime:
             observer=ordinary,
             authorization=ordinary,
             claim_wait_hub=hub,
+            admission_enabled=resolved.admission_enabled,
         )
         housekeeper: SqlTaskqTransport | None = None
         if resolved.housekeeper_enabled:
@@ -425,6 +427,12 @@ class TaskqRuntime:
         try:
             meta = await self.facade_transports.observer.get_contract_meta()
             _require_supported_sql_contract(meta.contract_version)
+            if self.facade_transports.admission_enabled:
+                if meta.contract_version != "0.1.5":
+                    raise TaskqVersionError(details={"contract_version": meta.contract_version})
+                active = meta.capabilities.get("active")
+                if not isinstance(active, list) or "admission_reservations" not in active:
+                    raise TaskqCapabilityError(details={"capability": "admission_reservations"})
             self._log_budget()
             if self.housekeeper_transport is not None:
                 await self._tick(startup=True)

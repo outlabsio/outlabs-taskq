@@ -31,6 +31,16 @@ from taskq.execution import (
     TaskCancelled,
 )
 from taskq.protocol import (
+    AdmissionAdmittedResult,
+    AdmissionCancelOutcome,
+    AdmissionCancelResult,
+    AdmissionFinishOutcome,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionPendingResult,
+    AdmissionReservationResult,
+    AdmissionReserveOutcome,
+    AdmissionReservedResult,
     ClaimedJob,
     EnqueueCreatedResult,
     EnqueueExistedResult,
@@ -76,6 +86,16 @@ from taskq.worker import (
 )
 
 __all__ = [
+    "AdmissionAdmittedResult",
+    "AdmissionCancelOutcome",
+    "AdmissionCancelResult",
+    "AdmissionFinishOutcome",
+    "AdmissionFinishResult",
+    "AdmissionJobCommand",
+    "AdmissionPendingResult",
+    "AdmissionReservationResult",
+    "AdmissionReserveOutcome",
+    "AdmissionReservedResult",
     "ClaimedJob",
     "Cancel",
     "CancellationReason",

@@ -6,9 +6,12 @@ from datetime import UTC, datetime
 import pytest
 
 from taskq import TaskQ
-from taskq.errors import TaskqConfigError
+from taskq.errors import TaskqConfigError, TaskqConflictError
 from taskq.execution import Cancel, Complete, NonRetryable, Retry, Snooze
 from taskq.protocol import (
+    AdmissionCancelOutcome,
+    AdmissionFinishOutcome,
+    AdmissionReserveOutcome,
     ClaimState,
     EnqueueCommand,
     EnqueueManyItem,
@@ -17,6 +20,7 @@ from taskq.protocol import (
     SettleOutcome,
 )
 from taskq.testing import FakeTaskQClient
+from taskq.transport import ProducerTransport
 
 
 async def _enqueue_and_claim(
@@ -72,6 +76,54 @@ async def test_fake_enqueue_dedup_and_matchers_are_typed_and_fence_free() -> Non
         fake.assert_enqueued("tests.email", count=2, where={"attempt_id": "secret"})
     with pytest.raises(TaskqConfigError, match="safe dotted"):
         fake.assert_enqueued("tests.email", count=2, where={"payload.x;select": 1})
+
+
+@pytest.mark.asyncio
+async def test_fake_admission_lifecycle_matches_producer_contract() -> None:
+    fake = FakeTaskQClient(queues=("admission",))
+    assert isinstance(fake, ProducerTransport)
+
+    reserved = await fake.reserve_admission("admission", "key", "a" * 64, handle=None)
+    assert reserved.outcome is AdmissionReserveOutcome.RESERVED
+
+    pending = await fake.reserve_admission("admission", "key", "a" * 64, handle=None)
+    assert pending.outcome is AdmissionReserveOutcome.PENDING
+
+    finished = await fake.finish_admission(
+        "admission",
+        "key",
+        reserved.handle,
+        {"job_type": "tests.admitted", "payload": {"value": 1}},
+        {"accepted": True},
+    )
+    assert finished.outcome is AdmissionFinishOutcome.CREATED
+
+    replay = await fake.finish_admission(
+        "admission",
+        "key",
+        reserved.handle,
+        {"job_type": "tests.admitted", "payload": {"value": 1}},
+        {"accepted": True},
+    )
+    assert replay.outcome is AdmissionFinishOutcome.EXISTED
+    assert replay.job_id == finished.job_id
+    assert replay.receipt == {"accepted": True}
+
+    admitted = await fake.reserve_admission("admission", "key", "a" * 64, handle=None)
+    assert admitted.outcome is AdmissionReserveOutcome.ADMITTED
+    assert admitted.job_id == finished.job_id
+
+    with pytest.raises(TaskqConflictError) as mismatch:
+        await fake.reserve_admission("admission", "key", "b" * 64)
+    assert mismatch.value.details == {"reason": "idempotency_mismatch"}
+
+    cancelled_reservation = await fake.reserve_admission("admission", "cancel", "c" * 64)
+    cancelled = await fake.cancel_admission("admission", "cancel", cancelled_reservation.handle)
+    assert cancelled.outcome is AdmissionCancelOutcome.CANCELLED
+    cancelled_replay = await fake.cancel_admission(
+        "admission", "cancel", cancelled_reservation.handle
+    )
+    assert cancelled_replay.outcome is AdmissionCancelOutcome.ALREADY_CANCELLED
 
 
 @pytest.mark.asyncio

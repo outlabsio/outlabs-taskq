@@ -34,12 +34,6 @@ from taskq.sql.transport import METHOD_FUNCTIONS, SqlTaskqTransport
 
 pytestmark = pytest.mark.taskq_sql
 
-_STAGED_ADMISSION_FUNCTIONS = {
-    "taskq.cancel_admission(text,text,uuid)",
-    "taskq.finish_admission(text,text,uuid,jsonb,jsonb)",
-    "taskq.reserve_admission(text,text,text,uuid,integer,integer)",
-}
-
 
 @pytest.fixture
 async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTransport]]:
@@ -58,12 +52,9 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
             await transport.engine.dispose()
 
 
-def test_transport_method_ledger_accounts_for_staged_admission_surface() -> None:
-    """S5-AR-01 names the exact gap that S5-AR-02 must close, without hiding drift."""
-    assert set(METHOD_FUNCTIONS.values()).isdisjoint(_STAGED_ADMISSION_FUNCTIONS)
-    assert set(METHOD_FUNCTIONS.values()) | _STAGED_ADMISSION_FUNCTIONS == set(PUBLIC_FUNCTIONS)
-    assert len(METHOD_FUNCTIONS) == 33
-    assert len(PUBLIC_FUNCTIONS) == 36
+def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
+    assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
+    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 36
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }

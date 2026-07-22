@@ -14,6 +14,7 @@ import pytest
 from taskq.errors import TaskqCapabilityError, TaskqConfigError
 from taskq.http import AsyncTaskqHttpClient, TaskqHttpClient
 from taskq.protocol import (
+    AdmissionReservedResult,
     ClaimState,
     EnqueueCommand,
     EnqueueStatus,
@@ -88,6 +89,41 @@ def test_construction_is_side_effect_free_and_repr_is_secret_safe() -> None:
     assert "do-not-print" not in rendered
     assert "https://example.test/base" in rendered
     assert client._client is None
+
+
+def test_sync_admission_retry_mints_one_handle_per_logical_operation() -> None:
+    bodies: list[dict[str, object]] = []
+    request_ids: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        bodies.append(body)
+        request_ids.append(request.headers["Taskq-Request-Id"])
+        if len(bodies) == 1:
+            return _error(request, "TQ503", status=503, retryable=True)
+        return _response(
+            request,
+            outcome="reserved",
+            data={
+                "handle": body["handle"],
+                "reservation_expires_at": "2026-07-22T12:00:00Z",
+            },
+        )
+
+    raw = httpx.Client(base_url="https://example.test", transport=httpx.MockTransport(handler))
+    client = TaskqHttpClient(
+        "https://example.test", bearer_token="secret", client=raw, max_retries=1
+    )
+    try:
+        result = client.reserve_admission("emails", "logical-key", "a" * 64)
+        assert isinstance(result, AdmissionReservedResult)
+        assert len(bodies) == 2
+        assert bodies[0] == bodies[1]
+        assert len(set(request_ids)) == 2
+        assert str(result.handle) == bodies[0]["handle"]
+    finally:
+        client.close()
+        raw.close()
 
 
 @pytest.mark.parametrize(

@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.7"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.8"
 T = TypeVar("T")
 
 
@@ -301,6 +301,186 @@ class EnqueueManyWireData(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     items: tuple[EnqueueManyWireItem, ...]
+
+
+class AdmissionReserveOutcome(StrEnum):
+    RESERVED = "reserved"
+    PENDING = "pending"
+    ADMITTED = "admitted"
+
+
+class AdmissionFinishOutcome(StrEnum):
+    CREATED = "created"
+    EXISTED = "existed"
+
+
+class AdmissionCancelOutcome(StrEnum):
+    CANCELLED = "cancelled"
+    ALREADY_CANCELLED = "already_cancelled"
+    EXPIRED = "expired"
+    ALREADY_ADMITTED = "already_admitted"
+
+
+class AdmissionReserveRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    intent_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
+    handle: UUID = Field(repr=False, json_schema_extra={"writeOnly": True})
+    reservation_ttl_seconds: int = Field(default=300, ge=15, le=3600)
+    receipt_ttl_seconds: int = Field(default=2_592_000, ge=3600, le=31_536_000)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle_non_nil(cls, value: UUID) -> UUID:
+        if value.int == 0:
+            raise ValueError("handle must be non-nil")
+        return value
+
+
+class AdmissionJobCommand(BaseModel):
+    """Strict finish-time job command; admission and dependency authority are absent."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    job_type: str
+    payload: dict[str, Any]
+    priority: int | None = None
+    scheduled_at: datetime | None = None
+    concurrency_key: str | None = None
+    affinity_key: str | None = None
+    max_attempts: int | None = None
+    lease_seconds: int | None = None
+    backoff_mode: Literal["fixed", "exponential"] | None = None
+    backoff_base: int | None = None
+    backoff_cap: int | None = None
+    headers: dict[str, Any] | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 65536, "payload")
+
+    @field_validator("headers")
+    @classmethod
+    def _headers_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
+        return _bounded_json(value, 8192, "headers")
+
+
+class AdmissionFinishRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    handle: UUID = Field(repr=False, json_schema_extra={"writeOnly": True})
+    job: AdmissionJobCommand
+    receipt: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("handle")
+    @classmethod
+    def _handle_non_nil(cls, value: UUID) -> UUID:
+        if value.int == 0:
+            raise ValueError("handle must be non-nil")
+        return value
+
+    @field_validator("receipt")
+    @classmethod
+    def _receipt_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 2048, "receipt")
+
+
+class AdmissionCancelRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    idempotency_key: str = Field(min_length=1, max_length=255)
+    handle: UUID = Field(repr=False, json_schema_extra={"writeOnly": True})
+
+    @field_validator("handle")
+    @classmethod
+    def _handle_non_nil(cls, value: UUID) -> UUID:
+        if value.int == 0:
+            raise ValueError("handle must be non-nil")
+        return value
+
+
+class AdmissionReserveWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    handle: UUID | None = Field(default=None, repr=False)
+    job_id: UUID | None = None
+    reservation_expires_at: datetime | None = None
+    retry_after_seconds: int | None = Field(default=None, ge=1, le=3600)
+    receipt: dict[str, Any] | None = None
+    receipt_expires_at: datetime | None = None
+
+
+class AdmissionResultWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID
+    receipt: dict[str, Any]
+    receipt_expires_at: datetime
+
+
+class _AdmissionReservationBase(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: AdmissionReserveOutcome
+
+
+class AdmissionReservedResult(_AdmissionReservationBase):
+    outcome: Literal[AdmissionReserveOutcome.RESERVED] = AdmissionReserveOutcome.RESERVED
+    handle: UUID = Field(repr=False)
+    reservation_expires_at: datetime
+
+
+class AdmissionPendingResult(_AdmissionReservationBase):
+    outcome: Literal[AdmissionReserveOutcome.PENDING] = AdmissionReserveOutcome.PENDING
+    reservation_expires_at: datetime
+    retry_after_seconds: int = Field(ge=1, le=3600)
+
+
+class AdmissionAdmittedResult(_AdmissionReservationBase):
+    outcome: Literal[AdmissionReserveOutcome.ADMITTED] = AdmissionReserveOutcome.ADMITTED
+    job_id: UUID
+    receipt: dict[str, Any]
+    receipt_expires_at: datetime
+
+
+AdmissionReservationResult: TypeAlias = Annotated[
+    AdmissionReservedResult | AdmissionPendingResult | AdmissionAdmittedResult,
+    Field(discriminator="outcome"),
+]
+ADMISSION_RESERVATION_ADAPTER: Final[TypeAdapter[AdmissionReservationResult]] = TypeAdapter(
+    AdmissionReservationResult
+)
+
+
+class AdmissionFinishResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: AdmissionFinishOutcome
+    job_id: UUID
+    receipt: dict[str, Any]
+    receipt_expires_at: datetime
+
+
+class AdmissionCancelResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: AdmissionCancelOutcome
+    job_id: UUID | None = None
+    receipt: dict[str, Any] | None = None
+    receipt_expires_at: datetime | None = None
+
+    @model_validator(mode="after")
+    def _admitted_data_matches_outcome(self) -> AdmissionCancelResult:
+        values = (self.job_id, self.receipt, self.receipt_expires_at)
+        if self.outcome is AdmissionCancelOutcome.ALREADY_ADMITTED:
+            if any(value is None for value in values):
+                raise ValueError("already_admitted requires stored admission data")
+        elif any(value is not None for value in values):
+            raise ValueError("non-admitted cancellation outcomes carry no data")
+        return self
 
 
 class ClaimWireRequest(BaseModel):
@@ -706,6 +886,9 @@ class RedriveFailedResult(BaseModel):
 
 
 class CommandName(StrEnum):
+    RESERVE_ADMISSION = "reserve_admission"
+    FINISH_ADMISSION = "finish_admission"
+    CANCEL_ADMISSION = "cancel_admission"
     ENQUEUE = "enqueue"
     ENQUEUE_MANY = "enqueue_many"
     CLAIM = "claim"
@@ -759,6 +942,9 @@ class HttpCommandName(StrEnum):
     ENSURE_QUEUE = "ensure_queue"
     ENQUEUE = "enqueue"
     ENQUEUE_MANY = "enqueue_many"
+    RESERVE_ADMISSION = "reserve_admission"
+    FINISH_ADMISSION = "finish_admission"
+    CANCEL_ADMISSION = "cancel_admission"
     CLAIM = "claim"
     HEARTBEAT = "heartbeat"
     COMPLETE = "complete"
@@ -887,6 +1073,30 @@ _HOUSEKEEPER = CapabilityRole.HOUSEKEEPER
 # audit this independent projection against the Tier-0-derived SQL manifest.
 COMMAND_SPECS: Final = MappingProxyType(
     {
+        CommandName.RESERVE_ADMISSION: _spec(
+            "taskq.reserve_admission(text,text,text,uuid,integer,integer)",
+            _PRODUCER,
+            tuple(item.value for item in AdmissionReserveOutcome),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
+        CommandName.FINISH_ADMISSION: _spec(
+            "taskq.finish_admission(text,text,uuid,jsonb,jsonb)",
+            _PRODUCER,
+            tuple(item.value for item in AdmissionFinishOutcome),
+            (
+                TqCode.NOT_FOUND,
+                TqCode.CONFLICT,
+                TqCode.VALIDATION,
+                TqCode.BACKPRESSURE,
+                TqCode.INTERNAL,
+            ),
+        ),
+        CommandName.CANCEL_ADMISSION: _spec(
+            "taskq.cancel_admission(text,text,uuid)",
+            _PRODUCER,
+            tuple(item.value for item in AdmissionCancelOutcome),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
         CommandName.ENQUEUE: _spec(
             "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
             _PRODUCER,
@@ -1210,6 +1420,39 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             request_model=EnqueueManyWireRequest,
             data_model=EnqueueManyWireData,
         ),
+        HttpCommandName.RESERVE_ADMISSION: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/admissions/reserve",
+            TaskqAction.ENQUEUE,
+            _PATH,
+            _status_map(reserved=200, pending=202, admitted=200),
+            _SAFE,
+            CommandName.RESERVE_ADMISSION,
+            request_model=AdmissionReserveRequest,
+            data_model=AdmissionReserveWireData,
+        ),
+        HttpCommandName.FINISH_ADMISSION: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/admissions/finish",
+            TaskqAction.ENQUEUE,
+            _PATH,
+            _status_map(created=201, existed=200),
+            _SAFE,
+            CommandName.FINISH_ADMISSION,
+            request_model=AdmissionFinishRequest,
+            data_model=AdmissionResultWireData,
+        ),
+        HttpCommandName.CANCEL_ADMISSION: _http(
+            "POST",
+            "/taskq/v1/queues/{queue}/admissions/cancel",
+            TaskqAction.ENQUEUE,
+            _PATH,
+            _status_map(cancelled=200, already_cancelled=200, expired=200, already_admitted=200),
+            _SAFE,
+            CommandName.CANCEL_ADMISSION,
+            request_model=AdmissionCancelRequest,
+            data_model=AdmissionReserveWireData,
+        ),
         HttpCommandName.CLAIM: _http(
             "POST",
             "/taskq/v1/queues/{queue}/claims",
@@ -1482,6 +1725,22 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
 
 
 __all__ = [
+    "ADMISSION_RESERVATION_ADAPTER",
+    "AdmissionAdmittedResult",
+    "AdmissionCancelOutcome",
+    "AdmissionCancelRequest",
+    "AdmissionCancelResult",
+    "AdmissionFinishOutcome",
+    "AdmissionFinishRequest",
+    "AdmissionFinishResult",
+    "AdmissionJobCommand",
+    "AdmissionPendingResult",
+    "AdmissionReservationResult",
+    "AdmissionReserveOutcome",
+    "AdmissionReserveRequest",
+    "AdmissionReserveWireData",
+    "AdmissionReservedResult",
+    "AdmissionResultWireData",
     "AttemptRequest",
     "AuthorizationProjection",
     "COMMAND_SPECS",

@@ -1,4 +1,4 @@
-"""Hand-derived Protocol-v1.0.7 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.8 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
@@ -53,6 +53,27 @@ EXPECTED_HTTP_IDENTITIES = {
     "enqueue_many": (
         "POST",
         "/taskq/v1/queues/{queue}/jobs/batch",
+        "enqueue",
+        "path",
+        "active",
+    ),
+    "reserve_admission": (
+        "POST",
+        "/taskq/v1/queues/{queue}/admissions/reserve",
+        "enqueue",
+        "path",
+        "active",
+    ),
+    "finish_admission": (
+        "POST",
+        "/taskq/v1/queues/{queue}/admissions/finish",
+        "enqueue",
+        "path",
+        "active",
+    ),
+    "cancel_admission": (
+        "POST",
+        "/taskq/v1/queues/{queue}/admissions/cancel",
         "enqueue",
         "path",
         "active",
@@ -205,6 +226,14 @@ EXPECTED_HTTP_OUTCOMES = {
     "ensure_queue": {"created": 201, "updated": 200, "unchanged": 200},
     "enqueue": {"created": 201, "existed": 200},
     "enqueue_many": {"ok": 200},
+    "reserve_admission": {"reserved": 200, "pending": 202, "admitted": 200},
+    "finish_admission": {"created": 201, "existed": 200},
+    "cancel_admission": {
+        "cancelled": 200,
+        "already_cancelled": 200,
+        "expired": 200,
+        "already_admitted": 200,
+    },
     "claim": {"claimed": 200, "empty": 200, "timeout": 200, "paused": 200, "unavailable": 200},
     "heartbeat": {"ok": 200, "lost": 409},
     "complete": {"ok": 200, "already_settled": 200, "settle_conflict": 409, "lost": 409},
@@ -249,7 +278,14 @@ def _method_names(protocol: type[object]) -> set[str]:
 
 
 def test_capability_protocol_method_sets_are_exact() -> None:
-    assert _method_names(ProducerTransport) == {"enqueue", "enqueue_many", "aclose"}
+    assert _method_names(ProducerTransport) == {
+        "reserve_admission",
+        "finish_admission",
+        "cancel_admission",
+        "enqueue",
+        "enqueue_many",
+        "aclose",
+    }
     assert _method_names(RunnerTransport) == {
         "claim",
         "heartbeat",
@@ -318,7 +354,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.7"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.8"
     _assert_catalog_matches_hand_derived_oracle()
 
 

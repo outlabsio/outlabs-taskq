@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import hashlib
+import json
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
@@ -15,9 +17,24 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from taskq.client import TaskQ
-from taskq.errors import TaskqConfigError, TaskqInternalError
+from taskq.errors import (
+    TaskqConfigError,
+    TaskqConflictError,
+    TaskqInternalError,
+    TaskqNotFoundError,
+)
 from taskq.execution import Cancel, Complete, HandlerResult, NonRetryable, Retry, Snooze
 from taskq.protocol import (
+    ADMISSION_RESERVATION_ADAPTER,
+    AdmissionCancelOutcome,
+    AdmissionCancelRequest,
+    AdmissionCancelResult,
+    AdmissionFinishOutcome,
+    AdmissionFinishRequest,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
+    AdmissionReserveRequest,
     ClaimedJob,
     ClaimResult,
     ClaimState,
@@ -125,6 +142,19 @@ class _FakeJob:
     settled_command: str | None = None
 
 
+@dataclass(slots=True)
+class _FakeAdmission:
+    intent_hash: str
+    handle: UUID
+    reservation_expires_at: datetime
+    receipt_ttl_seconds: int
+    state: Literal["reserved", "admitted", "cancelled"] = "reserved"
+    finish_hash: str | None = None
+    job_id: UUID | None = None
+    receipt: dict[str, Any] | None = None
+    receipt_expires_at: datetime | None = None
+
+
 _SAFE_FIELDS = {
     "job_id",
     "queue",
@@ -163,6 +193,9 @@ class FakeTaskQClient:
     _SUPPORTED = {
         "enqueue",
         "enqueue_many",
+        "reserve_admission",
+        "finish_admission",
+        "cancel_admission",
         "claim",
         "heartbeat",
         "complete",
@@ -179,6 +212,7 @@ class FakeTaskQClient:
         self._jobs: dict[UUID, _FakeJob] = {}
         self._order: list[UUID] = []
         self._active_keys: dict[tuple[str, str], UUID] = {}
+        self._admissions: dict[tuple[str, str], _FakeAdmission] = {}
         self._enqueues: list[RecordedEnqueue] = []
         self._settlements: list[RecordedSettlement] = []
         self._closed = False
@@ -274,6 +308,160 @@ class FakeTaskQClient:
         return [
             await self.enqueue(EnqueueCommand(queue=queue, **item.model_dump())) for item in items
         ]
+
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+    ) -> AdmissionReservationResult:
+        self._ensure_open()
+        request = AdmissionReserveRequest(
+            idempotency_key=idempotency_key,
+            intent_hash=intent_hash,
+            handle=handle or uuid4(),
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+        )
+        if queue not in self._known_queues:
+            raise TaskqNotFoundError()
+        now = datetime.now(UTC)
+        identity = (queue, request.idempotency_key)
+        admission = self._admissions.get(identity)
+        if (
+            admission is None
+            or admission.state == "cancelled"
+            or (admission.state == "reserved" and admission.reservation_expires_at <= now)
+        ):
+            admission = _FakeAdmission(
+                intent_hash=request.intent_hash,
+                handle=request.handle,
+                reservation_expires_at=now + timedelta(seconds=request.reservation_ttl_seconds),
+                receipt_ttl_seconds=request.receipt_ttl_seconds,
+            )
+            self._admissions[identity] = admission
+            return ADMISSION_RESERVATION_ADAPTER.validate_python(
+                {
+                    "outcome": "reserved",
+                    "handle": admission.handle,
+                    "reservation_expires_at": admission.reservation_expires_at,
+                }
+            )
+        if admission.intent_hash != request.intent_hash:
+            raise TaskqConflictError(details={"reason": "idempotency_mismatch"})
+        if admission.state == "admitted":
+            return ADMISSION_RESERVATION_ADAPTER.validate_python(
+                {
+                    "outcome": "admitted",
+                    "job_id": admission.job_id,
+                    "receipt": deepcopy(admission.receipt),
+                    "receipt_expires_at": admission.receipt_expires_at,
+                }
+            )
+        if admission.handle == request.handle:
+            return ADMISSION_RESERVATION_ADAPTER.validate_python(
+                {
+                    "outcome": "reserved",
+                    "handle": admission.handle,
+                    "reservation_expires_at": admission.reservation_expires_at,
+                }
+            )
+        return ADMISSION_RESERVATION_ADAPTER.validate_python(
+            {
+                "outcome": "pending",
+                "reservation_expires_at": admission.reservation_expires_at,
+                "retry_after_seconds": max(
+                    1, int((admission.reservation_expires_at - now).total_seconds() + 0.999)
+                ),
+            }
+        )
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+    ) -> AdmissionFinishResult:
+        self._ensure_open()
+        request = AdmissionFinishRequest(
+            idempotency_key=idempotency_key,
+            handle=handle,
+            job=job,
+            receipt=dict(receipt or {}),
+        )
+        identity = (queue, request.idempotency_key)
+        admission = self._admissions.get(identity)
+        if admission is None:
+            raise TaskqNotFoundError()
+        if admission.handle != request.handle:
+            raise TaskqConflictError(details={"reason": "reservation_conflict"})
+        finish_hash = hashlib.sha256(
+            json.dumps(
+                {
+                    "job": request.job.model_dump(mode="json", exclude_none=True),
+                    "receipt": request.receipt,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode()
+        ).hexdigest()
+        if admission.state == "admitted":
+            if admission.finish_hash != finish_hash:
+                raise TaskqConflictError(details={"reason": "finish_mismatch"})
+            return AdmissionFinishResult(
+                outcome=AdmissionFinishOutcome.EXISTED,
+                job_id=admission.job_id,
+                receipt=deepcopy(admission.receipt),
+                receipt_expires_at=admission.receipt_expires_at,
+            )
+        if admission.state == "cancelled":
+            raise TaskqConflictError(details={"reason": "reservation_cancelled"})
+        now = datetime.now(UTC)
+        if admission.reservation_expires_at <= now:
+            raise TaskqConflictError(details={"reason": "reservation_expired"})
+        command = EnqueueCommand(queue=queue, **request.job.model_dump())
+        enqueued = await self.enqueue(command)
+        admission.state = "admitted"
+        admission.finish_hash = finish_hash
+        admission.job_id = enqueued.job_id
+        admission.receipt = deepcopy(request.receipt)
+        admission.receipt_expires_at = now + timedelta(seconds=admission.receipt_ttl_seconds)
+        return AdmissionFinishResult(
+            outcome=AdmissionFinishOutcome.CREATED,
+            job_id=enqueued.job_id,
+            receipt=deepcopy(request.receipt),
+            receipt_expires_at=admission.receipt_expires_at,
+        )
+
+    async def cancel_admission(
+        self, queue: str, idempotency_key: str, handle: UUID
+    ) -> AdmissionCancelResult:
+        self._ensure_open()
+        request = AdmissionCancelRequest(idempotency_key=idempotency_key, handle=handle)
+        admission = self._admissions.get((queue, request.idempotency_key))
+        if admission is None:
+            raise TaskqNotFoundError()
+        if admission.handle != request.handle:
+            raise TaskqConflictError(details={"reason": "reservation_conflict"})
+        if admission.state == "admitted":
+            return AdmissionCancelResult(
+                outcome=AdmissionCancelOutcome.ALREADY_ADMITTED,
+                job_id=admission.job_id,
+                receipt=deepcopy(admission.receipt),
+                receipt_expires_at=admission.receipt_expires_at,
+            )
+        if admission.state == "cancelled":
+            return AdmissionCancelResult(outcome=AdmissionCancelOutcome.ALREADY_CANCELLED)
+        if admission.reservation_expires_at <= datetime.now(UTC):
+            return AdmissionCancelResult(outcome=AdmissionCancelOutcome.EXPIRED)
+        admission.state = "cancelled"
+        return AdmissionCancelResult(outcome=AdmissionCancelOutcome.CANCELLED)
 
     async def claim(
         self,

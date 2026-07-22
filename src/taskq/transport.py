@@ -7,6 +7,10 @@ from typing import Any, Literal, Protocol, TypeVar, cast, runtime_checkable
 from uuid import UUID
 
 from taskq.protocol import (
+    AdmissionCancelResult,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
     AuthorizationProjection,
     CancelResult,
     ClaimResult,
@@ -58,6 +62,30 @@ class ClosableTransport(Protocol):
 
 @runtime_checkable
 class ProducerTransport(ClosableTransport, Protocol):
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+    ) -> AdmissionReservationResult: ...
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+    ) -> AdmissionFinishResult: ...
+
+    async def cancel_admission(
+        self, queue: str, idempotency_key: str, handle: UUID
+    ) -> AdmissionCancelResult: ...
+
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult: ...
 
     async def enqueue_many(

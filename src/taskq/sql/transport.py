@@ -8,14 +8,27 @@ from collections.abc import Awaitable, Callable, Mapping, Sequence
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, Literal, TypeVar
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
-from taskq.errors import TaskqConfigError, TaskqInternalError, taskq_error_from_exception
+from taskq.errors import (
+    TaskqConfigError,
+    TaskqConflictError,
+    TaskqInternalError,
+    taskq_error_from_exception,
+)
 from taskq.protocol import (
+    ADMISSION_RESERVATION_ADAPTER,
+    AdmissionCancelRequest,
+    AdmissionCancelResult,
+    AdmissionFinishRequest,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
+    AdmissionReserveRequest,
     AuthorizationProjection,
     CLAIM_BATCH_ADAPTER,
     COMMAND_SPECS,
@@ -47,6 +60,16 @@ from taskq.protocol import (
 
 T = TypeVar("T")
 
+_ADMISSION_CONFLICT_REASONS = frozenset(
+    {
+        "idempotency_mismatch",
+        "reservation_conflict",
+        "reservation_expired",
+        "reservation_cancelled",
+        "finish_mismatch",
+    }
+)
+
 METHOD_FUNCTIONS = MappingProxyType(
     {command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()}
 )
@@ -66,6 +89,40 @@ def _nested_mapping(value: Any, fields: Sequence[str]) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
     return dict(zip(fields, value, strict=True))
+
+
+def _admission_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    """Recover only the frozen safe reason; never surface arbitrary driver detail."""
+
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason"}
+                and value["reason"] in _ADMISSION_CONFLICT_REASONS
+            ):
+                return TaskqConflictError(details={"reason": value["reason"]}, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
 
 
 class SqlTaskqTransport:
@@ -182,6 +239,107 @@ class SqlTaskqTransport:
             )
 
         return await self._run(operation, connection=connection)
+
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionReservationResult:
+        request = AdmissionReserveRequest(
+            idempotency_key=idempotency_key,
+            intent_hash=intent_hash,
+            handle=handle or uuid4(),
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+        )
+
+        async def operation(conn: AsyncConnection) -> AdmissionReservationResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.reserve_admission(:queue, :idempotency_key, "
+                ":intent_hash, :handle, :reservation_ttl_seconds, :receipt_ttl_seconds)",
+                {"queue": queue, **request.model_dump()},
+            )
+            data = dict(row)
+            data["receipt"] = _json(data["receipt"])
+            result = ADMISSION_RESERVATION_ADAPTER.validate_python(data)
+            self._validated_outcome(CommandName.RESERVE_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionFinishResult:
+        request = AdmissionFinishRequest(
+            idempotency_key=idempotency_key,
+            handle=handle,
+            job=job,
+            receipt=dict(receipt or {}),
+        )
+
+        async def operation(conn: AsyncConnection) -> AdmissionFinishResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.finish_admission(:queue, :idempotency_key, :handle, "
+                "CAST(:job AS jsonb), CAST(:receipt AS jsonb))",
+                {
+                    "queue": queue,
+                    "idempotency_key": request.idempotency_key,
+                    "handle": request.handle,
+                    "job": _json_param(request.job.model_dump(mode="json", exclude_none=True)),
+                    "receipt": _json_param(request.receipt),
+                },
+            )
+            result = AdmissionFinishResult.model_validate({**row, "receipt": _json(row["receipt"])})
+            self._validated_outcome(CommandName.FINISH_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
+
+    async def cancel_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionCancelResult:
+        request = AdmissionCancelRequest(idempotency_key=idempotency_key, handle=handle)
+
+        async def operation(conn: AsyncConnection) -> AdmissionCancelResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.cancel_admission(:queue, :idempotency_key, :handle)",
+                {"queue": queue, **request.model_dump()},
+            )
+            result = AdmissionCancelResult.model_validate({**row, "receipt": _json(row["receipt"])})
+            self._validated_outcome(CommandName.CANCEL_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
 
     async def enqueue_many(
         self,

@@ -40,6 +40,9 @@ from taskq.http.hub import ClaimWaitHub
 from taskq.protocol import (
     HTTP_COMMAND_SPECS,
     TQ_ERROR_REGISTRY,
+    AdmissionCancelRequest,
+    AdmissionFinishRequest,
+    AdmissionReserveRequest,
     CancelRunningWireRequest,
     ClaimResult,
     ClaimedJobWire,
@@ -104,6 +107,13 @@ _OPERATOR_COMMANDS = frozenset(
         CommandName.REQUEST_WORKER_SHUTDOWN,
     }
 )
+_ADMISSION_COMMANDS = frozenset(
+    {
+        HttpCommandName.RESERVE_ADMISSION,
+        HttpCommandName.FINISH_ADMISSION,
+        HttpCommandName.CANCEL_ADMISSION,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +123,7 @@ class TaskqFacadeTransports:
     observer: ObserverTransport
     authorization: AuthorizationLookupTransport
     claim_wait_hub: ClaimWaitHub
+    admission_enabled: bool = False
 
 
 def _selected_request_id(request: Request) -> tuple[str, bool]:
@@ -352,6 +363,15 @@ class _FacadeDispatcher:
             else await authenticate_request(authorizer, request)
         )
 
+        if name in _ADMISSION_COMMANDS:
+            self._validate_query(request, name)
+            queue = await self._authorize(
+                request, name, spec, None, context, authorizer, public_meta
+            )
+            self._validate_headers(request)
+            body = await self._body(request, spec)
+            return await self._execute(request, name, spec, body, context, queue)
+
         self._validate_headers(request)
         body = await self._body(request, spec)
         self._validate_query(request, name)
@@ -544,6 +564,46 @@ class _FacadeDispatcher:
 
         if name is HttpCommandName.META:
             return _command_response(request, spec, "ok", await r.observer.get_contract_meta())
+        if name is HttpCommandName.RESERVE_ADMISSION:
+            assert queue is not None and isinstance(body, AdmissionReserveRequest)
+            result = await r.producer.reserve_admission(
+                queue,
+                body.idempotency_key,
+                body.intent_hash,
+                handle=body.handle,
+                reservation_ttl_seconds=body.reservation_ttl_seconds,
+                receipt_ttl_seconds=body.receipt_ttl_seconds,
+            )
+            return _command_response(
+                request,
+                spec,
+                result.outcome.value,
+                result.model_dump(exclude={"outcome"}, exclude_none=True),
+            )
+        if name is HttpCommandName.FINISH_ADMISSION:
+            assert queue is not None and isinstance(body, AdmissionFinishRequest)
+            result = await r.producer.finish_admission(
+                queue,
+                body.idempotency_key,
+                body.handle,
+                body.job,
+                body.receipt,
+            )
+            return _command_response(
+                request,
+                spec,
+                result.outcome.value,
+                result.model_dump(exclude={"outcome"}, exclude_none=True),
+            )
+        if name is HttpCommandName.CANCEL_ADMISSION:
+            assert queue is not None and isinstance(body, AdmissionCancelRequest)
+            result = await r.producer.cancel_admission(queue, body.idempotency_key, body.handle)
+            return _command_response(
+                request,
+                spec,
+                result.outcome.value,
+                result.model_dump(exclude={"outcome"}, exclude_none=True),
+            )
         if name is HttpCommandName.ENQUEUE:
             assert queue is not None and isinstance(body, EnqueueWireRequest)
             command = EnqueueCommand(queue=queue, **body.model_dump())
@@ -1031,6 +1091,8 @@ def create_taskq_app(
         return _error_response(request, TqCode.INTERNAL, 500, message="internal taskq failure")
 
     for name, spec in HTTP_COMMAND_SPECS.items():
+        if name in _ADMISSION_COMMANDS and not resources.admission_enabled:
+            continue
         if name in _OPERATOR_COMMANDS and operator_transport is None:
             continue
 

@@ -19,10 +19,20 @@ from pydantic_core import to_jsonable_python
 
 from taskq.errors import TaskqConfigError, TaskqInternalError, taskq_error_from_code
 from taskq.protocol import (
+    ADMISSION_RESERVATION_ADAPTER,
     CLAIM_BATCH_ADAPTER,
     ENQUEUE_RESULT_ADAPTER,
     SETTLE_RESULT_ADAPTER,
     HTTP_COMMAND_SPECS,
+    AdmissionCancelRequest,
+    AdmissionCancelResult,
+    AdmissionFinishRequest,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
+    AdmissionReserveRequest,
+    AdmissionReserveWireData,
+    AdmissionResultWireData,
     ClaimResult,
     ClaimState,
     ClaimWireData,
@@ -174,6 +184,17 @@ def _decode_domain(spec: HttpCommandSpec, outcome: str, data: dict[str, Any]) ->
     """Normalize a generated command response to its core SQL-domain value."""
 
     command = spec.sql_command
+    if command is CommandName.RESERVE_ADMISSION:
+        wire = AdmissionReserveWireData.model_validate(data)
+        return ADMISSION_RESERVATION_ADAPTER.validate_python(
+            {"outcome": outcome, **wire.model_dump()}
+        )
+    if command is CommandName.FINISH_ADMISSION:
+        wire = AdmissionResultWireData.model_validate(data)
+        return AdmissionFinishResult(outcome=outcome, **wire.model_dump())
+    if command is CommandName.CANCEL_ADMISSION:
+        wire = AdmissionReserveWireData.model_validate(data)
+        return AdmissionCancelResult(outcome=outcome, **wire.model_dump())
     if command is CommandName.ENSURE_QUEUE:
         wire = EnsureQueueWireData.model_validate(data)
         return EnsureQueueResult(
@@ -413,6 +434,62 @@ class AsyncTaskqHttpClient:
         if not protocol_min <= PROTOCOL_MAJOR <= protocol_max:
             raise taskq_error_from_code(TqCode.VERSION, details={"protocol": PROTOCOL_MAJOR})
         return ContractMeta.model_validate(data)
+
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+    ) -> AdmissionReservationResult:
+        request = AdmissionReserveRequest(
+            idempotency_key=idempotency_key,
+            intent_hash=intent_hash,
+            handle=handle or uuid4(),
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+        )
+        outcome, data, _ = await self._request(
+            HttpCommandName.RESERVE_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.RESERVE_ADMISSION], outcome, data)
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+    ) -> AdmissionFinishResult:
+        request = AdmissionFinishRequest(
+            idempotency_key=idempotency_key,
+            handle=handle,
+            job=job,
+            receipt=dict(receipt or {}),
+        )
+        outcome, data, _ = await self._request(
+            HttpCommandName.FINISH_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.FINISH_ADMISSION], outcome, data)
+
+    async def cancel_admission(
+        self, queue: str, idempotency_key: str, handle: UUID
+    ) -> AdmissionCancelResult:
+        request = AdmissionCancelRequest(idempotency_key=idempotency_key, handle=handle)
+        outcome, data, _ = await self._request(
+            HttpCommandName.CANCEL_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_ADMISSION], outcome, data)
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)
@@ -854,6 +931,62 @@ class TaskqHttpClient:
         if not protocol_min <= PROTOCOL_MAJOR <= protocol_max:
             raise taskq_error_from_code(TqCode.VERSION, details={"protocol": PROTOCOL_MAJOR})
         return ContractMeta.model_validate(data)
+
+    def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+    ) -> AdmissionReservationResult:
+        request = AdmissionReserveRequest(
+            idempotency_key=idempotency_key,
+            intent_hash=intent_hash,
+            handle=handle or uuid4(),
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+        )
+        outcome, data, _ = self._request(
+            HttpCommandName.RESERVE_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.RESERVE_ADMISSION], outcome, data)
+
+    def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+    ) -> AdmissionFinishResult:
+        request = AdmissionFinishRequest(
+            idempotency_key=idempotency_key,
+            handle=handle,
+            job=job,
+            receipt=dict(receipt or {}),
+        )
+        outcome, data, _ = self._request(
+            HttpCommandName.FINISH_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.FINISH_ADMISSION], outcome, data)
+
+    def cancel_admission(
+        self, queue: str, idempotency_key: str, handle: UUID
+    ) -> AdmissionCancelResult:
+        request = AdmissionCancelRequest(idempotency_key=idempotency_key, handle=handle)
+        outcome, data, _ = self._request(
+            HttpCommandName.CANCEL_ADMISSION,
+            path_params={"queue": queue},
+            body=request,
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_ADMISSION], outcome, data)
 
     def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)

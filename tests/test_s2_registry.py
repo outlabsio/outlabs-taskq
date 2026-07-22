@@ -429,7 +429,7 @@ def test_closed_tq_registry_normalizes_from_sqlstate_only(
 
 def test_protocol_command_registry_is_closed_and_self_consistent() -> None:
     assert set(COMMAND_SPECS) == set(CommandName)
-    assert len(COMMAND_SPECS) == 33
+    assert len(COMMAND_SPECS) == 36
     for spec in COMMAND_SPECS.values():
         assert spec.outcomes
         assert spec.retryable_errors == frozenset(
