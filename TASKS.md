@@ -214,6 +214,32 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-C7-CQ-01 — Accepted network isolation conflicts with QDarte's blanket worker-container ban *(resolved: narrow closed-worker exception)*
+
+**Trigger:** C7-01 source convergence read the QDarte worker and runtime
+`AGENTS.md` files before implementation. Both require the normal content/media
+worker fleet to run as host-local `uv` processes and prohibit worker
+containers, while the accepted C7 plan requires the dedicated contact-package
+worker to join only an `internal: true` network so a separately dual-homed
+verification gateway is its sole egress path.
+
+**Why this cannot be coded around:** a host-local process cannot be attached to
+the private Compose network or structurally denied direct host egress. Keeping
+the blanket ban would make the accepted network-enforcement oracle impossible;
+silently weakening the oracle would violate the reviewed C7 plan.
+
+**Decision:** the owner-approved C7 topology is a narrow exception for the
+single closed `qdarte.contact_verify.scope` worker only. It may run as one
+disabled-by-default Compose service with no database credential, no enqueue
+credential, no host port, one fixed queue/type, and only the internal contact
+network. The ordinary QDarte worker fleet remains host-local and the general
+container ban remains in force. QDarte's repository guides and environment
+documentation must state this exception docs-first before service code lands.
+
+**Scope opened:** documentation alignment and C7-01 implementation only. This
+does not authorize C7-02, a provider call, another containerized worker lane,
+direct-queue retirement, or Stage 6.
+
 ### S5-QD-C6-CQ-01 — Static closed modes cannot consume a process-owned drain attestation *(resolved)*
 
 **Blocking evidence:** C6-01 freezes `QDARTE_CONTACT_VERIFY_MODE` as a
