@@ -100,7 +100,7 @@
 
 - [x] **S5-QD-C6-02-DESIGN · Direct-drain interlock mechanics frozen** — C6-02 uses no mutable flag, queue-table write, or reusable evidence file: a process-owned opaque attestation is issued only in `draining` mode for one named local exercise, verified development database identity, and source revision. It requires two direct-only observations 1–60 seconds apart with no active/leased contact work and equal job/attempt/event counts and high-waters; every later package admission must re-observe the same posture and expires within five minutes. Restart, tampering, mode/identity change, or any direct insert invalidates and evicts it. No QDarte source, database, queue, worker, provider, deployment, credential, or production state changes in this docs-first decision. C6-02 implementation may add only the local direct-ledger observer and refusal vectors; package admission remains unavailable until C6-03.
 
-- [x] **S5-QD-C6-02 · Direct drain and package-admission interlock** — QDarte API commit `145ca1a` adds a route-free, write-free observer over only the incumbent `qdarte_ops` contact job/attempt/event ledger and a process-owned opaque attestation registry. It issues only in explicit `draining` mode after two stable bounded observations, is bound to one development database identity/exercise/source revision, expires within five minutes, vanishes on restart, and re-observes before every future package admission. The six new vectors reject active work, bad bounds, forged/expired records, cross-mode use, a direct insertion during observation, and a direct insertion after issuance; the query assertion proves no package table or payload read. Focused C6/config/route/lifespan vectors are 48/48 with Ruff, format, and changed-file MyPy clean under the documented unreachable integration DSN. No service was started, no direct producer was disabled in a lasting environment, no package job/route/database write/worker/provider/deployment/credential/production action occurred. C6-03 alone may bind this interlock to the scoped caller-compatible package adapter.
+- [x] **S5-QD-C6-02 · Direct drain and package-admission interlock** — QDarte API commit `145ca1a` adds a route-free, write-free observer over only the incumbent `qdarte_ops` contact job/attempt/event ledger and a process-owned opaque attestation registry. It issues only in explicit `draining` mode after two stable bounded observations, is bound to one development database identity/exercise/source revision, expires within five minutes, vanishes on restart, and re-observes before every future package admission. The six new vectors reject active work, bad bounds, forged/expired records, cross-mode use, a direct insertion during observation, and a direct insertion after issuance; the query assertion proves no package table or payload read. Focused C6/config/route/lifespan vectors are 48/48 with Ruff, format, and changed-file MyPy clean under the documented unreachable integration DSN. No service was started, no direct producer was disabled in a lasting environment, no package job/route/database write/worker/provider/deployment/credential/production action occurred. C6-03 is blocked on S5-QD-C6-CQ-01; it must not weaken the process-owned proof or add a fallback.
 
 - [x] **S5-RM-DESIGN · H-08/H-11 read-model activation proposal prepared** — added the Tier-3 [Read Model Specification](docs/Task%20Queue%20Read%20Model%20Specification.md): queue-scoped finite `ready|running|finished` keyset pages; fixed safe job projection; observer-safe queue profile; and a real version/ETag conditional-update path that preserves bootstrap `ensure_queue`. It names the docs-first ADR/Protocol/Manifest/migration sequence plus PG16/PG18 B9, SQL/HTTP parity, redaction, authorization, pagination, and conflict evidence. It changes no current contract, SQL, host, UI, producer, consumer, or L1 observation behavior; both deferred routes remain `TQ501` pending ADR acceptance.
 
@@ -155,6 +155,32 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-C6-CQ-01 — Static closed modes cannot consume a process-owned drain attestation *(open)*
+
+**Blocking evidence:** C6-01 freezes `QDARTE_CONTACT_VERIFY_MODE` as a
+startup-validated `legacy | draining | package` selector. C6-02 correctly
+issues its opaque direct-drain attestation only while the selected mode is
+`draining`; it correctly removes that attestation on restart or mode change.
+C6-03 would need the selected mode to become `package` before it can admit its
+first package job. With the current static configuration that transition
+requires a restart, which intentionally erases the only valid attestation.
+Therefore no process can satisfy both preconditions: the package path is
+unreachable without weakening the proof, persisting/hand-editing it, or
+inventing a fallback.
+
+**Recommended adjudication:** amend the Tier-3 C6 mode semantics docs-first:
+`legacy` and explicit `draining` remain steady states, while a configured
+`package` process starts internally in a non-serving draining posture, performs
+the complete C6-02 direct observation in that same process, and atomically
+opens its package selector only after the in-memory attestation is issued.
+Every restart repeats the drain before serving; failure leaves no package
+producer callable and fails startup or remains a fixed draining refusal. The
+mode is still sampled once per request after this one startup transition, no
+opaque record crosses a route/environment/database boundary, and no direct or
+package fallback is introduced. Alternative: choose a different, explicitly
+reviewed durable attestation mechanism. Do not start C6-03 until one of these
+semantics is adopted docs-first.
 
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
