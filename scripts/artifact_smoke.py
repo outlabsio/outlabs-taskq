@@ -69,6 +69,8 @@ def main() -> None:
     import taskq.transport
     import taskq.worker
     from taskq import (
+        AdmissionFinishOutcome,
+        AdmissionReserveOutcome,
         CancellationToken,
         Complete,
         JobContext,
@@ -116,13 +118,26 @@ def main() -> None:
     assert WorkerOptions().concurrency == 1
 
     async def smoke_testing() -> None:
-        fake = FakeTaskQClient()
+        fake = FakeTaskQClient(queues=("artifact",))
         facade = TaskQ(fake, validate_job_types=False)
         result = await facade.enqueue_raw(
             queue="artifact", job_type="artifact.testing", payload={"ok": True}
         )
         job = await require_enqueued(fake, job_type="artifact.testing")
         assert job.job_id == result.job_id
+        reserved = await facade.reserve_admission("artifact", "artifact-key", "a" * 64)
+        assert reserved.outcome is AdmissionReserveOutcome.RESERVED
+        admitted = await facade.finish_admission(
+            "artifact",
+            "artifact-key",
+            reserved.handle,
+            {"job_type": "artifact.admitted", "payload": {"ok": True}},
+            {"source": "artifact-smoke"},
+        )
+        assert admitted.outcome is AdmissionFinishOutcome.CREATED
+        replay = await facade.reserve_admission("artifact", "artifact-key", "a" * 64)
+        assert replay.outcome is AdmissionReserveOutcome.ADMITTED
+        assert replay.job_id == admitted.job_id
 
     asyncio.run(smoke_testing())
 
@@ -139,7 +154,7 @@ def main() -> None:
         "0006_activate_ready_read_model",
         "0007_admission_reservations",
     ]
-    assert len(FUNCTIONS) == 43
+    assert len(FUNCTIONS) == 46
 
     if args.mode != "core":
         return
