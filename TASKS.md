@@ -84,6 +84,7 @@
 
 - [ ] **S5-QD-C7-01 · Mini87 production preflight** — only after explicit owner authorization: identify the live deployed source/database identities; construct zero-unclassified-path API/worker/runtime candidates; run complete gates; create and execute the fresh two-database-plus-globals restore drill; measure `M` and normal-production `H` and prove `H + 3 <= M - 20`; implement and test the capped domain session, exact private service origin, readiness, runtime-owned proxy verifier, and network isolation; prove all runtime/role/token negatives; provision/migrate/verify the lasting package database and disabled services; finish healthy in `legacy`, queue paused, worker stopped, and zero package publish/provider action. Stop for targeted acceptance before C7-02.
   - **Progress 2026-07-22:** all four Mini87 shares are mounted and the three live checkout identities were read without modifying them. Reviewed integration candidates are pushed on `codex/taskq-c7-01`: API `a4d90e2` (all 30 accepted C6 commits forward-ported onto current `origin/main`, capped 1+2 facade/domain pools, readiness and production guards), worker `c8c03bb` (all 14 C6 commits plus the Mini87 typing cleanup, private proxy-only verifier, closed image), and runtime `21ccce3` (disabled profiles, internal-only worker network, two-database backup/restore unit). Focused gates are API 95/95, worker 627/627 plus MyPy 53 files, and runtime 1124/1124 plus MyPy 192 files; the production-shaped Compose graph parses, default Compose excludes all C7 services, and the candidate worker image has no dev packages or credential-bearing history. The broad API suite is honestly not a green gate at this point: 1692 passed and 15 unrelated/order-sensitive baseline tests failed outside the C7 paths. C7-01 remains open at stop condition 1 because the SMB mounts do not provide live command execution: new IPv4 and IPv6 connections to Mini87 currently return `No route to host`, so deployed container identity, database identity, fresh backup/restore, `M/H`, grants, and deployment are deliberately unclaimed and untouched.
+  - **Progress 2026-07-22, live preflight:** owner-authorized Remote Login established the missing live channel. The production image reports deployed API `fee29d2` against database identity `production/45677dd9-2717-4d80-bdf7-a09a94a95221`; the three reviewed candidate tips are now cleanly checked out on Mini87 after preserving 92 API paths and two runtime paths as separate local recovery commits. Fresh API/intake backups at `20260722-155220` were byte-verified on `/Volumes/Server87` and `/Volumes/Server87 Backup`, their disposable restores matched production counts and migration heads, and the package 0001→0007 disposable install/dump/ownership-preserving restore passed `verify()` twice with exact 0.1.5 metadata before both named scratch databases were dropped. A 15-minute/180-sample connection trace measured `M=100`, `H=16`, so `H+3=19 <= 80` with 61 connections of headroom. Runtime candidate `a79812d` additionally fixes portable backup checksums, preserves package ownership/ACLs, and validates the actual `taskq.admissions` / `taskq.schema_migrations` relations; 1124 tests and MyPy 192 remain green. The pre-lasting full-row baseline proves six direct jobs, zero active jobs/leases, no stable-effect table yet, and no lasting package database. Lasting creation/deployment is now paused at S5-QD-C7-CQ-02; no package job, provider call, or C7-02 action occurred.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
 
@@ -214,6 +215,40 @@
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-C7-CQ-02 — Same-cluster package isolation conflicts with the incumbent superuser application login *(open)*
+
+**Trigger:** the live C7-01 identity proof established that the ordinary
+production `qdarteapi` service still connects to the shared PostgreSQL cluster
+as the `postgres` superuser. The frozen C7 topology places
+`qdarte_contact_verify` on that same cluster while stating that the ordinary
+QDarte app receives no package-database password and that package access is
+limited to the dedicated capability identities.
+
+**Why this cannot be coded around:** PostgreSQL credentials authenticate a
+cluster role, not one database. The existing `postgres` credential can connect
+to and fully control every database on the cluster; a superuser bypasses
+`CONNECT`, ownership, grants, RLS, and every taskq capability role. Merely
+omitting `QDARTE_TASKQ_CONTACT_DSN` from the ordinary app would therefore make
+the documented isolation claim false. Creating the lasting database anyway,
+granting broader roles, or treating absence of a configured DSN as a security
+boundary would violate the accepted C7 plan.
+
+**Recommended adjudication:** amend the Tier-3 topology docs-first so the
+package database runs in a dedicated private PostgreSQL service on Mini87,
+with its own durable volume, owner/operator/runtime identities, connection
+budget, globals-inclusive backup, and restore drill. Keep only the capped
+two-connection domain/auth pool on the incumbent cluster. This is narrower
+than attempting a C7-scoped least-privilege conversion of the whole incumbent
+API and host worker fleet. The alternative is to freeze and separately prove
+that broader runtime-credential conversion before package creation; accepting
+the current superuser as an exception is not recommended.
+
+**Scope while open:** completed read-only/live preflight, fresh backups,
+disposable restore proofs, candidate source work, and evidence remain valid.
+No lasting package database, credential, facade deployment, worker start,
+package enqueue, provider call, C7-02 cohort, retirement, non-contact lane, or
+Stage 6 action is authorized until one topology is adopted docs-first.
 
 ### S5-QD-C7-CQ-01 — Accepted network isolation conflicts with QDarte's blanket worker-container ban *(resolved: narrow closed-worker exception)*
 
