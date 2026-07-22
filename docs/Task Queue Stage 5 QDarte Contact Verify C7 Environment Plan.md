@@ -1,7 +1,7 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** frozen C7-00 plan amended by C7-CQ-02; C7-01 privilege-separation
-remediation is active, while package creation and C7-02 remain closed
+**Status:** C7-01 disabled production preflight executed; targeted acceptance
+gates C7-02
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
 Compatibility and Cutover Specification
@@ -17,9 +17,12 @@ bound to `/Volumes/Server87`. The cloud intake environment does not host the
 full QDarte API or worker fleet. The MacBook `qdarte-dev` stack remains a
 rehearsal environment and cannot supply production evidence.
 
-This document is a plan, not an execution record. It creates no database,
-role, token, service, queue, backup, job, provider call, deployment, or source
-branch. C7-01 remains closed until a targeted review accepts this plan.
+This document remains the frozen design, not the execution ledger. The C7-01
+execution record lives in QDarte API's
+`docs/taskq-contact-c7-01-production-preflight-evidence.md`. That preflight
+created the reviewed disabled production posture but admitted no package job
+and made no provider call. Targeted C7-01 acceptance remains mandatory before
+C7-02.
 
 C7 keeps the C6 rules intact:
 
