@@ -13,7 +13,12 @@ from pydantic import ValidationError
 import pytest
 
 from taskq import TaskQ
-from taskq.errors import TaskqBackpressureError, TaskqConflictError, TaskqUnavailableError
+from taskq.errors import (
+    TaskqBackpressureError,
+    TaskqConflictError,
+    TaskqNotFoundError,
+    TaskqUnavailableError,
+)
 from taskq.http import (
     AsyncTaskqHttpClient,
     AuthContext,
@@ -26,6 +31,7 @@ from taskq.http import (
 )
 from taskq.protocol import (
     AdmissionAdmittedResult,
+    AdmissionCancelOutcome,
     AdmissionFinishOutcome,
     AdmissionFinishRequest,
     AdmissionJobCommand,
@@ -289,6 +295,99 @@ async def test_sql_and_http_admission_surfaces_have_typed_state_parity(
         second_cancel = await client.cancel_admission(http_queue, "cancel-key", handles[1])
         assert first_cancel.outcome.value == "cancelled"
         assert second_cancel.outcome.value == "already_cancelled"
+    finally:
+        await client.aclose()
+        await raw_client.aclose()
+        await transport.aclose()
+
+
+async def test_http_outcome_and_safe_error_matrix(
+    pg: asyncpg.Connection,
+    stateful_time_travel: None,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+) -> None:
+    queue = "admission_http_matrix"
+    await _make_queue(operator, queue)
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport, admission_enabled=True), authorizer=no_auth_for_tests()
+        )
+    )
+    raw_client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    client = AsyncTaskqHttpClient("http://test", bearer_token="test-only", client=raw_client)
+    owner_handle = uuid4()
+    contender_handle = uuid4()
+    try:
+        with pytest.raises(TaskqNotFoundError):
+            await client.reserve_admission("missing_queue", "key", _INTENT)
+
+        reserved = await client.reserve_admission(queue, "matrix", _INTENT, handle=owner_handle)
+        assert reserved.outcome is AdmissionReserveOutcome.RESERVED
+        pending = await client.reserve_admission(queue, "matrix", _INTENT, handle=contender_handle)
+        assert pending.outcome is AdmissionReserveOutcome.PENDING
+
+        with pytest.raises(TaskqConflictError) as wrong_handle:
+            await client.cancel_admission(queue, "matrix", contender_handle)
+        assert wrong_handle.value.details == {"reason": "reservation_conflict"}
+
+        cancelled = await client.cancel_admission(queue, "matrix", owner_handle)
+        cancelled_replay = await client.cancel_admission(queue, "matrix", owner_handle)
+        assert cancelled.outcome is AdmissionCancelOutcome.CANCELLED
+        assert cancelled_replay.outcome is AdmissionCancelOutcome.ALREADY_CANCELLED
+
+        current = await client.reserve_admission(queue, "matrix", "d" * 64, handle=contender_handle)
+        assert current.outcome is AdmissionReserveOutcome.RESERVED
+        created = await client.finish_admission(
+            queue,
+            "matrix",
+            contender_handle,
+            {"job_type": "test.matrix", "payload": {"version": 1}},
+            {"plan": "stable"},
+        )
+        with pytest.raises(TaskqConflictError) as changed_finish:
+            await client.finish_admission(
+                queue,
+                "matrix",
+                contender_handle,
+                {"job_type": "test.matrix", "payload": {"version": 2}},
+                {"plan": "stable"},
+            )
+        assert changed_finish.value.details == {"reason": "finish_mismatch"}
+
+        with pytest.raises(TaskqConflictError) as changed_intent:
+            await client.reserve_admission(queue, "matrix", "e" * 64)
+        assert changed_intent.value.details == {"reason": "idempotency_mismatch"}
+
+        admitted_cancel = await client.cancel_admission(queue, "matrix", contender_handle)
+        assert admitted_cancel.outcome is AdmissionCancelOutcome.ALREADY_ADMITTED
+        assert admitted_cancel.job_id == created.job_id
+        assert admitted_cancel.receipt == {"plan": "stable"}
+
+        with pytest.raises(TaskqNotFoundError):
+            await client.finish_admission(
+                queue,
+                "missing-admission",
+                uuid4(),
+                {"job_type": "test.missing", "payload": {}},
+            )
+
+        expired = await client.reserve_admission(
+            queue,
+            "expired",
+            "f" * 64,
+            handle=owner_handle,
+            reservation_ttl_seconds=15,
+        )
+        assert expired.outcome is AdmissionReserveOutcome.RESERVED
+        assert await pg.fetchval(
+            "SELECT taskq_test.rewind_admission($1,$2,interval '1 hour')",
+            queue,
+            "expired",
+        )
+        expired_cancel = await client.cancel_admission(queue, "expired", owner_handle)
+        assert expired_cancel.outcome is AdmissionCancelOutcome.EXPIRED
     finally:
         await client.aclose()
         await raw_client.aclose()
