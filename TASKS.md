@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C6** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; C6-01..04 local compatibility, admission, and rollback evidence are complete, with C6-AUDIT now gating C7 planning |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C7 planning** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; C6-01..04 and the owner-authorized internal C6-AUDIT are complete, opening only the docs-first C7-00 environment plan |
 | Suite | 505/505 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 309/309 DB-free on Python 3.12; 289/289 last Python 3.13 run; million-row plan gate 2/2 on both PostgreSQL majors; current wheel/sdist × core/HTTP/OutLabs × Python 3.12/3.13 artifact matrix 12/12 before the response-schema-only delta; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | C6-AUDIT follows the three local C6-04 rollback postures; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | C7-00 must freeze the production-evidence environment/topology and preflight gates before C7-01; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -68,7 +68,9 @@
 
 - [x] **S5-QD-C6-AUDIT-REQUEST · Local compatibility/cutover completion gate assembled** — Round 15 pins C6-01 mode isolation, C6-02 direct-drain interlock, C6-03 canonical admission and a6 repin, C6-04 typed rollback, the exact API/worker/release tips, and the retained disposable database raw state. It attacks dual publication, direct insertion, active-row import, fallback, broadened workers, package-table access, result/effect ambiguity, and manual-DML rollback. READY may open only C7-00 environment planning; no production mutation, worker/provider action, retirement, cohort, deployment, non-contact lane, or Stage 6 is authorized.
 
-- [ ] **S5-QD-C6-AUDIT · Internal local cutover acceptance** — execute `docs/design-review-15/REQUEST.md` with the same explicit non-independent provenance authorized for Round 14. The response must derive the current dispatch/interlock/adapter/rollback state from source and raw ledgers, rerun the gates, and state precisely whether C7-00 planning opens.
+- [x] **S5-QD-C6-AUDIT · Internal local cutover accepted** — registered the owner-authorized internal Round-15 response (SHA-256 `0ad659ae143fd1fdff29a7e3718bda747a084cd10bf7fef0942cde792e5488fd`) with its non-independent provenance explicit. The audit derived closed one-publisher dispatch, the process-local direct-drain interlock, reserve-before-plan/admitted-no-plan behavior, and all three rollback postures from source and live read-only ledgers. It independently reproduced the exact six full-row conservation hashes, paused/zero-active package state, retained admission and stable post-effect history, API 62/62, worker 73/73, and clean Ruff/format/MyPy gates. No blocker or Contract question was found. READY opens only C7-00 planning.
+
+- [ ] **S5-QD-C7-00 · Production-evidence environment plan** — docs-only: name the proposed environment and topology, account/credential ownership, connection arithmetic, backup plus disposable restore target, explicit direct-lane baseline, bounded cohort/counter sources, and the exact C7-01 stop conditions. Reconcile the isolated-local package database with the proposed lasting environment without mutating either. Stop for targeted acceptance before any production migration, credential, deployment, worker/provider run, package publish, direct-queue change, C7-01+, retirement, non-contact lane, or Stage 6.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
 
