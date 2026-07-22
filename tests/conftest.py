@@ -94,8 +94,9 @@ async def _install_stateful_time_travel(dsn: str) -> None:
     """Install the Harness §1.1 scratch-only lease clock helper.
 
     This schema is test infrastructure, never package migration content. The
-    helper remains owner-executed and grants only the housekeeper role used by
-    T4's lease-rewind + tick operation.
+    helpers remain owner-executed. The lease helper grants only the
+    housekeeper role used by T4; admission clock control stays owner-only for
+    the durable-admission expiry and retention oracles.
     """
     conn = await asyncpg.connect(_plain_dsn(dsn))
     try:
@@ -127,6 +128,42 @@ async def _install_stateful_time_travel(dsn: str) -> None:
             REVOKE EXECUTE ON FUNCTION taskq_test.rewind_lease(uuid, interval) FROM PUBLIC;
             GRANT EXECUTE ON FUNCTION taskq_test.rewind_lease(uuid, interval)
                 TO taskq_housekeeper;
+
+            CREATE OR REPLACE FUNCTION taskq_test.rewind_admission(
+                p_queue text,
+                p_idempotency_key text,
+                p_by interval
+            ) RETURNS boolean
+            LANGUAGE plpgsql SECURITY DEFINER
+            SET search_path = pg_catalog, taskq, pg_temp
+            AS $function$
+            BEGIN
+                IF p_by IS NULL OR p_by <= interval '0 seconds' THEN
+                    RAISE EXCEPTION 'rewind interval must be positive';
+                END IF;
+                UPDATE taskq.admissions
+                   SET reservation_expires_at = reservation_expires_at - p_by,
+                       receipt_expires_at = CASE
+                           WHEN receipt_expires_at IS NULL THEN NULL
+                           ELSE receipt_expires_at - p_by
+                       END,
+                       updated_at = updated_at - p_by,
+                       admitted_at = CASE
+                           WHEN admitted_at IS NULL THEN NULL
+                           ELSE admitted_at - p_by
+                       END,
+                       cancelled_at = CASE
+                           WHEN cancelled_at IS NULL THEN NULL
+                           ELSE cancelled_at - p_by
+                       END
+                 WHERE queue = p_queue AND idempotency_key = p_idempotency_key;
+                RETURN FOUND;
+            END
+            $function$;
+            ALTER FUNCTION taskq_test.rewind_admission(text, text, interval)
+                OWNER TO taskq_owner;
+            REVOKE EXECUTE ON FUNCTION taskq_test.rewind_admission(text, text, interval)
+                FROM PUBLIC;
             """
         )
     finally:

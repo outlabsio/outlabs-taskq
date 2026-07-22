@@ -24,6 +24,11 @@ def _json(value: object) -> object:
 # group below. This closed ledger intentionally fails collection when the
 # machine manifest grows without a corresponding vector update.
 BEHAVIOR_GROUPS = {
+    "admission": {
+        "taskq.cancel_admission(text,text,uuid)",
+        "taskq.finish_admission(text,text,uuid,jsonb,jsonb)",
+        "taskq.reserve_admission(text,text,text,uuid,integer,integer)",
+    },
     "bulk": {
         "taskq.enqueue_many(text,jsonb)",
         "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
@@ -226,8 +231,10 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.1.4"
-    assert _json(meta["capabilities"]) == {"active": ["read_model_list_ready"]}
+    assert meta["contract_version"] == "0.1.5"
+    assert _json(meta["capabilities"]) == {
+        "active": ["admission_reservations", "read_model_list_ready"]
+    }
 
     await runner.fetchrow(
         "SELECT * FROM taskq.worker_heartbeat('view-worker', ARRAY[$1])", "r3_observe"

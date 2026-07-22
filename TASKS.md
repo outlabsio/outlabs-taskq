@@ -25,8 +25,8 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; ADR-023 resolves the QDarte C6 replay gap and S5-AR-01 is the active library slice before local C6 may resume |
-| Suite | 475/475 regular on fresh local PG18.3 with 1 opt-in skip (CI-shaped Redis); 469/469 last independently verified on PG16.14 with 1 opt-in skip; 304/304 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; the 0.1.5 SQL kernel is complete on both supported PostgreSQL majors and S5-AR-02 is the active typed transport/facade slice before local QDarte C6 may resume |
+| Suite | 489/489 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 304/304 DB-free last run on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
 | Next review | S5-AR-AUDIT must accept the dual-PG admission primitive before QDarte repins; targeted L1 acceptance separately gates legacy-tools L2 |
 
@@ -34,7 +34,7 @@
 
 - [x] **S5-AR-SPEC · Durable two-phase admission frozen** — ADR-023 accepts a reusable queue-native `(queue, idempotency_key)` reservation ledger rather than a QDarte mapping wrapper. Protocol 1.0.8 and Manifest 0.1.5 freeze client-generated retry-stable handles, SHA-256 intent binding, `reserved | pending | admitted`, atomic finish with immutable bounded receipt, reservation-only cancellation, database-clock expiry/retention, producer-scoped authorization, bridge/rollback-floor ordering, and immutable migration 0007. QDarte is the first integration but owns no durable mapping. No SQL, migration, source, package release, host database, worker, provider, deployment, production, or direct-queue change occurs in this docs-first task.
 
-- [ ] **S5-AR-01 · Admission SQL kernel and bridge proof** — implement immutable `0007_admission_reservations.sql`, closed 0.1.5 bridge membership, exact metadata/grants/catalog verification, fresh/full upgrade paths, bounded cleanup, and the full concurrent SQL race matrix on PostgreSQL 16/18. Stop on any Tier-0 mismatch; no HTTP/QDarte/production action in this task.
+- [x] **S5-AR-01 · Admission SQL kernel and bridge proof** — immutable `0007_admission_reservations.sql` adds the private durable reservation ledger, one-job linkage, database-clock expiry/retention, bounded janitor cleanup, and producer-only reserve/finish/cancel functions under exact 0.1.5 catalog/grant verification. The bridge accepts the closed `{0.1.2,0.1.3,0.1.4,0.1.5}` set while exposing no admission transport yet. Fresh/full chains, canonical finish replay, intent/handle mismatch, cancellation, expiry takeover, retention, privilege walls, and choreographed reserve/finish/cancel races pass identically on PG18.3 and exact PG16.14: 489 passed with 1 opt-in skip each; the PG18 million-row plan gate remains 2/2. No HTTP, QDarte, host database, or production action occurred.
 
 - [ ] **S5-AR-02 · Generated admission transports and parity** — add strict typed SQL/HTTP reserve/finish/cancel clients, capability-safe facade mounting, retry-stable orchestration, authorization/hiding, response-loss, and SQL/HTTP parity evidence. No QDarte repin or worker action until this slice is green.
 

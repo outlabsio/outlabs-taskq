@@ -44,6 +44,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0004_read_models",
                 "0005_read_model_conformance",
                 "0006_activate_ready_read_model",
+                "0007_admission_reservations",
             ],
         ]
         async with engines[0].connect() as conn:

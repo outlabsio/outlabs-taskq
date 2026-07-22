@@ -30,10 +30,10 @@ logger = logging.getLogger("taskq.runtime")
 
 
 # ADR-020: this bridge is deliberately a closed compatibility set, not a range.
-# It exposes no read-model capability; it only lets an already-deployed
-# runtime survive the additive metadata revision while a later surface release
-# remains separately gated.
-SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4"})
+# Set membership alone exposes no newly added capability surface; it only lets
+# an already-deployed runtime survive additive metadata revisions while each
+# later transport/facade surface remains separately gated.
+SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5"})
 
 
 def _require_supported_sql_contract(

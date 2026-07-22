@@ -203,8 +203,8 @@ async def test_taskq_lifespan_removes_new_state_and_startup_failure_unwinds() ->
     assert failing.state is TaskqRuntimeState.FAILED
 
 
-@pytest.mark.parametrize("version", ["0.1.2", "0.1.3", "0.1.4"])
-async def test_runtime_bridge_accepts_both_contract_revisions_and_keeps_prebridge_rejection(
+@pytest.mark.parametrize("version", ["0.1.2", "0.1.3", "0.1.4", "0.1.5"])
+async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_rejection(
     version: str,
 ) -> None:
     bridge = _runtime(_Transport(version=version))
@@ -215,8 +215,8 @@ async def test_runtime_bridge_accepts_both_contract_revisions_and_keeps_prebridg
     # This preserved historical set is the deliberate negative proof: a
     # pre-bridge exact-0.1.2 runtime must still fail closed on newer metadata.
     with pytest.raises(TaskqVersionError) as exc_info:
-        _require_supported_sql_contract("0.1.4", supported_versions=frozenset({"0.1.2"}))
-    assert exc_info.value.details == {"contract_version": "0.1.4"}
+        _require_supported_sql_contract("0.1.5", supported_versions=frozenset({"0.1.2"}))
+    assert exc_info.value.details == {"contract_version": "0.1.5"}
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:

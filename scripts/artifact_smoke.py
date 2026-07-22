@@ -137,6 +137,7 @@ def main() -> None:
         "0004_read_models",
         "0005_read_model_conformance",
         "0006_activate_ready_read_model",
+        "0007_admission_reservations",
     ]
     assert len(FUNCTIONS) == 43
 

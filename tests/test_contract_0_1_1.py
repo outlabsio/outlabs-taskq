@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate
+from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate, verify
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -56,7 +56,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same full 0.1.4 ledger and activation posture."""
+    """Both supported paths end at the same full 0.1.5 ledger and activation posture."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -74,6 +74,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             "0004_read_models",
             "0005_read_model_conformance",
             "0006_activate_ready_read_model",
+            "0007_admission_reservations",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -97,7 +98,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             version = await conn.exec_driver_sql(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            assert version.scalar_one() == "0.1.4"
+            assert version.scalar_one() == "0.1.5"
             ledger = await conn.exec_driver_sql(
                 "SELECT id FROM taskq.schema_migrations ORDER BY id"
             )
@@ -108,12 +109,13 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 "0004_read_models",
                 "0005_read_model_conformance",
                 "0006_activate_ready_read_model",
+                "0007_admission_reservations",
             ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname='taskq' AND p.prokind='f'"
             )
-            assert count.scalar_one() == 43
+            assert count.scalar_one() == 46
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
@@ -152,7 +154,7 @@ async def test_ready_view_transitions_from_tq501_to_page_at_0006(taskq_dsn: str)
             await conn.rollback()
 
             applied = await conn.run_sync(
-                lambda sync_conn: _migrate_impl(sync_conn, migrations[5:])
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[5:6])
             )
             assert applied == ["0006_activate_ready_read_model"]
             page = await conn.exec_driver_sql(
@@ -160,6 +162,59 @@ async def test_ready_view_transitions_from_tq501_to_page_at_0006(taskq_dsn: str)
             )
             assert page.first() is not None
             await conn.commit()
+    finally:
+        await engine.dispose()
+        admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+        try:
+            await admin.execute(f'DROP DATABASE "{database}"')
+        finally:
+            await admin.close()
+
+
+async def test_admission_capability_transitions_only_at_0007(taskq_dsn: str) -> None:
+    """The bridge accepts 0.1.5, but migration 0007 alone activates admission."""
+    database = f"taskq_adr023_activation_{uuid4().hex}"
+    admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+    try:
+        await admin.execute(f'CREATE DATABASE "{database}"')
+    finally:
+        await admin.close()
+
+    engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
+    try:
+        migrations = discover_migrations()
+        async with engine.connect() as conn:
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[:6])
+            )
+            assert applied[-1] == "0006_activate_ready_read_model"
+            before = await conn.exec_driver_sql(
+                "SELECT value FROM taskq.meta WHERE key='capabilities'"
+            )
+            assert before.scalar_one() == {"active": ["read_model_list_ready"]}
+            absent = await conn.exec_driver_sql(
+                "SELECT to_regprocedure("
+                "'taskq.reserve_admission(text,text,text,uuid,integer,integer)')"
+            )
+            assert absent.scalar_one() is None
+            await conn.commit()
+
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[6:7])
+            )
+            assert applied == ["0007_admission_reservations"]
+            version = await conn.exec_driver_sql(
+                "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
+            )
+            assert version.scalar_one() == "0.1.5"
+            after = await conn.exec_driver_sql(
+                "SELECT value FROM taskq.meta WHERE key='capabilities'"
+            )
+            assert after.scalar_one() == {
+                "active": ["admission_reservations", "read_model_list_ready"]
+            }
+            report = await verify(conn)
+            assert report.ok
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))

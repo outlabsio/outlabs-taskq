@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.4.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.5.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.1.4"
+CONTRACT_VERSION = "0.1.5"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -39,6 +39,7 @@ ROLE_CONFIGS = {
 
 TABLES = frozenset(
     {
+        "admissions",
         "concurrency_limits",
         "control_state",
         "job_attempts",
@@ -57,12 +58,13 @@ SEQUENCES = frozenset({"job_events_id_seq"})
 
 # relname -> (column count, digest of ordered name/type/nullability/default rows)
 TABLE_SHAPES = {
+    "admissions": (16, "0315e8754989dc0eaf57c71e62b13b9c"),
     "concurrency_limits": (4, "75911ee35d8add1f962fa83dc55fb7b0"),
     "control_state": (5, "d4b439e011e97384b2e2ae638dcc570e"),
     "job_attempts": (10, "c77285741656eeebe691db4f3e40ae29"),
     "job_deps": (3, "9d2a532798d70fa2514644b7a61da3c7"),
     "job_events": (8, "fee387eec268693cd507c443a58e1322"),
-    "jobs": (38, "cb58712f28f993c5ef35a672be3f2da2"),
+    "jobs": (39, "9d63fa059a09b964241ca2fc5b104045"),
     "meta": (3, "6b0aa3a5745ebdd662479daa8c766d1d"),
     "queues": (16, "56a64a19b9cdef25b8e842e5f0c16fa2"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
@@ -75,12 +77,13 @@ TABLE_SHAPES = {
 # 16 does not; exact column nullability is already closed by TABLE_SHAPES, so
 # this axis deliberately covers the portable structural constraint kinds.
 CONSTRAINTS = {
+    "admissions": (11, "8f397fa6d17e508614a2979615086cf2"),
     "concurrency_limits": (3, "66936c03f772ba78965bf60edcc5dd5c"),
     "control_state": (1, "65d3c0be64a45faf70dc5ecfc465bb71"),
     "job_attempts": (3, "1b3551d273ad80b3a1914494ac750057"),
     "job_deps": (3, "fa4b0e4d226160305724e3e9fd330390"),
     "job_events": (2, "190355e5ad2160ab5d9d5adf84016b61"),
-    "jobs": (15, "3d09e31c7533969bb143c22eda670788"),
+    "jobs": (17, "144c55331ea498fa4c3b3c0d2d5c5260"),
     "meta": (1, "b8a6f433ca275e289861f29159c6d4f3"),
     "queues": (9, "b565d95eb81c18bd78660ebe7230dc2a"),
     "schema_migrations": (1, "9a70b629e02d9c9c4c87285047e4c5fa"),
@@ -89,6 +92,11 @@ CONSTRAINTS = {
 }
 
 INDEXES = {
+    "admissions_cancelled_cleanup_idx": "027dfe0b40e8c3fc717ced0dd50cf37f",
+    "admissions_pkey": "56452661b9570cc9b8582b5394288ab2",
+    "admissions_queue_key_uq": "1b6398a305f52362efc9341da1b65c51",
+    "admissions_receipt_cleanup_idx": "bf5e2c97a410692ca5d77b2023d2fc18",
+    "admissions_reservation_cleanup_idx": "3a23e0123c6bad7de55de7114615d33d",
     "concurrency_limits_pkey": "4451cd41ab2a31b52ae1a34d69435e19",
     "control_state_pkey": "43b5b6e33a824e152859f4ef9ccbb046",
     "job_attempts_job_idx": "ba54a88c3bf510cc36006927db2537cc",
@@ -99,6 +107,7 @@ INDEXES = {
     "job_events_pkey": "f7e772aee8a50604aa5d3b102b6cea7d",
     "job_events_time_brin": "e60dbd8f51af7980da0a9a7e76b1ecdd",
     "jobs_affinity_idx": "b11b463a3c128b45b3e9da6aea3f14ee",
+    "jobs_admission_id_uq": "0865c3b722eec545a5f1ebfcae989d0f",
     "jobs_claim_idx": "d7a7f8cdbdf8d939a0aec58bf770b829",
     "jobs_finished_idx": "bad49c3e9743bc3636d9ab5e08192bdf",
     "jobs_idem_uq": "f98d23c969575471f8495ad15cf52e7c",
@@ -123,6 +132,27 @@ VIEW_DEFINITIONS = {
 }
 
 COMPOSITES = {
+    "admission_cancel_result": (
+        ("outcome", "text"),
+        ("job_id", "uuid"),
+        ("receipt", "jsonb"),
+        ("receipt_expires_at", "timestamp with time zone"),
+    ),
+    "admission_finish_result": (
+        ("outcome", "text"),
+        ("job_id", "uuid"),
+        ("receipt", "jsonb"),
+        ("receipt_expires_at", "timestamp with time zone"),
+    ),
+    "admission_reservation": (
+        ("outcome", "text"),
+        ("handle", "uuid"),
+        ("job_id", "uuid"),
+        ("reservation_expires_at", "timestamp with time zone"),
+        ("retry_after_seconds", "integer"),
+        ("receipt", "jsonb"),
+        ("receipt_expires_at", "timestamp with time zone"),
+    ),
     "claim_batch": (("state", "text"), ("jobs", "taskq.claimed_job[]")),
     "claimed_job": (
         ("job_id", "uuid"),
@@ -202,6 +232,7 @@ class FunctionSpec:
 
 _FUNCTION_ROWS = r"""
 taskq.backoff_seconds(text,integer,integer,integer)|p_mode text, p_base integer, p_cap integer, p_failures integer|integer|sql|v|u|
+taskq.cancel_admission(text,text,uuid)|p_queue text, p_idempotency_key text, p_handle uuid|taskq.admission_cancel_result|plpgsql|v|u|taskq_producer
 taskq.cancel_job(uuid,text,text)|p_job_id uuid, p_actor text, p_reason text DEFAULT NULL::text|TABLE(result text, job_status text)|plpgsql|v|u|taskq_operator
 taskq.cancel_running_job(uuid,uuid,text,text)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_reason text|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.claim_janitor_due()||boolean|plpgsql|v|u|
@@ -214,6 +245,7 @@ taskq.ensure_queue(text,jsonb,text)|p_name text, p_profile jsonb DEFAULT '{}'::j
 taskq.expire_job(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.expire_worker_leases(text,text)|p_worker_id text, p_actor text|jsonb|plpgsql|v|u|taskq_operator
 taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_error text, p_retryable boolean DEFAULT true, p_retry_after_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
+taskq.finish_admission(text,text,uuid,jsonb,jsonb)|p_queue text, p_idempotency_key text, p_handle uuid, p_job jsonb, p_receipt jsonb DEFAULT '{}'::jsonb|taskq.admission_finish_result|plpgsql|v|u|taskq_producer
 taskq.finalize_cancel_stragglers(integer)|p_limit integer|integer|plpgsql|v|u|
 taskq.get_authorization_projection(uuid)|p_job_id uuid|TABLE(job_id uuid, queue text, job_type text, status text)|sql|s|u|taskq_observer
 taskq.get_contract_meta()||TABLE(contract_version text, capabilities jsonb)|sql|s|u|taskq_observer
@@ -234,6 +266,7 @@ taskq.redrive_job(uuid,text,boolean)|p_job_id uuid, p_actor text, p_reset_progre
 taskq.refresh_stats_snapshot()||void|plpgsql|v|u|
 taskq.release_job(uuid,uuid,text,text,integer,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_cause text DEFAULT 'released'::text, p_delay_seconds integer DEFAULT 0, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.reprioritize(uuid,smallint,text)|p_job_id uuid, p_priority smallint, p_actor text|text|plpgsql|v|u|taskq_operator
+taskq.reserve_admission(text,text,text,uuid,integer,integer)|p_queue text, p_idempotency_key text, p_intent_hash text, p_handle uuid, p_reservation_ttl_seconds integer DEFAULT 300, p_receipt_ttl_seconds integer DEFAULT 2592000|taskq.admission_reservation|plpgsql|v|u|taskq_producer
 taskq.request_worker_shutdown(text,text,text)|p_worker_id text, p_queue text, p_actor text|integer|plpgsql|v|u|taskq_operator
 taskq.resume_queue(text,text)|p_name text, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.run_now(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_operator
@@ -270,6 +303,7 @@ PUBLIC_FUNCTIONS = frozenset(identity for identity, spec in FUNCTIONS.items() if
 # Protocol v1. Empty sets are meaningful: those functions have no public TQ
 # exception outcome. R3-F04's executable vectors assert this map is complete.
 PUBLIC_ERRORS = {
+    "taskq.cancel_admission(text,text,uuid)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.cancel_job(uuid,text,text)": frozenset({"TQ001"}),
     "taskq.cancel_running_job(uuid,uuid,text,text)": frozenset(),
     "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)": frozenset({"TQ422"}),
@@ -282,6 +316,9 @@ PUBLIC_ERRORS = {
     "taskq.expire_job(uuid,text)": frozenset({"TQ001"}),
     "taskq.expire_worker_leases(text,text)": frozenset(),
     "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)": frozenset({"TQ422"}),
+    "taskq.finish_admission(text,text,uuid,jsonb,jsonb)": frozenset(
+        {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
+    ),
     "taskq.get_authorization_projection(uuid)": frozenset(),
     "taskq.get_contract_meta()": frozenset(),
     "taskq.get_job(uuid,boolean,boolean,boolean,boolean)": frozenset(),
@@ -297,6 +334,9 @@ PUBLIC_ERRORS = {
     "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
     "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
     "taskq.reprioritize(uuid,smallint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
+    "taskq.reserve_admission(text,text,text,uuid,integer,integer)": frozenset(
+        {"TQ001", "TQ409", "TQ422"}
+    ),
     "taskq.request_worker_shutdown(text,text,text)": frozenset(),
     "taskq.resume_queue(text,text)": frozenset({"TQ001"}),
     "taskq.run_now(uuid,text)": frozenset({"TQ001", "TQ409"}),
@@ -327,6 +367,6 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.1.4"',
-    "capabilities": '{"active": ["read_model_list_ready"]}',
+    "contract_version": '"0.1.5"',
+    "capabilities": '{"active": ["admission_reservations", "read_model_list_ready"]}',
 }
