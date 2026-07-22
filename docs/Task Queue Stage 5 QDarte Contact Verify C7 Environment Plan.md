@@ -1,7 +1,7 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** C7-01 disabled production preflight executed; targeted acceptance
-gates C7-02
+**Status:** C7-01 disabled production preflight internally accepted; the
+frozen one-place C7-02 cohort is open as a separately tracked slice
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
 Compatibility and Cutover Specification
@@ -21,8 +21,9 @@ This document remains the frozen design, not the execution ledger. The C7-01
 execution record lives in QDarte API's
 `docs/taskq-contact-c7-01-production-preflight-evidence.md`. That preflight
 created the reviewed disabled production posture but admitted no package job
-and made no provider call. Targeted C7-01 acceptance remains mandatory before
-C7-02.
+and made no provider call. Owner-authorized internal Round 17 accepted that
+boundary. C7-02 must still execute its exact bounded choreography and stop for
+targeted acceptance before C7-03.
 
 C7 keeps the C6 rules intact:
 
