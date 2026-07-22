@@ -1,9 +1,9 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** frozen C7-00 proposal; no production action authorized  
+**Status:** frozen C7-00 proposal; no production action authorized
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
-Compatibility and Cutover Specification  
+Compatibility and Cutover Specification
 **Scope:** one contact-verification lane only
 
 ## 1. Decision and boundary
