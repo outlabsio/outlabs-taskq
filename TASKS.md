@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C6** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; the isolated QDarte immutable admission repin and C6-03 created/existed proof are complete, with targeted acceptance now gating C6-04 |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C6** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; the isolated QDarte immutable admission repin and C6-03 proof are internally accepted, opening only the local C6-04 rollback exercises |
 | Suite | 505/505 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 309/309 DB-free on Python 3.12; 289/289 last Python 3.13 run; million-row plan gate 2/2 on both PostgreSQL majors; current wheel/sdist × core/HTTP/OutLabs × Python 3.12/3.13 artifact matrix 12/12 before the response-schema-only delta; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | Targeted C6 acceptance follows the isolated repin/created-existed proof; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | C6-AUDIT follows the three local C6-04 rollback postures; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -62,7 +62,9 @@
 
 - [x] **S5-QD-C6-03B-REVIEW-REQUEST · Targeted QDarte admission-repin gate assembled** — Round 14 pins the immutable a6 release identity, QDarte API `c0940fb..96fe5f0`, worker `abeaac1..21bd880`, disposable database metadata/raw rows, dedicated-role boundary, reserve-before-plan implementation, admitted replay with a forbidden planner, and direct/effect oracle equality. READY may open only the already-frozen local C6-04 rollback exercises; it cannot authorize a worker/provider run, production migration, direct-queue retirement, non-contact lane, C7, or Stage 6.
 
-- [ ] **S5-QD-C6-03B-REVIEW · Targeted repin/evidence acceptance** — dispatch `docs/design-review-14/REQUEST.md`; the response alone decides whether local C6-04 opens. Preserve the disposable database and both isolated branch tips for source/raw-row inspection; modify no prior Tier-4 record.
+- [x] **S5-QD-C6-03B-REVIEW · Targeted repin/evidence accepted internally** — registered the owner-authorized internal Round-14 response (SHA-256 `24fcc4f53e2f73f88829be8c9a8fcd629eb9b64d7c650c422127f1cfe7fccc6c`) with its non-independent provenance explicit. The review re-downloaded and hashed a6, derived the 0001–0007 artifact and lock pins, executed facade-role negatives, inspected exact SQL 0.1.5 metadata/admission/job rows, source-audited reserve-before-plan and no-fallback behavior, and reran API 62/62 plus worker 73/73 with lint/format/MyPy gates. No blocker or Contract question was found. READY opens only local C6-04.
+
+- [ ] **S5-QD-C6-04 · Local zero-row-copy rollback exercises** — execute the three frozen postures without manual queue DML: legacy before package publish with no package row; package admission stopped after publish/before work with typed cancel/drain and no direct recreation; and preserved post-effect package history resolved through the stable effect oracle with no automatic cross-backend replay. Use raw package/direct/effect oracles, start no provider or broad worker, and stop for C6-AUDIT before C7, production, retirement, non-contact work, or Stage 6.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
 
