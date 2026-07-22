@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C7 cohort** — C7-02's one-place Mini87 cohort is complete in a paused/draining posture and awaits targeted internal acceptance. The legacy-tools observation continues independently |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C7 cohort** — C7-02's one-place Mini87 cohort is internally accepted; C7-03 deployment/zero-insert/backup/rollback evidence is next. The legacy-tools observation continues independently |
 | Suite | taskq 505/505 regular with 1 opt-in skip on local PG18.3 using CI-shaped authenticated Redis, Ruff/format clean; QDarte runtime 1144/1144 + MyPy 192; workers 628/628 + Ruff/format/MyPy clean across 53 source files; API C7 boundary 49/49 + Ruff/format/MyPy clean on the owned surface (broad local baseline remains separately recorded) |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | C7-02 execution must stop for targeted cohort acceptance before C7-03; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | C7-03 must stop for C7-AUDIT before any direct retirement; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -101,7 +101,9 @@
 
 - [x] **S5-QD-C7-02-REVIEW-REQUEST · One-place cohort targeted gate** — Round 18 pins the C7-02 cross-repo source and cohort/follow-up image identities, exact evidence hash, one-place/keyed-admission/raw-attempt/effect/direct-conservation oracles, least-privilege topology, cleanup scope, fail-closed incidents, final posture, and the missing-historical-structured-counter judgment. The response is owner-authorized internal/non-independent because the separate reviewer is unavailable. READY may open only C7-03; no direct retirement, another lane, or Stage 6.
 
-- [ ] **S5-QD-C7-02-REVIEW · One-place cohort targeted acceptance** — run Round 18's twelve-program audit against source, live read-only state, immutable artifacts, and fresh gates. Record the internal/non-independent provenance and decide whether the actual access ledger plus reconciled raw/domain counters and the network-disabled final-image structured-log proof satisfy C7-02. READY opens only C7-03.
+- [x] **S5-QD-C7-02-REVIEW · One-place cohort targeted acceptance** — registered the owner-authorized internal/non-independent Round-18 response byte-for-byte (SHA-256 `818ca59df840dd73cabfdb73866119211e314b569e9a9b93936afe54557beb8b`). The audit regenerated source/artifact identities, one-place planning, created/existed admission, raw three-attempt history, canonical terminal read, byte-identical direct hashes, one stable effect/method/usage unit, exact private topology, final paused/draining posture, 505/1 taskq, 628 workers, 1,144 runtime, and 49 API boundary gates. READY explicitly accepts the one actual access line plus reconciled durable oracles and the network-disabled final-image structured-counter proof; three LOWs bind C7-03 to persist that line, retain the honest `3/2/0` history, and use explicit `--no-deps`. Zero Contract questions. C7-03 alone is open.
+
+- [ ] **S5-QD-C7-03 · Production continuity and rollback evidence** — execute only the frozen two normal deployment cycles, zero-insert direct observation window, recurring API/package/Intake/globals backup plus restore continuity, and rollback rehearsal against the accepted post-effect history. Persist the bounded structured egress record before any gateway removal, retain the exact C7-02 `3 attempts / 2 failures / 0 releases` history, and use explicit single-service `--no-deps` choreography. Stop for C7-AUDIT before direct retirement, another lane, or Stage 6.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
 
