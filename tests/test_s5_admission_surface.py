@@ -305,6 +305,7 @@ async def test_http_outcome_and_safe_error_matrix(
     pg: asyncpg.Connection,
     stateful_time_travel: None,
     operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
     sqlalchemy_dsn: str,
 ) -> None:
     queue = "admission_http_matrix"
@@ -336,6 +337,14 @@ async def test_http_outcome_and_safe_error_matrix(
         cancelled_replay = await client.cancel_admission(queue, "matrix", owner_handle)
         assert cancelled.outcome is AdmissionCancelOutcome.CANCELLED
         assert cancelled_replay.outcome is AdmissionCancelOutcome.ALREADY_CANCELLED
+        with pytest.raises(TaskqConflictError) as cancelled_finish:
+            await client.finish_admission(
+                queue,
+                "matrix",
+                owner_handle,
+                {"job_type": "test.cancelled", "payload": {}},
+            )
+        assert cancelled_finish.value.details == {"reason": "reservation_cancelled"}
 
         current = await client.reserve_admission(queue, "matrix", "d" * 64, handle=contender_handle)
         assert current.outcome is AdmissionReserveOutcome.RESERVED
@@ -388,6 +397,57 @@ async def test_http_outcome_and_safe_error_matrix(
         )
         expired_cancel = await client.cancel_admission(queue, "expired", owner_handle)
         assert expired_cancel.outcome is AdmissionCancelOutcome.EXPIRED
+
+        expired_finish = await client.reserve_admission(
+            queue,
+            "expired-finish",
+            "1" * 64,
+            handle=owner_handle,
+            reservation_ttl_seconds=15,
+        )
+        assert expired_finish.outcome is AdmissionReserveOutcome.RESERVED
+        assert await pg.fetchval(
+            "SELECT taskq_test.rewind_admission($1,$2,interval '1 hour')",
+            queue,
+            "expired-finish",
+        )
+        with pytest.raises(TaskqConflictError) as expired_error:
+            await client.finish_admission(
+                queue,
+                "expired-finish",
+                owner_handle,
+                {"job_type": "test.expired", "payload": {}},
+            )
+        assert expired_error.value.details == {"reason": "reservation_expired"}
+
+        cross_writer = await client.reserve_admission(
+            queue, "cross-writer", "2" * 64, handle=owner_handle
+        )
+        assert cross_writer.outcome is AdmissionReserveOutcome.RESERVED
+        created_by_client = await client.finish_admission(
+            queue,
+            "cross-writer",
+            owner_handle,
+            {"job_type": "test.cross-writer", "payload": {}},
+            {"style": "omitted"},
+        )
+        assert created_by_client.outcome is AdmissionFinishOutcome.CREATED
+        explicit_null_job = {
+            "job_type": "test.cross-writer",
+            "payload": {},
+            "priority": None,
+        }
+        with pytest.raises(asyncpg.PostgresError) as null_style_mismatch:
+            await producer.fetchrow(
+                "SELECT * FROM taskq.finish_admission($1,$2,$3,$4::jsonb,$5::jsonb)",
+                queue,
+                "cross-writer",
+                owner_handle,
+                json.dumps(explicit_null_job),
+                json.dumps({"style": "omitted"}),
+            )
+        assert null_style_mismatch.value.sqlstate == "TQ409"
+        assert json.loads(null_style_mismatch.value.detail) == {"reason": "finish_mismatch"}
     finally:
         await client.aclose()
         await raw_client.aclose()

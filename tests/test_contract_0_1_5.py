@@ -269,6 +269,57 @@ class TestAdmissionContract:
         assert created["outcome"] == "created"
         assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == 1
 
+    async def test_finish_reports_unreacquired_expired_and_cancelled_states(
+        self,
+        pg: asyncpg.Connection,
+        stateful_time_travel: None,
+        operator: asyncpg.Connection,
+        producer: asyncpg.Connection,
+    ) -> None:
+        queue = "admission_finish_state_errors"
+        await _make_queue(operator, queue)
+
+        expired_handle = uuid4()
+        await _reserve(
+            producer,
+            queue,
+            "expired",
+            _INTENT_A,
+            expired_handle,
+            reservation_ttl=15,
+        )
+        assert await pg.fetchval(
+            "SELECT taskq_test.rewind_admission($1,$2,interval '1 hour')",
+            queue,
+            "expired",
+        )
+        with pytest.raises(asyncpg.PostgresError) as expired:
+            await _finish(
+                producer,
+                queue,
+                "expired",
+                expired_handle,
+                {"job_type": "test.expired", "payload": {}},
+                {},
+            )
+        _assert_tq(expired, "TQ409", "reservation_expired")
+
+        cancelled_handle = uuid4()
+        await _reserve(producer, queue, "cancelled", _INTENT_A, cancelled_handle)
+        cancelled = await producer.fetchrow(_CANCEL, queue, "cancelled", cancelled_handle)
+        assert cancelled is not None and cancelled["outcome"] == "cancelled"
+        with pytest.raises(asyncpg.PostgresError) as cancelled_finish:
+            await _finish(
+                producer,
+                queue,
+                "cancelled",
+                cancelled_handle,
+                {"job_type": "test.cancelled", "payload": {}},
+                {},
+            )
+        _assert_tq(cancelled_finish, "TQ409", "reservation_cancelled")
+        assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == 0
+
     async def test_retention_cleanup_is_bounded_and_requires_job_absence(
         self,
         pg: asyncpg.Connection,
@@ -428,3 +479,39 @@ class TestAdmissionRaces:
         assert cancelled["outcome"] == "already_admitted"
         assert cancelled["job_id"] == created["job_id"]
         assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == 1
+
+    async def test_cancel_wins_over_blocked_finish_without_creating_job(
+        self,
+        pg: asyncpg.Connection,
+        role_conn: RoleConnect,
+        operator: asyncpg.Connection,
+    ) -> None:
+        queue = "admission_race_cancel_first"
+        key = "cancel-first"
+        handle = uuid4()
+        await _make_queue(operator, queue)
+        first = await role_conn("taskq_producer")
+        second = await role_conn("taskq_producer")
+        await _reserve(first, queue, key, _INTENT_A, handle)
+
+        transaction = first.transaction()
+        await transaction.start()
+        cancelled = await first.fetchrow(_CANCEL, queue, key, handle)
+        assert cancelled is not None and cancelled["outcome"] == "cancelled"
+        finish = asyncio.create_task(
+            _finish(
+                second,
+                queue,
+                key,
+                handle,
+                {"job_type": "test.cancel-finish", "payload": {}},
+                {"winner": "cancel"},
+            )
+        )
+        await _wait_for_lock(pg, second.get_server_pid(), {"transactionid", "tuple"})
+        await transaction.commit()
+
+        with pytest.raises(asyncpg.PostgresError) as cancelled_finish:
+            await asyncio.wait_for(finish, timeout=_WAIT_TIMEOUT)
+        _assert_tq(cancelled_finish, "TQ409", "reservation_cancelled")
+        assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == 0

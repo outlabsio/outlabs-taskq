@@ -124,6 +124,14 @@ async def test_fake_admission_lifecycle_matches_producer_contract() -> None:
         "admission", "cancel", cancelled_reservation.handle
     )
     assert cancelled_replay.outcome is AdmissionCancelOutcome.ALREADY_CANCELLED
+    with pytest.raises(TaskqConflictError) as cancelled_finish:
+        await fake.finish_admission(
+            "admission",
+            "cancel",
+            cancelled_reservation.handle,
+            {"job_type": "tests.cancelled", "payload": {}},
+        )
+    assert cancelled_finish.value.details == {"reason": "reservation_cancelled"}
 
 
 @pytest.mark.asyncio
