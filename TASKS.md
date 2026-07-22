@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C7 planning** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; C6 is complete and the C7-00 Mini87 environment plan is frozen for targeted review |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C7 preflight** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; C6 is complete and the internally accepted C7-00 Mini87 plan opens only explicitly authorized C7-01 preflight |
 | Suite | 505/505 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 309/309 DB-free on Python 3.12; 289/289 last Python 3.13 run; million-row plan gate 2/2 on both PostgreSQL majors; current wheel/sdist × core/HTTP/OutLabs × Python 3.12/3.13 artifact matrix 12/12 before the response-schema-only delta; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | Targeted C7-00 plan review gates C7-01 preflight; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | C7-01 completion evidence gates the one-place C7-02 cohort; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -80,7 +80,9 @@
 
 - [x] **S5-QD-C7-R16-DELTA-REQUEST · Targeted environment-plan recheck assembled** — pins remediation `5d08f7c` and the immutable Round-16 response hash, with five checks for the valid one-place allowlist, runtime-owned verifier and network-enforced proxy, reachable unpublished Compose topology, readiness-bearing health, corpus consistency, and docs-only scope. The review remains explicitly internal/non-independent. READY may open only C7-01 preflight.
 
-- [ ] **S5-QD-C7-R16-DELTA-RESPONSE · Environment-plan delta acceptance** — execute the exact targeted recheck and leave all production actions behind C7-01's separately authorized sequence.
+- [x] **S5-QD-C7-R16-DELTA-RESPONSE · Environment plan internally accepted** — registered the owner-authorized internal delta response (SHA-256 `50dfbc214985bee7d7d8c8fff7a150f50e0e8069582b599bc561bd1c1246aadb`) with its non-independent provenance explicit. It verifies the valid country-plus-one-place contract shape, runtime-owned proxy verifier, network-isolated worker and dual-homed counter, reachable unpublished Compose service graph, readiness-bearing health, corpus consistency, and docs-only scope. All R16 blockers pass with zero Contract questions. READY opens only C7-01 preflight.
+
+- [ ] **S5-QD-C7-01 · Mini87 production preflight** — only after explicit owner authorization: identify the live deployed source/database identities; construct zero-unclassified-path API/worker/runtime candidates; run complete gates; create and execute the fresh two-database-plus-globals restore drill; measure `M` and normal-production `H` and prove `H + 3 <= M - 20`; implement and test the capped domain session, exact private service origin, readiness, runtime-owned proxy verifier, and network isolation; prove all runtime/role/token negatives; provision/migrate/verify the lasting package database and disabled services; finish healthy in `legacy`, queue paused, worker stopped, and zero package publish/provider action. Stop for targeted acceptance before C7-02.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
 
