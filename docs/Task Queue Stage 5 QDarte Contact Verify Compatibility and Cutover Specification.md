@@ -7,7 +7,7 @@
 > environment, broad worker, cloud target, or non-contact lane.
 >
 > **Authority:** subordinate to the Transport Protocol v1, Function Manifest
-> 0.1.4, ADR-006, ADR-007, ADR-010, ADR-011, ADR-020, ADR-022, the Build Plan,
+> 0.1.5, ADR-006, ADR-007, ADR-010, ADR-011, ADR-020, ADR-022, ADR-023, the Build Plan,
 > the Stage 5 QDarte Contact Verify Consolidation Specification, and its
 > accepted Round-12 delta. The consolidation specification owns the C1–C7
 > destination and safety rules. This document owns only the work order and
@@ -214,6 +214,23 @@ projection; a non-identical active scope remains a typed host refusal until a
 later caller contract specifies its semantics. The old backend-specific
 `/ops/taskq/*` and `/worker/taskq/*` paths remain incumbent-only: they are not
 aliases, bridges, or fallback paths for this adapter.
+
+The package path implements that rule through ADR-023's queue-native admission
+primitive. Before candidate planning it hashes the canonical contact request
+(including a canonicalization-version marker), generates one UUID handle for
+the logical operation, and calls `reserve_admission`. `admitted` maps directly
+to caller `existed` using the stored receipt's bounded `planned_entities`; the
+planner is not invoked. Only `reserved` for that handle may plan and call
+`finish_admission`, storing `{ "planned_entities": N }` as its immutable
+receipt. `pending` becomes a bounded retryable host refusal and never plans,
+finishes, or falls back. Intent mismatch, expiry, cancellation, transport
+ambiguity, and backpressure retain their typed package outcomes and never
+invoke the direct producer.
+
+This adapter is a temporary retirement seam, not a second admission ledger.
+QDarte stores no key→job mapping, payload snapshot, or reservation cache. The
+queue ledger is authoritative and remains useful after the direct queue and
+adapter are retired.
 
 The adapter has exactly one selected producer per request. In effective
 `legacy` it uses the direct producer and maps its result to the canonical

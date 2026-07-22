@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, and ADR-021 as additive protocol document revision **1.0.7** / SQL contract 0.1.4. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, and ADR-023 as additive protocol document revision **1.0.8** / SQL contract 0.1.5. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -52,6 +52,10 @@
     command identity. SQL contract 0.1.4 / migration `0005_read_model_conformance.sql` corrects
     direct-SQL `list_jobs` unknown-queue behavior; it adds no Protocol command, outcome, or
     wire-major change.
+15. **ADR-023 durable two-phase admission:** protocol document revision 1.0.8 and SQL contract
+    0.1.5 add the reserve/finish/cancel command family defined in §2.6. It is a queue-scoped
+    producer capability whose durable receipt survives planning changes and job settlement. It
+    does not change ordinary enqueue identity, active-key reuse, IAM grammar, or wire major.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -269,6 +273,75 @@ is `^"taskq-profile-([1-9][0-9]*)"$`.
 H-13 generates the two commands, models, OpenAPI, clients, and parity vectors from this amendment.
 The SQL client receives the same fixed page/profile projections and per-view outcomes. It never gains
 a wider projection by bypassing HTTP.
+
+### 2.6 Durable two-phase admission (document revision 1.0.8)
+
+The admission family is additive and queue-scoped. All three commands require the existing
+`enqueue` action on the path queue. Authentication and queue authorization occur before body
+decoding or admission lookup.
+
+| Command | HTTP | SQL | Outcomes / status | Retry rule |
+|---|---|---|---|---|
+| reserve | `POST /taskq/v1/queues/{queue}/admissions/reserve` | `taskq.reserve_admission` | `reserved` 200; `pending` 202; `admitted` 200 | replay identical body with the same handle |
+| finish | `POST /taskq/v1/queues/{queue}/admissions/finish` | `taskq.finish_admission` | `created` 201; `existed` 200 | replay identical body with the same handle |
+| cancel | `POST /taskq/v1/queues/{queue}/admissions/cancel` | `taskq.cancel_admission` | `cancelled`, `already_cancelled`, `expired`, `already_admitted` 200 | replay identical body with the same handle |
+
+Reserve's strict body is:
+
+```json
+{
+  "idempotency_key": "required 1..255 chars",
+  "intent_hash": "64 lowercase hexadecimal SHA-256 chars",
+  "handle": "non-nil UUID",
+  "reservation_ttl_seconds": 300,
+  "receipt_ttl_seconds": 2592000
+}
+```
+
+`reservation_ttl_seconds` is 15–3600 and `receipt_ttl_seconds` is
+3600–31536000. Both are stamped and evaluated only from the database clock. An unexpired
+same-intent reservation returns `reserved` only to the same handle; a different handle receives
+`pending`. An admitted same-intent replay returns `admitted` regardless of job terminal state
+while the receipt is retained. A different intent on an unexpired reservation or retained
+admission is `TQ409`, `retryable=false`, with
+details exactly `{ "reason": "idempotency_mismatch" }`.
+
+Reserve data is outcome-discriminated and contains no request echo:
+
+- `reserved`: stored `handle` and `reservation_expires_at`;
+- `pending`: `reservation_expires_at` and database-derived `retry_after_seconds`; and
+- `admitted`: authoritative `job_id`, stored `receipt`, and `receipt_expires_at`.
+
+Finish's strict body contains `idempotency_key`, `handle`, a `job` object, and a `receipt` object.
+The job object accepts exactly `job_type`, `payload`, `priority`, `scheduled_at`,
+`concurrency_key`, `affinity_key`, `max_attempts`, `lease_seconds`, `backoff_mode`,
+`backoff_base`, `backoff_cap`, and `headers`, with the existing enqueue/H-09 validation and
+defaults. It never accepts a job idempotency key, dependency, workflow, step, parent, queue,
+actor, or admission identity. Receipt is a non-sensitive JSON object of at most 2,048 UTF-8
+bytes. Both success outcomes return exactly `job_id`, stored `receipt`, and
+`receipt_expires_at`; `existed` is a durable database replay, never a facade reconstruction. The
+database stores SHA-256 over canonical JSON `{job, receipt}` at first commit; a same-handle finish
+with different canonical content is `TQ409` with details exactly
+`{ "reason": "finish_mismatch" }`.
+
+Cancel's strict body contains only `idempotency_key` and `handle`. `already_admitted` returns the
+same admitted data as finish; every other success returns an empty data object. Admission cancel
+never cancels, releases, or mutates the admitted job.
+
+The command family uses the existing registry codes. Unknown queue/admission is `TQ001`.
+Malformed inputs are `TQ422`. Wrong, stale, expired, or cancelled finish authority and a wrong
+cancel handle are `TQ409`, `retryable=false`, with details containing only one stable reason:
+`reservation_conflict`, `reservation_expired`, `reservation_cancelled`, or `finish_mismatch`.
+Finish may additionally
+return the ordinary enqueue `TQ429` or `TQ500`; rollback creates no job
+and leaves the reservation unchanged. Raw keys, hashes, handles, payloads, receipts, SQL text, and
+constraint names never appear in error details.
+
+The official clients mint a handle once per logical reserve operation, outside every HTTP/SQL
+retry loop. A competing `pending` caller does not plan or finish; it waits using the bounded
+database-derived delay with jitter. SQL contract 0.1.5 advertises capability
+`admission_reservations`. A route-free bridge may support 0.1.5 metadata without exposing these
+commands; a feature runtime mounts them only after startup proves both 0.1.5 and that capability.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

@@ -25,12 +25,20 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility · S4-POST-R3 independently accepted** — `main` is the authoritative deployed line; S4-POST-L1-SPEC freezes the legacy-tools observation rules before any producer removal; the isolated QDarte pilot has completed P0–P5 and its direct contact-verify convergence decision awaits targeted review |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; ADR-023 resolves the QDarte C6 replay gap and S5-AR-01 is the active library slice before local C6 may resume |
 | Suite | 475/475 regular on fresh local PG18.3 with 1 opt-in skip (CI-shaped Redis); 469/469 last independently verified on PG16.14 with 1 opt-in skip; 304/304 DB-free on Python 3.12; 289/289 last run on Python 3.13; PG18 million-row plan gate 2/2; artifact matrix 12/12; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
-| Contracts | Protocol v1 document revision 1.0.7 + Function Manifest 0.1.4 (+ ADR-012..022); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | Targeted L1 eligibility acceptance must close the seven-day/two-deploy ledger and its independent-oracle limits before L2 producer removal |
+| Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
+| Next review | S5-AR-AUDIT must accept the dual-PG admission primitive before QDarte repins; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
+
+- [x] **S5-AR-SPEC · Durable two-phase admission frozen** — ADR-023 accepts a reusable queue-native `(queue, idempotency_key)` reservation ledger rather than a QDarte mapping wrapper. Protocol 1.0.8 and Manifest 0.1.5 freeze client-generated retry-stable handles, SHA-256 intent binding, `reserved | pending | admitted`, atomic finish with immutable bounded receipt, reservation-only cancellation, database-clock expiry/retention, producer-scoped authorization, bridge/rollback-floor ordering, and immutable migration 0007. QDarte is the first integration but owns no durable mapping. No SQL, migration, source, package release, host database, worker, provider, deployment, production, or direct-queue change occurs in this docs-first task.
+
+- [ ] **S5-AR-01 · Admission SQL kernel and bridge proof** — implement immutable `0007_admission_reservations.sql`, closed 0.1.5 bridge membership, exact metadata/grants/catalog verification, fresh/full upgrade paths, bounded cleanup, and the full concurrent SQL race matrix on PostgreSQL 16/18. Stop on any Tier-0 mismatch; no HTTP/QDarte/production action in this task.
+
+- [ ] **S5-AR-02 · Generated admission transports and parity** — add strict typed SQL/HTTP reserve/finish/cancel clients, capability-safe facade mounting, retry-stable orchestration, authorization/hiding, response-loss, and SQL/HTTP parity evidence. No QDarte repin or worker action until this slice is green.
+
+- [ ] **S5-AR-AUDIT · Admission primitive completion gate** — dual-PG race/resource/packaging/plan evidence and targeted independent review. Acceptance opens only an isolated QDarte repin and C6-03 replay proof; it authorizes no production migration or direct retirement.
 
 - [x] **S4-POST-L1-SPEC · Legacy-tools retirement eligibility frozen** — amended the Tier-3 retirement plan to close Round-8 R8-02/03/05 before observation starts: `TASKQ_TOOLS_ALLOWLIST` remains an enrollment gate after `TASKQ_TOOLS_MODE` removal; disabled, not-ready, and registered non-allowlisted tools share the exact fail-closed `503 {"detail":"Queued task processing is unavailable"}` response and never enqueue legacy work; `umami` uses a target access-log counter while the read-only flight lane's host-counter/taskq reconciliation is explicitly non-independent; and the retired 200 response now has an explicit caller-sweep gate. L2 owns the restricted-runtime proof rewrite and compatible settings/documentation update. No host source, taskq SQL/wire/IAM/capability, deployment, database, or producer/consumer behavior changed.
 
@@ -231,7 +239,7 @@ caller contract. C6-03 must migrate or retire discriminator callers, prove the
 canonical response in both modes, and leave `/ops/taskq/*` and
 `/worker/taskq/*` incumbent-only.
 
-### S5-QD-C6-CQ-03 — A package keyed replay cannot depend on a fresh volatile direct plan *(open)*
+### S5-QD-C6-CQ-03 — A package keyed replay cannot depend on a fresh volatile direct plan *(resolved: ADR-023 queue-native admission)*
 
 **Blocking evidence:** the local C6-03 exercise at QDarte API `c0940fb`
 started only a loopback package facade and a package-mode caller API; no worker
@@ -266,6 +274,18 @@ in-memory cache nor a read-only lookup can provide the cross-process,
 settlement-race guarantee. Do not change the canonical response,
 re-plan-on-replay behavior, use direct queue lookup, add a fallback, start a
 worker, or open C6-04 until one choice is made docs-first.
+
+**Resolution:** adopted the queue-native option as a general library feature,
+not a QDarte ledger or permanent wrapper. ADR-023, Protocol document revision
+1.0.8, Manifest/SQL contract 0.1.5, and the Durable Admission Reservation
+Specification freeze a durable `(queue, idempotency_key)` authority with a
+pre-plan SHA-256 intent binding, retry-stable UUID handle, single planning
+owner, atomic job+receipt finish, typed pending/expiry/cancellation, bounded
+retention/cleanup, and bridge-first migration order. QDarte must call reserve
+before planning, return an admitted receipt without replanning, and keep no
+host mapping/cache or direct fallback. C6-04 remains closed until S5-AR-01/02
+and S5-AR-AUDIT complete and the isolated C6-03 created/existed proof is rerun
+against the accepted package release.
 
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 

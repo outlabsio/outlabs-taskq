@@ -1,6 +1,6 @@
 # taskq — 0.1.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.4 — 2026-07-21. Closes R2-08 and incorporates ADR-012/013/019/021: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 + 0006 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.4 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.1.5 — 2026-07-22. Closes R2-08 and incorporates ADR-012/013/019/021/023: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 or the Durable Admission Reservation Specification as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 + 0006 + 0007 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.5 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -43,6 +43,17 @@ CREATE TYPE taskq.queue_profile AS (
 );
 CREATE TYPE taskq.queue_profile_update AS (
     result text, profile taskq.queue_profile, current_version bigint
+);
+CREATE TYPE taskq.admission_reservation AS (
+    outcome text, handle uuid, job_id uuid,
+    reservation_expires_at timestamptz, retry_after_seconds integer,
+    receipt jsonb, receipt_expires_at timestamptz
+);
+CREATE TYPE taskq.admission_finish_result AS (
+    outcome text, job_id uuid, receipt jsonb, receipt_expires_at timestamptz
+);
+CREATE TYPE taskq.admission_cancel_result AS (
+    outcome text, job_id uuid, receipt jsonb, receipt_expires_at timestamptz
 );
 -- taskq.claimed_job and taskq.settle_result: as spec §4, with settle_result.result
 -- gaining the 'settle_conflict' value (H-03).
@@ -208,6 +219,9 @@ END $$;
 |---|---|---|---|
 | `taskq.enqueue(...)` (no `p_internal`) | spec §5.2 (v1.6) | TQ001, TQ422, TQ429, TQ500 | T2-ENQ, T3-DEDUP |
 | `taskq.enqueue_many(p_queue, p_jobs jsonb)` | below | TQ001, TQ422, TQ429, TQ500 | T2-BULK, T3-BULK, B2 |
+| `taskq.reserve_admission(p_queue, p_idempotency_key, p_intent_hash, p_handle, p_reservation_ttl_seconds, p_receipt_ttl_seconds)` | §14 / Durable Admission Specification §4.1 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
+| `taskq.finish_admission(p_queue, p_idempotency_key, p_handle, p_job, p_receipt)` | §14 / Durable Admission Specification §4.2 | TQ001, TQ409, TQ422, TQ429, TQ500 | T2-ADM, T3-ADM-RACE |
+| `taskq.cancel_admission(p_queue, p_idempotency_key, p_handle)` | §14 / Durable Admission Specification §4.3 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
 
 ```sql
 -- One transaction, one queue, ≤1000 specs, no deps, one depth probe, one NOTIFY,
@@ -610,7 +624,7 @@ END $$;
 
 ## 7. Explicitly absent from the 0.1 migration
 
-`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.4 contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.5's read-model surface still contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. ADR-023's admission functions are the separate producer surface defined in §14. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
 
 ## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
 
@@ -726,5 +740,68 @@ catalog, composites, grants, indexes, or Protocol surface.
    PostgreSQL 16 and 18 prove that `ready` returns `TQ501` at 0005 and its bounded 200 page after
    0006.
 4. **Deactivation.** A future deactivation requires its own immutable metadata migration
-   (a 0007-class successor); operations must never edit `taskq.meta` manually to reverse this
+   (a later metadata successor); operations must never edit `taskq.meta` manually to reverse this
    activation.
+
+## 14. Contract patch 0.1.5 — ADR-023 (2026-07-22)
+
+Immutable migration `0007_admission_reservations.sql` is the sole implementation vehicle for the
+durable two-phase admission primitive.
+
+1. **Private ledger and job link.** It creates private table `taskq.admissions`, owned by
+   `taskq_owner` with no application-role table grants. `(queue, idempotency_key)` is unique;
+   key length is 1–255; `intent_hash` is exactly 64 lowercase hexadecimal SHA-256 characters;
+   `state` is `reserved | admitted | cancelled`; handle, database-clock expiry, immutable receipt
+   policy/data, database-computed canonical finish SHA-256, admitted job id, and lifecycle
+   timestamps are stored. It appends nullable unique
+   `taskq.jobs.admission_id` referencing the ledger. Ordinary enqueue leaves this column null and
+   retains its existing active-only `jobs_idem_uq` semantics.
+2. **Exact SQL identities and grants.** The three new identities are:
+
+   ```text
+   taskq.reserve_admission(text,text,text,uuid,integer,integer)
+     RETURNS taskq.admission_reservation
+   taskq.finish_admission(text,text,uuid,jsonb,jsonb)
+     RETURNS taskq.admission_finish_result
+   taskq.cancel_admission(text,text,uuid)
+     RETURNS taskq.admission_cancel_result
+   ```
+
+   Their argument names/defaults are respectively `(p_queue, p_idempotency_key, p_intent_hash,
+   p_handle, p_reservation_ttl_seconds DEFAULT 300, p_receipt_ttl_seconds DEFAULT 2592000)`,
+   `(p_queue, p_idempotency_key, p_handle, p_job, p_receipt DEFAULT '{}'::jsonb)`, and
+   `(p_queue, p_idempotency_key, p_handle)`. All are volatile `plpgsql SECURITY DEFINER`, owner
+   `taskq_owner`, pinned path, PUBLIC-revoked, and EXEC only to `taskq_producer`.
+3. **Reserve authority.** Reserve validates queue before state, locks the unique key, and follows
+   Protocol §2.6 exactly. Same-handle replay never extends its stamped expiry. A competing handle
+   never receives the current handle, job command, or receipt. Expired/cancelled rows may be
+   reacquired. An admitted same-intent row returns its durable result until cleanup eligibility;
+   a different intent on an unexpired reservation or retained admission is `TQ409
+   idempotency_mismatch`; expired/cancelled rows may begin a new intent.
+4. **Atomic finish.** Finish locks and validates the current unexpired handle, strictly validates
+   the fixed 0.1.5 job JSON and 2KB receipt, invokes existing enqueue validation/backpressure with
+   no ordinary idempotency key, links the one created job, and stores the receipt plus
+   database-computed SHA-256 of canonical `{job, receipt}` JSON atomically. Same-handle,
+   same-content post-commit replay returns `existed`; changed content is `TQ409 finish_mismatch`.
+   A rollback, validation/backpressure error,
+   cancellation, stale handle, or expiry exposes no partial job/admission state.
+5. **Cancellation and non-confusion.** Cancel affects only an unadmitted current reservation.
+   Its outcomes are `cancelled | already_cancelled | expired | already_admitted`; it never invokes
+   job cancellation/release or changes worker budgets. A wrong handle is `TQ409
+   reservation_conflict`.
+6. **Retention and bounded cleanup.** Receipt TTL is 3,600–31,536,000 seconds. An admitted row is
+   cleanup-eligible only after its database-stamped receipt expiry and after its hot job row is
+   absent. The existing `taskq.janitor()` performs an index-backed bounded pass; expired/cancelled
+   unadmitted rows receive a diagnostic grace period. No manual DML is a supported cleanup or
+   deactivation mechanism.
+7. **Metadata and compatibility.** Migration 0007 requires contract metadata exactly `0.1.4`,
+   updates it to `0.1.5`, and replaces capability metadata by exact equality with
+   `{"active":["admission_reservations","read_model_list_ready"]}`. The route-free bridge runtime
+   declares `{0.1.2, 0.1.3, 0.1.4, 0.1.5}` while preserving the historical pre-bridge rejection.
+   Applying 0007 raises the database rollback floor to that bridge; production application is a
+   separate host decision.
+8. **Evidence.** `verify()`, independent catalog parity, fresh install, and full 0001→0007 upgrade
+   assert the table/column/index/composite/function/grant/metadata surface on PostgreSQL 16 and 18.
+   T2/T3/T6 cover every outcome plus reserve/finish/cancel races, response loss, expiry takeover,
+   backpressure rollback, retention, authorization order, strict wire models, SQL/HTTP parity,
+   and bounded cleanup.

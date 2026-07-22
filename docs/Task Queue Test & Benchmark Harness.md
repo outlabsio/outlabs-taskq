@@ -26,13 +26,13 @@ Floors inherited from the spec, restated as hard harness assertions: **0 duplica
 | Layer | Suite | Needs Postgres | What it proves |
 |---|---|---|---|
 | Unit | T1 | no | pydantic contracts, retry compilation, key derivation, worker-loop logic against the fake client |
-| SQL contract | T2 | yes | every `taskq.*` function's documented behavior, one test per contract row (§3.2 transitions, §3.3 budget table) |
-| Race / concurrency | T3 | yes | the §16.3.1 gate: dedup convergence, double-claim impossibility, fence `lost`, cap no-overshoot, diamond no-deadlock |
+| SQL contract | T2 | yes | every `taskq.*` function's documented behavior, one test per contract row (§3.2 transitions, §3.3 budget table), including ADR-023 admission outcomes |
+| Race / concurrency | T3 | yes | the §16.3.1 gate: dedup convergence, admission owner/finish/cancel/expiry races, double-claim impossibility, fence `lost`, cap no-overshoot, diamond no-deadlock |
 | Property (stateful) | T4 | yes | §16.3.2 budget semantics + state-machine invariants under random interleaving |
 | Crash / chaos | T5 | yes + subprocesses | §16.3.3: kill -9 mid-handler, lost settle responses, followup exactly-once, tick savepoint isolation |
-| Facade + auth | T6 | yes | mounted-subapp envelope ownership plus the canonical path-scoped authorization vectors in Authorization doc §8, HTTP↔settle-result mapping, lifespan/embedded runtime (feature 14 §5) |
+| Facade + auth | T6 | yes | mounted-subapp envelope ownership plus the canonical path-scoped authorization vectors in Authorization doc §8, admission SQL/HTTP parity and safe receipts, HTTP↔settle-result mapping, lifespan/embedded runtime (feature 14 §5) |
 | Soak | T7 | yes, long-lived | §16.3.4 24h bloat profiles; nightly 1h mini-soak; release-gate full run |
-| Migration / compatibility | T8 | yes | ADR-004: clean install at N; double-invocation/lock contention; N→N+1 upgrade with queued/running/failed/archived jobs present; old client vs new schema inside the compatibility window; new client vs old schema fails fast with a stable error; interrupted migration resumes or reports a deterministic operator action; `verify` detects corrupted signatures/ownership/grants/checksums/missing indexes; mid-flight worker survives a pre-migration (brief §8.2 upgrade test) |
+| Migration / compatibility | T8 | yes | ADR-004: clean install at N; double-invocation/lock contention; N→N+1 upgrade with queued/running/failed/archived jobs present; ADR-023's 0001→0007 chain and bridge floor; old client vs new schema inside the compatibility window; new client vs old schema fails fast with a stable error; interrupted migration resumes or reports a deterministic operator action; `verify` detects corrupted signatures/ownership/grants/checksums/missing indexes; mid-flight worker survives a pre-migration (brief §8.2 upgrade test) |
 
 Consumer-facing helpers (feature 10: fake client, `work`, `require_enqueued`, inline/drain modes) are **built on T-layer plumbing and tested by it** — the package dogfoods its own testing story.
 

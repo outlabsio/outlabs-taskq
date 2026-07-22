@@ -53,6 +53,9 @@ The generated Taskq sub-application declares, per active route: `(action, queue_
 | `POST /taskq/v1/queues/{queue}/claims` | `run` | path |
 | `POST /taskq/v1/queues/{queue}/jobs` | `enqueue` | path |
 | `POST /taskq/v1/queues/{queue}/jobs/batch` | `enqueue` | path — one queue and one authorization check per atomic batch |
+| `POST /taskq/v1/queues/{queue}/admissions/reserve` | `enqueue` | path — authorize before key/intent lookup |
+| `POST /taskq/v1/queues/{queue}/admissions/finish` | `enqueue` | path — body handle/key never choose authority |
+| `POST /taskq/v1/queues/{queue}/admissions/cancel` | `enqueue` | path — cancels only an unadmitted reservation |
 | `POST /taskq/v1/jobs/{id}/heartbeat·complete·fail·release·snooze·cancel-running` | `run` | job lookup |
 | `POST /taskq/v1/workers/heartbeat` | `run` | every distinct declared queue, all-or-nothing preflight |
 | `POST /taskq/v1/jobs/{id}/cancel·redrive·expire` | `control` | job lookup |
