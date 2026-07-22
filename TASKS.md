@@ -192,7 +192,7 @@ remains a fixed refusal, while no route/config/database record can forge or
 preserve the transition. C6-03 may implement exactly this local lifecycle
 controller and no alternative durable/fallback path.
 
-### S5-QD-C6-CQ-02 — The existing cutover response and idempotency semantics are backend-specific *(open)*
+### S5-QD-C6-CQ-02 — The existing cutover response and idempotency semantics are backend-specific *(resolved: canonical admission)*
 
 **Blocking evidence:** `POST /ops/cutover/jobs/contact-verify-scope` currently
 returns `ContactVerifyCutoverEnqueueResponse(route, legacy_job | taskq_job)`.
@@ -216,6 +216,18 @@ backend-specific `/ops/taskq/*` and `/worker/taskq/*` paths remain incumbent
 only and are not aliases or fallbacks. Alternative: approve a versioned public
 API response. Do not implement C6-03's producer until the public shape and
 key rule are chosen docs-first.
+
+**Resolution:** adopted the recommended canonical admission. The existing
+authorized cutover URL retains its request grammar but returns only opaque
+`job_id`, `created | existed`, the canonical supplied-or-derived idempotency
+key, and bounded planned entity count. Both modes derive the supplied key or
+exactly `contact_verify_scope:<scope_kind>:<scope_key>` before admission;
+there is no route discriminator, queue/type projection, backend impersonation,
+or fallback after package ambiguity. Legacy active-scope coalescing that does
+not share that canonical key is a typed host refusal until a later explicit
+caller contract. C6-03 must migrate or retire discriminator callers, prove the
+canonical response in both modes, and leave `/ops/taskq/*` and
+`/worker/taskq/*` incumbent-only.
 
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 

@@ -184,9 +184,45 @@ cross-backend fallback.
 ### C6-03 — caller-compatible package adapter
 
 Once C6-00/01/02 vectors are green, implement the smallest host adapter behind
-the existing caller boundary. It must preserve the compatibility ledger’s
-authorized request/response contract and idempotency behavior while recording
-only bounded diagnostics. Its package credentials are capability-sized:
+the existing caller boundary. The retained
+`POST /ops/cutover/jobs/contact-verify-scope` URL and request grammar have one
+deliberately backend-neutral package-era admission response:
+
+```json
+{
+  "job_id": "<opaque durable admission id>",
+  "disposition": "created | existed",
+  "idempotency_key": "contact_verify_scope:<scope_kind>:<scope_key>",
+  "planned_entities": 1
+}
+```
+
+`job_id` is an opaque identifier for the selected authoritative backend; it
+does not assert a shared legacy/package ledger. `disposition` is the only
+deduplication outcome exposed. The response contains no route discriminator,
+queue, job type, legacy job projection, package fence, or backend-specific
+field. Any caller that relies on the former discriminator must migrate or
+retire before package admission; C6-03 proves that caller sweep explicitly.
+
+Both `legacy` and `package` derive the same canonical key before planning or
+admission: use the supplied non-empty `idempotency_key`, otherwise exactly
+`contact_verify_scope:<scope_kind>:<scope_key>`. An admission with that key
+returns `created` only for its first durable backend admission and `existed`
+for an admitted replay with the same canonical key. Incumbent active-scope
+coalescing is not silently represented as a different key or a backend
+projection; a non-identical active scope remains a typed host refusal until a
+later caller contract specifies its semantics. The old backend-specific
+`/ops/taskq/*` and `/worker/taskq/*` paths remain incumbent-only: they are not
+aliases, bridges, or fallback paths for this adapter.
+
+The adapter has exactly one selected producer per request. In effective
+`legacy` it uses the direct producer and maps its result to the canonical
+admission response. In effective `package` it first demands the same-process
+C6-02 interlock re-observation, then uses the package HTTP producer once. A
+timeout, transport failure, or typed package refusal returns the fixed,
+sanitized host error; it never invokes the direct producer or retries through
+another backend. It records only bounded diagnostics. Its package credentials
+are capability-sized:
 
 - the facade runtime has producer/runner/observer/housekeeper memberships;
 - the closed worker has a short-lived queue-scoped `run` credential and no
