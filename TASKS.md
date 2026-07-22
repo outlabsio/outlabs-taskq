@@ -192,6 +192,31 @@ remains a fixed refusal, while no route/config/database record can forge or
 preserve the transition. C6-03 may implement exactly this local lifecycle
 controller and no alternative durable/fallback path.
 
+### S5-QD-C6-CQ-02 — The existing cutover response and idempotency semantics are backend-specific *(open)*
+
+**Blocking evidence:** `POST /ops/cutover/jobs/contact-verify-scope` currently
+returns `ContactVerifyCutoverEnqueueResponse(route, legacy_job | taskq_job)`.
+The legacy producer returns an incumbent `WorkerJobDetail`, checks an explicit
+idempotency key only when supplied, and also has an active-scope coalescing
+path. The incumbent direct taskq producer instead derives
+`contact_verify_scope:<scope_kind>:<scope_key>` when the caller omits a key and
+returns a typed `created` disposition, queue/type, key, and planned count. The
+package producer has neither an honest legacy-job projection nor an authority
+to masquerade as the host-owned direct taskq catalog. Retaining one of those
+shapes silently would either expose a fake backend, alter deduplication, or
+break callers that branch on the discriminator.
+
+**Recommended adjudication:** make the existing authorized cutover URL's
+package-era response deliberately backend-neutral: a bounded canonical
+admission result (`job_id`, `created | existed`, canonical idempotency key, and
+planned entity count), with no route/queue/job-type projection. Freeze one
+canonical key rule for both modes before package admission; migrate or retire
+any discriminator-dependent caller as a C6-03 acceptance row. The old
+backend-specific `/ops/taskq/*` and `/worker/taskq/*` paths remain incumbent
+only and are not aliases or fallbacks. Alternative: approve a versioned public
+API response. Do not implement C6-03's producer until the public shape and
+key rule are chosen docs-first.
+
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
 **Blocking evidence:** CV-02's server-owned bridge correctly requires the
