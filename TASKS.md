@@ -248,17 +248,24 @@ quota, or ordering change between calls, the package adapter cannot reach its
 authoritative keyed `existed` outcome. A cache, direct fallback, or a new
 untracked host mapping would only hide the broken replay contract.
 
-**Required adjudication:** decide the durable package-side lookup/admission
-primitive before further C6 code. The likely narrow path is a contract-first
-observer-safe, queue-scoped lookup by canonical idempotency key which returns
-only the opaque job identity and terminal admission disposition, so the host
-can return `existed` without re-planning; it requires the normal
-Protocol/Manifest/SQL migration sequence and a new bridge release if the
-package database floor moves. Alternative: a separately specified durable host
-admission ledger with exact ownership, retention, and retirement rules. Do
-not change the canonical response, re-plan-on-replay behavior, use direct
-queue lookup, add a fallback, start a worker, or open C6-04 until this choice
-is made docs-first.
+**Required adjudication:** decide a *durable atomic admission* primitive before
+further C6 code. A lookup alone is not enough: `taskq.enqueue` currently
+deduplicates only an active row, so a matching job can settle between lookup
+and later publish. The contract-first queue-native option is a two-stage,
+key-scoped reservation/admission protocol: reserve returns an existing opaque
+job ID or a short-lived opaque admission handle; finishing that handle creates
+exactly one package job from the computed payload; replay returns the same
+existing job/handle without re-planning; expiry/cancellation and response-loss
+semantics are explicit. It requires the normal Protocol/Manifest/SQL migration
+sequence and a new bridge release if the package database floor moves.
+
+The alternative is a separately specified durable host admission ledger that
+owns the canonical request/key, payload snapshot, package job identity,
+response-loss replay, retention, and eventual retirement. Neither an
+in-memory cache nor a read-only lookup can provide the cross-process,
+settlement-race guarantee. Do not change the canonical response,
+re-plan-on-replay behavior, use direct queue lookup, add a fallback, start a
+worker, or open C6-04 until one choice is made docs-first.
 
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
