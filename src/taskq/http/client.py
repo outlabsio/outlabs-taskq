@@ -26,6 +26,7 @@ from taskq.protocol import (
     HTTP_COMMAND_SPECS,
     AdmissionCancelRequest,
     AdmissionCancelResult,
+    AdmissionCancelWireData,
     AdmissionFinishRequest,
     AdmissionFinishResult,
     AdmissionJobCommand,
@@ -193,7 +194,7 @@ def _decode_domain(spec: HttpCommandSpec, outcome: str, data: dict[str, Any]) ->
         wire = AdmissionResultWireData.model_validate(data)
         return AdmissionFinishResult(outcome=outcome, **wire.model_dump())
     if command is CommandName.CANCEL_ADMISSION:
-        wire = AdmissionReserveWireData.model_validate(data)
+        wire = AdmissionCancelWireData.model_validate(data)
         return AdmissionCancelResult(outcome=outcome, **wire.model_dump())
     if command is CommandName.ENSURE_QUEUE:
         wire = EnsureQueueWireData.model_validate(data)

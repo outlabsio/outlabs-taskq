@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from taskq.protocol import (
     HTTP_COMMAND_SPECS,
+    AdmissionCancelWireData,
     AttemptRequest,
     ClaimedJob,
     ClaimedJobWire,
@@ -312,6 +313,16 @@ def test_capability_protocol_method_sets_are_exact() -> None:
     }
     assert _method_names(HousekeeperTransport) == {"tick", "janitor", "aclose"}
     assert "redrive_failed" in _method_names(OperatorTransport)
+
+
+def test_cancel_admission_wire_projection_is_exact() -> None:
+    spec = HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_ADMISSION]
+    assert spec.data_model is AdmissionCancelWireData
+    assert set(AdmissionCancelWireData.model_json_schema()["properties"]) == {
+        "job_id",
+        "receipt",
+        "receipt_expires_at",
+    }
 
 
 async def test_non_owning_capability_view_close_is_a_noop() -> None:

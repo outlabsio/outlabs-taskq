@@ -421,6 +421,16 @@ class AdmissionResultWireData(BaseModel):
     receipt_expires_at: datetime
 
 
+class AdmissionCancelWireData(BaseModel):
+    """Cancel returns admitted data only when finish already won."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID | None = None
+    receipt: dict[str, Any] | None = None
+    receipt_expires_at: datetime | None = None
+
+
 class _AdmissionReservationBase(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -1451,7 +1461,7 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             _SAFE,
             CommandName.CANCEL_ADMISSION,
             request_model=AdmissionCancelRequest,
-            data_model=AdmissionReserveWireData,
+            data_model=AdmissionCancelWireData,
         ),
         HttpCommandName.CLAIM: _http(
             "POST",
@@ -1730,6 +1740,7 @@ __all__ = [
     "AdmissionCancelOutcome",
     "AdmissionCancelRequest",
     "AdmissionCancelResult",
+    "AdmissionCancelWireData",
     "AdmissionFinishOutcome",
     "AdmissionFinishRequest",
     "AdmissionFinishResult",

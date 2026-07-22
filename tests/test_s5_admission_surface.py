@@ -520,6 +520,14 @@ async def test_admission_routes_are_mount_gated_and_authorize_before_body_decode
                 "requestBody"
             ]["content"]["application/json"]["schema"]
             assert request_schema["properties"]["handle"]["writeOnly"] is True
+        cancel_response = openapi["paths"]["/v1/queues/{queue}/admissions/cancel"]["post"][
+            "responses"
+        ]["200"]["content"]["application/json"]["schema"]
+        assert set(cancel_response["properties"]["data"]["properties"]) == {
+            "job_id",
+            "receipt",
+            "receipt_expires_at",
+        }
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=enabled), base_url="http://test"
         ) as client:
