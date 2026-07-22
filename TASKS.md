@@ -25,10 +25,10 @@
 
 | | |
 |---|---|
-| Stage | **Post-Stage-4 retirement eligibility + Stage-5 durable admission** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; R13-01/02/04 and the Round-12 provenance condition are closed locally, with publication/green CI and targeted delta acceptance now the only gates before local QDarte C6 may resume |
+| Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte C6** — `main` is the authoritative deployed host line; the legacy-tools observation continues independently; the durable admission primitive is independently accepted and only the isolated QDarte immutable repin plus C6-03 created/existed proof is now open |
 | Suite | 505/505 regular on fresh local PG18.3 and disposable exact PG16.14 with 1 opt-in skip each (CI-shaped Redis); 309/309 DB-free on Python 3.12; 289/289 last Python 3.13 run; million-row plan gate 2/2 on both PostgreSQL majors; current wheel/sdist × core/HTTP/OutLabs × Python 3.12/3.13 artifact matrix 12/12 before the response-schema-only delta; host 72/72 regular with 5 pre-existing opt-in skips; MyPy 64 files |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | S5-AR-AUDIT must accept the dual-PG admission primitive before QDarte repins; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | Targeted C6 acceptance follows the isolated repin/created-existed proof; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -54,7 +54,11 @@
 
 - [ ] **S5-AR-R13-FOLLOWUPS · Nonblocking admission hardening** — own R13-05/06/07(c,d): add live unmounted-route, facade-backpressure, recycle, janitor-class/bound, and async mint-once vectors; extend safe-detail defense-in-depth for handle/receipt/intent hash; and label fake hashes as non-comparable to SQL hashes while keeping admission-specific replay prose authoritative. These do not open QDarte or production scope and must not be represented as Round-13 preconditions.
 
-- [ ] **S5-AR-AUDIT · Admission primitive completion gate** — dual-PG race/resource/packaging/plan evidence and targeted independent review. Acceptance opens only an isolated QDarte repin and C6-03 replay proof; it authorizes no production migration or direct retirement.
+- [x] **S5-AR-R13-DELTA-RESPONSE · Durable admission independently accepted** — registered the immutable response byte-for-byte (SHA-256 `6fac5706b624fe3fb92f10c2807e71d7aff6684371c3f0cc03cadd42f7ac1a66`). The reviewer independently re-ran 505/1 on PG18.3 and exact PG16.14, 309 DB-free, Ruff/format, full chains, hashes, race waits, cross-writer identity, exact cancel projection, published CI `29920365139`, and Round-12 provenance; all five checks pass with zero Contract questions. READY opens only an isolated immutable QDarte repin and C6-03 created/existed proof in the disposable local stack.
+
+- [x] **S5-AR-AUDIT · Admission primitive completion gate** — Round-13 targeted acceptance closes the dual-PG race/resource/packaging/plan gate at Protocol 1.0.8 / SQL 0.1.5 / migrations 0001–0007. `admission_reservations` and `read_model_list_ready` are the exact active capabilities. No production migration, host deployment, existing-queue mutation, retirement, provider call, side-effecting lane, worker expansion, UI work, or Stage 6 is authorized.
+
+- [ ] **S5-QD-C6-03B · Immutable admission repin and isolated created/existed proof** — publish the accepted admission-capable package release, exact-hash repin only the isolated QDarte API/worker branches, migrate/verify only disposable `qdarte_contact_verify_dev`, and prove reserve→plan→finish returns `created` then `existed` for one stable job/receipt while the direct-ledger and provider/effect oracles remain unchanged. Stop before C6-04 or any production/existing-queue action.
 
 - [x] **S4-POST-L1-SPEC · Legacy-tools retirement eligibility frozen** — amended the Tier-3 retirement plan to close Round-8 R8-02/03/05 before observation starts: `TASKQ_TOOLS_ALLOWLIST` remains an enrollment gate after `TASKQ_TOOLS_MODE` removal; disabled, not-ready, and registered non-allowlisted tools share the exact fail-closed `503 {"detail":"Queued task processing is unavailable"}` response and never enqueue legacy work; `umami` uses a target access-log counter while the read-only flight lane's host-counter/taskq reconciliation is explicitly non-independent; and the retired 200 response now has an explicit caller-sweep gate. L2 owns the restricted-runtime proof rewrite and compatible settings/documentation update. No host source, taskq SQL/wire/IAM/capability, deployment, database, or producer/consumer behavior changed.
 
