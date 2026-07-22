@@ -1,8 +1,9 @@
 # Task Queue Stage 5 — QDarte contact-verify direct retirement specification
 
-> **Status:** proposal frozen by S5-QD-C8-SPEC; targeted review required
-> before any caller, source, configuration, service, database, IAM, worker, or
-> production change.
+> **Status:** proposal frozen by S5-QD-C8-SPEC and amended docs-first for
+> Round-20 findings R20-01/02/03; targeted delta review required before any
+> caller, source, configuration, service, database, IAM, worker, or production
+> change.
 >
 > **Authority:** Tier 3, subordinate to Transport Protocol v1 revision 1.0.8,
 > Function Manifest / SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, the
@@ -110,6 +111,16 @@ Before C8-R1 changes a caller or production setting, record:
 7. immutable rollback images/configuration for the current C7 API, admin,
    ordinary worker, package facade, package worker, and gateway.
 
+The docs-only Round-20 remediation measured only bounded production metadata
+from the six retained direct jobs. Their planned entity counts are exactly
+`[1, 25, 86, 100, 176, 293]`: minimum 1, maximum 293, total 681, average
+113.50. Five are completed and one cancelled. No payload value, place, phone,
+credential, or provider result was read into evidence. The current admin asks
+for `limit: 500`; that is larger than both the proven package cohort (1) and
+the observed direct maximum (293). C8 therefore targets a hard supported
+maximum of **300 planned entities**, but it may not claim that envelope until
+the staged gates in §5.5 pass.
+
 R19-01 is closed only by item 1. A manual invocation of the wrapper is not the
 next scheduled-run evidence. A failed scheduled run blocks implementation even
 if an on-demand retry succeeds, until the scheduler defect is explained and a
@@ -127,9 +138,12 @@ and its existing backend-neutral response:
   "job_id": "<opaque package job id>",
   "disposition": "created | existed",
   "idempotency_key": "contact_verify_scope:<scope_kind>:<scope_key>",
-  "planned_entities": 1
+  "planned_entities": 7
 }
 ```
+
+`planned_entities` is a positive integer no greater than the currently
+accepted stage cap; `7` is illustrative, not a fixed cohort size.
 
 The admin client must not decode that response as `WorkerJobDetail`, infer a
 legacy payload, call the old direct cancel route, or use a route discriminator.
@@ -162,6 +176,14 @@ not granted `taskq_operator`, and the admin removes its generic direct cancel
 button for package contact jobs. Adding runtime cancellation would require a
 separate authority design.
 
+This is the adopted C8 product posture: exact-ID taskq status plus a
+client-side persisted last-job hint replaces automatic scope rediscovery, and
+cancellation remains an explicit one-off operator action. The admin must label
+that behavior honestly. Losing or clearing the hint may remove the convenient
+link, but cannot create, cancel, lose, or misstate durable work. A reload with
+no hint shows no inferred package job; it never queries the direct list and
+never re-submits merely to rediscover an ID.
+
 ### 5.3 Caller-floor evidence
 
 Deploy the migrated caller while the accepted C7 API remains in `package`.
@@ -172,6 +194,86 @@ caller image is the minimum rollback floor: an older caller that posts to the
 direct route may not be deployed while later C8 slices are active.
 
 Stop for targeted acceptance before making a direct producer unreachable.
+
+### 5.4 Transition from the accepted safe posture
+
+Round 19 left production in `draining`, with the package queue paused and the
+closed worker and gateway absent. C8-R1 must not assume a serving package lane.
+The exact transition is:
+
+1. **API source/config owner:** add a separate
+   `QDARTE_CONTACT_VERIFY_SUBMISSION_ENABLED` gate, default false. False returns
+   the existing bounded unavailable response before drain proof, reservation,
+   planning, or either producer. Deploy the new API with mode still `draining`.
+2. **Admin owner:** deploy the migrated admission/status client while the gate
+   is false. The UI reads the host readiness posture and keeps submission
+   disabled; a forged request still receives the same server-side refusal.
+3. **Package/operator owner:** verify facade, domain/auth dependency, exact
+   private origin, SQL 0.1.5 capabilities, enqueue+read IAM, queue profile,
+   `max_depth=1`, and the named concurrency limit. The old unlimited profile
+   is superseded once; the safe limit is retained by every rollback image and
+   is not reverted during rollback.
+4. **Runtime owner:** start the bounded egress gateway, prove the closed worker
+   has no direct route, then start exactly one closed worker. It may poll the
+   paused queue but cannot claim work.
+5. **API owner:** replace only the API into configured `package`; startup earns
+   a fresh same-process direct-drain attestation before serving. Submission
+   remains false.
+6. **Operator owner:** unpause the package queue only after API/facade/gateway/
+   worker health and the direct hashes are rechecked. No job exists yet.
+7. **API owner:** replace only the API with submission true. Recheck health,
+   then enable the admin control. The first request is the exact authorized
+   bounded stage in §5.5, never an ambient user race.
+8. **Evidence owner:** reconcile admission/job/attempt/event, stable
+   application, contact method, usage, egress, and unchanged direct hashes
+   before the next stage or normal caller use.
+
+Failure unwinds in the opposite safety order: submission false first, admin
+control disabled, queue paused, worker stopped, gateway stopped, API returned
+to `draining`. Package history remains. There is no direct fallback, row copy,
+cross-backend retry, or queue DML other than the typed pause/unpause controls
+and the one accepted profile/concurrency administration. A failed replacement
+cannot leave the UI enabled against an unknown readiness posture.
+
+### 5.5 Server-enforced workload envelope and staged proof
+
+The package boundary enforces the workload independently of the UI:
+
+- `limit` is mandatory for production package admission and must be 1–300;
+- more than 300 `place_ids` is rejected;
+- over-limit or absent-limit input is rejected before drain authorization,
+  reservation, planning, or provider work—never silently clamped;
+- the completed plan is checked again and a plan over the current stage cap is
+  cancelled at the reservation layer without creating a job or provider call;
+- every package job carries one fixed contact concurrency key whose operator
+  limit is exactly 1;
+- queue `max_depth` is exactly 1; and
+- exactly one closed worker exists. No second worker or queued backlog is a
+  way around the envelope.
+
+The admin changes its request from 500 to the currently accepted stage cap.
+The cap advances only through these gates:
+
+| Stage | Maximum planned entities | Required evidence |
+| --- | ---: | --- |
+| C7 retained | 1 | Existing accepted one-place job and `3 attempts / 2 failures / 0 releases` truth; no new request. |
+| C8-E25 | 25 | One operator-selected natural unverified scope, created/existed replay, exact-ID terminal read, one-at-a-time egress/effect arithmetic, direct hashes unchanged, safe unwind rehearsed. |
+| C8-E100 | 100 | C8-E25 accepted first; one natural scope of 26–100 entities plus the same oracles, bounded duration/resource measurements, backup continuity, and no queue depth above one. |
+| C8-E300 | 300 | C8-E100 accepted first; a production-clone no-network/sink proof plans and executes exactly 300 through the real package worker/reporter with zero external/domain effect, then one natural production scope of 101–300 entities proves real sequential egress/effect behavior. |
+
+No synthetic filler, re-verification of already verified contacts, or
+`require_unverified_only=false` may manufacture a production cohort. If a
+natural stage does not exist, the accepted cap remains at the prior stage and
+the admin exposes that smaller limit. Retiring the direct producer requires
+explicit owner acceptance that the current cap is the supported caller
+contract. Claiming full parity with the measured historical maximum requires
+C8-E300; otherwise the narrower cap is documented as a deliberate product
+constraint, never hidden as an implementation detail.
+
+Each stage is a separately accepted production-evidence increment. On any
+provider, effect, rate, latency, lease, settlement, backup, or rollback
+disagreement, submission is disabled and the safe unwind in §5.4 runs. C8-R2
+cannot start merely because the one-place C7 proof exists.
 
 ## 6. C8-R2 — retire every direct producer
 
@@ -317,8 +419,10 @@ fences, provider bodies, or unbounded errors.
 | --- | --- |
 | CR-01 | Round-19 R19-01 closed by the next scheduled 03:15 backup, not a manual substitute |
 | CR-02 | Regenerated source/deployment/access-log caller inventory; no unclassified active caller |
-| CR-03 | Admin caller accepts canonical admission and exact-ID status without legacy decode, list inference, cancel, or shadow mapping |
+| CR-03 | Admin caller accepts canonical admission and exact-ID status without legacy decode, list inference, cancel, or shadow mapping; reload/hint-loss vectors prove the adopted exact-ID/operator-only posture |
 | CR-04 | Queue-scoped API principal has exactly enqueue+read; no run/operator/other-queue permission |
+| CR-04A | Safe transition runs in the exact §5.4 order from draining/paused/no-worker/no-gateway, and every injected failure executes the inverse unwind before another request |
+| CR-04B | Historical `[1,25,86,100,176,293]` envelope is reproduced; production rejects absent/over-limit input pre-reservation, keeps depth/concurrency/worker at one, and only accepted staged cohorts raise the caller cap |
 | CR-05 | Historical and incumbent host-taskq direct producers are unreachable and never redirect/fallback |
 | CR-06 | Seven-day/two-API-cycle producer window with exact unchanged direct hashes and explained package/effect counters |
 | CR-07 | Producer rollback uses caller-floor + C7 API in package mode, zero DML, and no direct insertion |
@@ -353,6 +457,12 @@ Stop before or during implementation if:
 - the scheduled backup gate has not passed;
 - any active caller still uses a direct route/shape or depends on direct list
   or cancel behavior without an accepted disposition;
+- the UI can enable submission before the server gate and complete package
+  topology are ready;
+- a request omits `limit`, exceeds the accepted stage cap, can queue behind
+  another contact job, or can bypass the one-job concurrency posture;
+- a staged cohort is manufactured from already verified contacts or advances
+  without its own counter/rollback acceptance;
 - the API principal would need operator, raw SQL, or another-queue access;
 - an active/running direct contact row exists;
 - direct hashes change or a direct producer remains reachable;
