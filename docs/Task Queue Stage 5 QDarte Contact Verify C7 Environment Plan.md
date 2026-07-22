@@ -1,7 +1,7 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** C7-03 production continuity evidence complete; C7-AUDIT is the only
-open gate and may open only a separate direct-retirement specification
+**Status:** complete and accepted by owner-authorized internal Round 19; only a
+separately frozen direct-retirement specification may follow
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
 Compatibility and Cutover Specification
@@ -25,8 +25,9 @@ and made no provider call. Owner-authorized internal Round 17 accepted that
 boundary; Round 18 accepted the exact C7-02 one-place cohort. C7-03 then
 completed the two-cycle, zero-insert, recurring-backup/restore, and zero-DML
 rollback program recorded in QDarte API's
-`docs/taskq-contact-c7-03-continuity-evidence.md`. C7-AUDIT remains mandatory
-before any direct-retirement specification.
+`docs/taskq-contact-c7-03-continuity-evidence.md`. Owner-authorized internal
+Round 19 accepted the complete sequence; no producer/consumer removal is
+implied by that acceptance.
 
 C7 keeps the C6 rules intact:
 
