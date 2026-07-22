@@ -2,8 +2,9 @@
 
 > **Status:** proposal frozen by S5-QD-C8-SPEC, amended docs-first for
 > R20-01/02/03, and accepted by the owner-authorized internal Round-20 delta.
-> C8-R1 still requires every §4 eligibility item, including the next naturally
-> scheduled 03:15 backup, before any implementation or production action.
+> C8-R1 requires every §4 eligibility item except for the one-time owner waiver
+> recorded below. The waiver is not evidence that the 2026-07-23 scheduled run
+> occurred and does not weaken the recurring-backup requirement after R1.
 >
 > **Authority:** Tier 3, subordinate to Transport Protocol v1 revision 1.0.8,
 > Function Manifest / SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, the
@@ -121,10 +122,21 @@ the observed direct maximum (293). C8 therefore targets a hard supported
 maximum of **300 planned entities**, but it may not claim that envelope until
 the staged gates in §5.5 pass.
 
-R19-01 is closed only by item 1. A manual invocation of the wrapper is not the
-next scheduled-run evidence. A failed scheduled run blocks implementation even
-if an on-demand retry succeeds, until the scheduler defect is explained and a
-subsequent scheduled run passes.
+R19-01 is normally closed only by item 1. A manual invocation of the wrapper is
+not scheduled-run evidence, and no evidence record may relabel it as such.
+
+**One-time C8-R1 owner waiver (2026-07-22).** The owner explicitly waived the
+calendar aspect of item 1 so implementation need not idle until 03:15. The
+substitute is manual backup `20260722-203544`: API, package contact, Intake, and
+globals artifacts exist in both primary and Server87-copy locations; every
+listed checksum verifies; and the two copies' checksum manifests are
+byte-identical. The latest independently recorded object-store upload remains
+the natural `20260722-061506` run. Therefore this waiver does **not** claim a
+new scheduler execution or a new object-store copy. It accepts that bounded
+operational gap for C8-R1 implementation only. The next natural run and its
+object-store/retention result remain required C8 evidence and must be recorded
+before C8-AUDIT can pass. A failed next scheduled run still stops production
+enablement until explained and followed by a scheduled success.
 
 ## 5. C8-R1 — caller floor before producer removal
 
