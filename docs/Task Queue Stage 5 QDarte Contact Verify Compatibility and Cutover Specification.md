@@ -140,6 +140,35 @@ or credentials. A direct insertion after the first sample invalidates the
 attestation and returns the host to `draining` or `legacy`; it must not permit
 package admission.
 
+#### C6-02 interlock mechanics
+
+The interlock is a local, process-owned capability rather than a mutable
+configuration value or a durable queue record. It may issue an attestation
+only while the closed contact mode is `draining`, for one named local exercise,
+one verified `development` database instance, and one source revision. Its
+opaque issuer record has no JSON/environment parser, no public route, and no
+operator setter. A process restart loses every issued record and therefore
+fails closed until the drain is observed again.
+
+Issuance takes two direct-ledger observations at least one second and no more
+than sixty seconds apart. Each observation is bounded to the direct
+`contact_verify_scope` rows and their attempts/events, and records only:
+
+- counts by job status and an explicit active count;
+- leased-attempt count;
+- counts and maximum identifiers for jobs, attempts, and events;
+- the observation timestamp, database instance identity, exercise name, and
+  source revision.
+
+Both observations must have zero `queued`, `blocked`, and `running` jobs, zero
+leased attempts, and identical counts/high-waters. Before every future package
+admission, the interlock takes a third direct-ledger observation and requires
+the same zero posture and identical high-waters. Any difference, expiry (at
+most five minutes after the second observation), identity mismatch, mode
+change, or missing opaque issuer record evicts the attestation and refuses
+admission. This is an invalidation, never a compensating enqueue or a
+cross-backend fallback.
+
 ### C6-03 — caller-compatible package adapter
 
 Once C6-00/01/02 vectors are green, implement the smallest host adapter behind
