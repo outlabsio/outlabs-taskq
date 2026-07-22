@@ -84,6 +84,9 @@
 
 - [ ] **S5-QD-C7-01 · Mini87 production preflight** — only after explicit owner authorization: identify the live deployed source/database identities; construct zero-unclassified-path API/worker/runtime candidates; run complete gates; create and execute the fresh two-database-plus-globals restore drill; measure `M` and normal-production `H` and prove `H + 3 <= M - 20`; implement and test the capped domain session, exact private service origin, readiness, runtime-owned proxy verifier, and network isolation; prove all runtime/role/token negatives; provision/migrate/verify the lasting package database and disabled services; finish healthy in `legacy`, queue paused, worker stopped, and zero package publish/provider action. Stop for targeted acceptance before C7-02.
   - **Progress 2026-07-22:** all four Mini87 shares are mounted and the three live checkout identities were read without modifying them. Reviewed integration candidates are pushed on `codex/taskq-c7-01`: API `a4d90e2` (all 30 accepted C6 commits forward-ported onto current `origin/main`, capped 1+2 facade/domain pools, readiness and production guards), worker `c8c03bb` (all 14 C6 commits plus the Mini87 typing cleanup, private proxy-only verifier, closed image), and runtime `21ccce3` (disabled profiles, internal-only worker network, two-database backup/restore unit). Focused gates are API 95/95, worker 627/627 plus MyPy 53 files, and runtime 1124/1124 plus MyPy 192 files; the production-shaped Compose graph parses, default Compose excludes all C7 services, and the candidate worker image has no dev packages or credential-bearing history. The broad API suite is honestly not a green gate at this point: 1692 passed and 15 unrelated/order-sensitive baseline tests failed outside the C7 paths. C7-01 remains open at stop condition 1 because the SMB mounts do not provide live command execution: new IPv4 and IPv6 connections to Mini87 currently return `No route to host`, so deployed container identity, database identity, fresh backup/restore, `M/H`, grants, and deployment are deliberately unclaimed and untouched.
+  - **Progress 2026-07-22 (live preflight):** remote execution is restored. Live identity, candidate convergence, fresh globals/API backups and copied manifests, disposable API and package restore drills, exact 0001–0007 package verification, and a 15-minute 180-sample connection window are complete. The measured peak is `H=16`, so `H+3=19 <= 80` with 61 connections of headroom; the pre-lasting full-row baseline is recorded and no lasting package database/job/provider action exists. The live inventory then found the incumbent API connected as cluster superuser and able to recover the owner secret through environment, Docker socket, broad projects mount, and backup control. C7-CQ-02 correctly stopped package creation. The owner chose the full same-cluster least-privilege conversion rather than a separate database service. C7-01A now owns API/worker credential separation, owner-free startup, host-only backup control, secret-free worker desired state, exact grant verification, restored-production proof including OutLabsAuth, and reversible Mini87 rotation before package creation resumes.
+
+- [ ] **S5-QD-C7-01A · Same-cluster runtime privilege separation** — implement the adopted C7-CQ-02 resolution across QDarte API/runtime/worker candidates. Define distinct non-superuser API and ordinary-worker logins, retain the exact contact-domain and package identities, revoke default database connect, remove every owner/migration/backup secret and control mount from long-lived services, move migrations/backups to a host-only control path, keep API-managed desired states secret-free with controller-only credential injection, and ship an exact declarative grant verifier including future default privileges. Prove on a restored production clone: real API boot, OutLabsAuth login plus service-token authorization, representative read and rolled-back write, every worker database path including legacy direct queue, complete backup/restore, and negative admin/operator/package access. Rotate Mini87 reversibly and prove health/continuity/secret absence before C7-01 may create the lasting package database.
   - **Progress 2026-07-22, live preflight:** owner-authorized Remote Login established the missing live channel. The production image reports deployed API `fee29d2` against database identity `production/45677dd9-2717-4d80-bdf7-a09a94a95221`; the three reviewed candidate tips are now cleanly checked out on Mini87 after preserving 92 API paths and two runtime paths as separate local recovery commits. Fresh API/intake backups at `20260722-155220` were byte-verified on `/Volumes/Server87` and `/Volumes/Server87 Backup`, their disposable restores matched production counts and migration heads, and the package 0001→0007 disposable install/dump/ownership-preserving restore passed `verify()` twice with exact 0.1.5 metadata before both named scratch databases were dropped. A 15-minute/180-sample connection trace measured `M=100`, `H=16`, so `H+3=19 <= 80` with 61 connections of headroom. Runtime candidate `a79812d` additionally fixes portable backup checksums, preserves package ownership/ACLs, and validates the actual `taskq.admissions` / `taskq.schema_migrations` relations; 1124 tests and MyPy 192 remain green. The pre-lasting full-row baseline proves six direct jobs, zero active jobs/leases, no stable-effect table yet, and no lasting package database. Lasting creation/deployment is now paused at S5-QD-C7-CQ-02; no package job, provider call, or C7-02 action occurred.
 
 - [x] **S5-AR-RELEASE-A6-PREP · Admission release candidate frozen** — package version `0.1.0a6` is prepared from the Round-13-accepted source and carries Protocol 1.0.8, SQL contract 0.1.5, immutable migrations 0001–0007, trusted reporter support, and the complete typed admission surface. Root status/layout docs now match the accepted repository. Publication requires green CI at this exact release-prep commit before annotated tag and immutable wheel/sdist upload; no QDarte pin, database migration, host, production, or provider action occurs in this prep task.
@@ -216,7 +219,7 @@
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-C7-CQ-02 — Same-cluster package isolation conflicts with the incumbent superuser application login *(open)*
+### S5-QD-C7-CQ-02 — Same-cluster package isolation conflicts with the incumbent superuser application login *(resolved: full runtime privilege separation)*
 
 **Trigger:** the live C7-01 identity proof established that the ordinary
 production `qdarteapi` service still connects to the shared PostgreSQL cluster
@@ -234,21 +237,32 @@ the documented isolation claim false. Creating the lasting database anyway,
 granting broader roles, or treating absence of a configured DSN as a security
 boundary would violate the accepted C7 plan.
 
-**Recommended adjudication:** amend the Tier-3 topology docs-first so the
-package database runs in a dedicated private PostgreSQL service on Mini87,
-with its own durable volume, owner/operator/runtime identities, connection
-budget, globals-inclusive backup, and restore drill. Keep only the capped
-two-connection domain/auth pool on the incumbent cluster. This is narrower
-than attempting a C7-scoped least-privilege conversion of the whole incumbent
-API and host worker fleet. The alternative is to freeze and separately prove
-that broader runtime-credential conversion before package creation; accepting
-the current superuser as an exception is not recommended.
+**Decision:** retain the same-cluster package topology, but make the broader
+runtime-credential conversion a prerequisite to package creation. Long-lived
+QDarte API and ordinary-worker paths receive distinct non-superuser logins;
+the exact contact-domain, package facade, operator, and owner identities remain
+separate. The API no longer runs migrations or backup control and receives no
+owner secret through environment, Docker socket, mounts, desired state, image,
+or logs. API-managed worker desired state becomes secret-free; only a
+controller-owned mode-0600 environment injects the worker DSN/token. Both
+databases use explicit `CONNECT` allowlists, and a versioned declarative grant
+manifest plus exact verifier owns role attributes, memberships, current grants,
+future default privileges, and forbidden paths.
 
-**Scope while open:** completed read-only/live preflight, fresh backups,
-disposable restore proofs, candidate source work, and evidence remain valid.
-No lasting package database, credential, facade deployment, worker start,
-package enqueue, provider call, C7-02 cohort, retirement, non-contact lane, or
-Stage 6 action is authorized until one topology is adopted docs-first.
+**Required proof before package creation:** rehearse against a restored
+production database under the exact proposed logins: real API boot, OutLabsAuth
+login and service-token authorization, representative API read and rolled-back
+write, every deployed worker database path including the legacy direct queue,
+host-only backup/restore, and negative owner/operator/admin/package access.
+Then rotate Mini87 reversibly and prove health, direct-queue continuity,
+OutLabsAuth behavior, secret absence, and package blindness. Only after that
+may the lasting package database be created under the already-frozen C7
+sequence.
+
+**Scope opened:** C7-01A documentation, implementation, disposable-clone proof,
+and reversible incumbent runtime credential rotation. It does not authorize a
+lasting package database before the rotation proof, a package job, provider
+call, C7-02 cohort, retirement, non-contact lane, or Stage 6.
 
 ### S5-QD-C7-CQ-01 — Accepted network isolation conflicts with QDarte's blanket worker-container ban *(resolved: narrow closed-worker exception)*
 

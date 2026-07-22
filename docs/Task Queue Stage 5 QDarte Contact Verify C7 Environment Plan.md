@@ -1,6 +1,7 @@
 # Task Queue Stage 5 — QDarte Contact Verify C7 Environment Plan
 
-**Status:** frozen C7-00 proposal; no production action authorized
+**Status:** frozen C7-00 plan amended by C7-CQ-02; C7-01 privilege-separation
+remediation is active, while package creation and C7-02 remain closed
 **Authority:** subordinate to Protocol v1 revision 1.0.8, Function Manifest /
 SQL contract 0.1.5, ADR-020, ADR-022, ADR-023, and the accepted C6
 Compatibility and Cutover Specification
@@ -52,7 +53,10 @@ grants, queue history, restore, and future retirement remain auditable without
 placing package base tables inside the QDarte domain database. It uses the
 existing PostgreSQL cluster rather than introducing another database server.
 This means cluster-wide connection and role budgets must include both
-databases.
+databases. Same-cluster isolation is valid only after every incumbent
+long-lived API and worker process uses a non-superuser login and database
+`CONNECT` is an explicit allowlist. Absence of a package DSN is never treated
+as a boundary against a cluster superuser.
 
 The production Compose graph is explicit:
 
@@ -80,9 +84,12 @@ The proposed request path is:
    QDarte effect through a separately capped domain session; and
 7. the taskq runtime alone settles the job.
 
-The ordinary QDarte app receives no package database password. The worker
-receives no database password or enqueue credential. The facade receives no
-direct-queue mutation authority.
+The ordinary QDarte app receives no package database password **and its
+`qdarte_api_runtime` login has no `CONNECT` on the package database**. Ordinary
+host workers use a separate `qdarte_worker_runtime` login with the same
+package-database denial. The closed package worker receives no database
+password or enqueue credential. The facade receives no direct-queue mutation
+authority.
 
 ## 3. Source convergence before deployment
 
@@ -121,7 +128,9 @@ arguments, and evidence logs.
 
 | Identity | May hold | Must not hold |
 | --- | --- | --- |
-| PostgreSQL cluster owner/admin | database creation, packaged migration and `verify()` execution | application or worker runtime use |
+| PostgreSQL cluster owner/admin | database/role creation, QDarte and package migrations, package `verify()`, host-only backup/restore control | any application or worker runtime, service environment, desired-state document, container mount, image, or log |
+| `qdarte_api_runtime` login | explicit `CONNECT`, schema usage, sequence use, and table/function privileges required by the API and OutLabsAuth in `qdarteapi` | superuser/admin attributes, role/database/schema creation, owner/operator membership, package-database `CONNECT`, backup control |
+| `qdarte_worker_runtime` login | explicit `CONNECT` and the least QDarte-domain privileges proven by every ordinary host-worker path | OutLabsAuth mutation unless a named path proves it, superuser/admin attributes, owner/operator membership, package-database `CONNECT`, backup control |
 | `qdarte_contact_operator` login | `taskq_operator` for explicit queue/profile administration only | producer, runner, normal application pool, worker use |
 | `qdarte_contact_facade` login | producer, runner, observer, housekeeper capability memberships in `qdarte_contact_verify` | operator, owner, superuser, CREATEROLE, CREATEDB, BYPASSRLS, QDarte-domain access |
 | `qdarte_contact_domain_runtime` login | only the OutLabs authorization reads and QDarte contact-effect reads/writes proven necessary by the private reporter path | package database, direct queue mutation, schema ownership, broad schema grants, role/database administration |
@@ -134,6 +143,35 @@ credentials. No migration, queue provisioning, or IAM apply may silently fall
 back to a runtime login. C7-01 must execute negative vectors for role switching,
 operator functions, base-table reads, cross-queue actions, and administrative
 attributes under every runtime identity.
+
+The same-cluster boundary is enforced as a complete system, not a DSN-only
+rotation:
+
+- production API startup performs no migration and receives neither the owner
+  DSN/password nor `POSTGRES_MIGRATION_DSN`;
+- the API container has no Docker socket, backup directory, backup credential,
+  or broad projects-tree mount from which an owner secret can be recovered;
+- database migration, role administration, backup, and restore run only from a
+  host-owned control path outside application and worker containers;
+- API-managed worker desired state contains no DSN, token, password, key, or
+  other secret-like override. A mode-0600 controller-owned `worker.env` injects
+  the worker DSN and service token at spawn time, and the controller rejects
+  secret-like desired-state overrides;
+- `qdarteapi` and `qdarte_contact_verify` revoke default `PUBLIC CONNECT` and
+  grant it only to named owner, operations, runtime, and package identities;
+- a versioned declarative grant manifest owns current privileges and future
+  owner default privileges. Its verifier compares role attributes,
+  memberships, database ACLs, schema/table/sequence/function grants, and
+  forbidden access as exact sets rather than sampling a few grants; and
+- no owner secret may appear in runtime environment output, Docker inspect,
+  image history, desired-state JSON, service logs, or runtime-readable mounts.
+
+The first runtime grant boundary may be broad within the named QDarte domain
+schemas where the restored-production exercise proves it is required, but it
+is never broad across databases or administrative powers. Every broad domain
+grant is recorded as debt in the manifest so later narrowing is measurable.
+The `qdarte_contact_domain_runtime` remains the exact narrow contact path; it
+is not replaced by either ordinary runtime login.
 
 The current contact harness is development-only. Production enablement must be
 an explicit source change with all of the following construction guards:
@@ -297,15 +335,28 @@ provider counter.
 1. verify live source/deployment identity and build integration candidates;
 2. rerun API, worker, runtime, taskq, package, and artifact gates;
 3. create and test-restore the fresh pre-change backup;
-4. measure connection budget and construct the capped domain pool;
-5. prove owner/operator/runtime/service-principal boundaries in disposable
-   databases;
-6. add the disabled private-network facade/worker/proxy topology,
+4. create the declarative privilege manifest and rehearse the separate API,
+   ordinary-worker, exact-domain, owner, backup, and package identities on the
+   restored production database;
+5. boot the real API under `qdarte_api_runtime`; prove OutLabsAuth login and
+   service-token behavior, one authenticated read, a rolled-back representative
+   write, and startup with no migration/owner secret;
+6. exercise every ordinary worker family under `qdarte_worker_runtime`,
+   including legacy direct-queue and listing-writer paths, then prove the
+   forbidden admin, owner, operator, package-connect, and OutLabsAuth-mutation
+   vectors;
+7. run backup and restore through the host-only control path with no API or
+   worker container involved;
+8. measure connection budget and construct the capped domain pool;
+9. add the disabled private-network facade/worker/proxy topology,
    readiness-bearing health, and backup support;
-7. migrate and verify the lasting package database twice under the owner;
-8. provision IAM and queue under the operator, with the queue initially
+10. rotate Mini87 API and worker runtime credentials reversibly; prove health,
+    OutLabsAuth, direct-queue continuity, secret absence, exact grants, and
+    package blindness before removing the rollback window;
+11. migrate and verify the lasting package database twice under the owner;
+12. provision IAM and queue under the operator, with the queue initially
    paused; and
-9. deploy code/config with contact mode still `legacy`, package worker stopped,
+13. deploy code/config with contact mode still `legacy`, package worker stopped,
    and prove health plus zero package publish.
 
 C7-01 performs no provider call and enqueues no lasting package job. It stops
@@ -334,8 +385,9 @@ true:
 1. live deployed commit/branch or database identity is unknown;
 2. an isolated pilot tree would replace or discard deployed-line work;
 3. a source-forward-port path is unclassified or its focused gates are red;
-4. the taskq or domain runtime login is superuser/admin, can become operator,
-   or can read a forbidden base table;
+4. any long-lived API, ordinary worker, taskq, or domain runtime login is
+   superuser/admin, can become owner/operator, can connect to a forbidden
+   database, or can read a forbidden base table;
 5. the domain/auth pool cannot be capped at 2 with zero overflow;
 6. `H + 3 > M - 20` or the connection observation is not representative;
 7. a fresh complete backup or two-database restore drill is missing;
@@ -354,7 +406,15 @@ true:
 15. any fallback, dual publication, row copy, manual queue DML, or direct
     recreation is proposed; or
 16. production state would change before the owning task and review explicitly
-    authorize it.
+    authorize it;
+17. the API still receives an owner/migration/backup secret, Docker socket,
+    backup mount, or broad source-tree mount containing production secrets;
+18. API startup still runs a migration or a recurring backup still depends on
+    the API container;
+19. worker desired-state JSON contains a credential or allows a secret-like
+    environment override; or
+20. the restored-production proof does not exercise OutLabsAuth and every
+    deployed API/worker database path under the exact proposed runtime logins.
 
 ## 11. Acceptance and scope opened
 
