@@ -231,6 +231,35 @@ caller contract. C6-03 must migrate or retire discriminator callers, prove the
 canonical response in both modes, and leave `/ops/taskq/*` and
 `/worker/taskq/*` incumbent-only.
 
+### S5-QD-C6-CQ-03 — A package keyed replay cannot depend on a fresh volatile direct plan *(open)*
+
+**Blocking evidence:** the local C6-03 exercise at QDarte API `c0940fb`
+started only a loopback package facade and a package-mode caller API; no worker
+or provider ran. The direct ledger was stable at five completed
+`contact_verify_scope` jobs, five attempts, and twenty events. A keyed
+`country:AR` request returned the frozen canonical `created` result and added
+one queued package job with zero package attempts/events; the direct counts
+and high-waters remained unchanged. The identical keyed replay then returned
+host `422` before package enqueue. Source explains the counterexample:
+`ContactVerifyPackageAdapter.admit()` rebuilds the volatile direct candidate
+plan before it can call package `enqueue`, while the legacy canonical-admission
+method checks its idempotency key before planning. If candidates, operator
+quota, or ordering change between calls, the package adapter cannot reach its
+authoritative keyed `existed` outcome. A cache, direct fallback, or a new
+untracked host mapping would only hide the broken replay contract.
+
+**Required adjudication:** decide the durable package-side lookup/admission
+primitive before further C6 code. The likely narrow path is a contract-first
+observer-safe, queue-scoped lookup by canonical idempotency key which returns
+only the opaque job identity and terminal admission disposition, so the host
+can return `existed` without re-planning; it requires the normal
+Protocol/Manifest/SQL migration sequence and a new bridge release if the
+package database floor moves. Alternative: a separately specified durable host
+admission ledger with exact ownership, retention, and retirement rules. Do
+not change the canonical response, re-plan-on-replay behavior, use direct
+queue lookup, add a fallback, start a worker, or open C6-04 until this choice
+is made docs-first.
+
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
 **Blocking evidence:** CV-02's server-owned bridge correctly requires the
