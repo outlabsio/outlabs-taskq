@@ -108,6 +108,18 @@ is deliberately unavailable and fails closed before admission. `draining`
 refuses new contact enqueue with a fixed host-owned `503` detail that contains
 no queue identity, SQL text, credential, payload, or fallback instruction.
 
+Once C6-03 exists, a configured `package` process is a requested terminal
+posture, not a pre-authorized producer. Before its FastAPI lifespan yields it
+has an internal effective mode of `draining`: it disables the direct producer,
+performs the C6-02 two-sample direct observation in that same process, and
+opens package admission atomically only if it retains the opaque attestation.
+FastAPI serves no request during this pre-admission phase. A restart begins
+again at internal `draining`; an observation failure prevents startup from
+exposing a package producer. Explicit configured `draining` remains a steady
+fixed-refusal state. After the one lifecycle transition, the effective mode is
+sampled once per request; no route, environment value, database record, or
+cross-process token can force the transition.
+
 The existing `/ops/cutover/jobs/contact-verify-scope` response discriminator
 is an explicit compatibility decision for C6-03: it cannot silently survive
 as an indicator of backend choice. C6-01 must pin the legacy route behavior

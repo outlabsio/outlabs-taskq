@@ -182,6 +182,16 @@ package fallback is introduced. Alternative: choose a different, explicitly
 reviewed durable attestation mechanism. Do not start C6-03 until one of these
 semantics is adopted docs-first.
 
+**Resolution:** adopted the recommended same-process lifecycle transition.
+`package` is a requested terminal posture: before FastAPI serves any request,
+the process behaves internally as `draining`, disables the direct producer,
+and performs the complete C6-02 observation. It atomically opens package
+admission only while retaining that process-owned proof. A restart repeats the
+observation; a failure exposes no package producer. Explicit `draining`
+remains a fixed refusal, while no route/config/database record can forge or
+preserve the transition. C6-03 may implement exactly this local lifecycle
+controller and no alternative durable/fallback path.
+
 ### S5-QD-CV-CQ-01 — A package contact-result bridge needs the active attempt, but the safe worker handler context intentionally withholds it *(resolved: ADR-022 trusted reporter)*
 
 **Blocking evidence:** CV-02's server-owned bridge correctly requires the
