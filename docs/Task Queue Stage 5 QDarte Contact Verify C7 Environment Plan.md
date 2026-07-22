@@ -41,9 +41,10 @@ C7 keeps the C6 rules intact:
 | Existing domain database | `qdarteapi`, PostgreSQL 18/PostGIS, existing local-production cluster |
 | New package database | `qdarte_contact_verify`, separate database on that same cluster |
 | Package queue/type | `qdarte_contact_verify` / `qdarte.contact_verify.scope` only |
-| Package facade | one separate lifespan-owned ASGI process, never mounted in the normal QDarte app |
-| Package worker | one separate closed process, HTTP transport only, fixed queue/type |
-| Public exposure | none; package facade binds host loopback only and is not tunnelled or proxied publicly |
+| Package facade | one separate lifespan-owned ASGI Compose service, never mounted in the normal QDarte app |
+| Package worker | one dedicated Compose service, HTTP transport only, fixed queue/type, no direct external network |
+| Private service origin | exact `http://qdarte-contact-taskq:8021` on the internal `qdarte-contact-internal` network |
+| Public exposure | none; package facade has `expose` only and no host `ports`, tunnel, or public proxy |
 | Initial application mode | `legacy`; package database/service disabled by default |
 
 The package database is separate so taskq ownership, migrations, runtime
@@ -53,11 +54,24 @@ existing PostgreSQL cluster rather than introducing another database server.
 This means cluster-wide connection and role budgets must include both
 databases.
 
-The proposed service path is:
+The production Compose graph is explicit:
+
+- `qdarteapi` joins the existing application network and
+  `qdarte-contact-internal`;
+- `qdarte-contact-taskq` joins the application network for PostgreSQL plus
+  `qdarte-contact-internal`, exposes 8021 only to Compose peers, and publishes
+  no host port;
+- `qdarte-contact-worker` joins only `qdarte-contact-internal`, so it has no
+  direct external route;
+- `qdarte-contact-egress` joins `qdarte-contact-internal` and the external
+  application network, becoming the worker's sole outbound path; and
+- `qdarte-contact-internal` is declared `internal: true`.
+
+The proposed request path is:
 
 1. normal QDarte API receives the retained cutover request;
 2. in effective `package`, its same-process direct-drain controller authorizes
-   one call to the loopback package facade;
+   one call to the exact internal package service origin;
 3. the package facade reserves/finishes one durable admission in
    `qdarte_contact_verify`;
 4. the closed worker claims only `qdarte.contact_verify.scope` over HTTP;
@@ -92,7 +106,8 @@ code. Commit-message similarity is not evidence. The candidate must retain all
 deployed-line changes and reproduce the complete C6 focused suites. Directly
 deploying the isolated pilot branch is forbidden.
 
-The runtime candidate adds the two new dedicated services and backup coverage
+The runtime candidate adds the facade, closed worker, bounded egress proxy,
+private network, and backup coverage
 without changing unrelated worker-fleet, intake, media, or public-site
 topology. C7-01 stops if any source path is unclassified or if a candidate
 would require a force push or discard deployed work.
@@ -128,11 +143,21 @@ an explicit source change with all of the following construction guards:
 - exact database name `qdarte_contact_verify`;
 - non-superuser taskq and domain logins;
 - one expected ASGI process;
-- loopback-only package URL/bind;
+- exact internal service origin `http://qdarte-contact-taskq:8021`, accepted
+  only when the production acknowledgement is present;
 - admission capability and SQL contract 0.1.5 verified at startup; and
 - the C6 direct-drain proof repeated on every process start.
 
-Absent or contradictory input fails startup. There is no permissive default.
+Development keeps its existing loopback-only validation. Production accepts
+neither loopback nor an arbitrary hostname: only the exact private Compose
+service identity is valid. Absent or contradictory input fails startup. There
+is no permissive default.
+
+The package health endpoint is readiness-bearing. It returns 200 only when the
+taskq runtime is ready at SQL 0.1.5 with `admission_reservations` active and
+the capped domain/auth dependency can execute its bounded connectivity check.
+Wrong metadata, database loss, or privilege failure prevents startup or
+returns 503. A static environment/queue JSON is not production health.
 
 ## 5. Connection arithmetic
 
@@ -219,10 +244,22 @@ the application to `draining`; it never triggers a package-to-direct replay.
 
 ## 8. Bounded cohort and independent counters
 
-C7-02 is limited to one predeclared `scope_kind=place` / exact place UUID that
-the provider-free planner proves yields exactly one entity. Zero or more than
-one planned entity stops the cohort. The idempotency key is recorded before
-the first request and reused byte-for-byte for the created/existed pair.
+C7-02 is limited to one valid containing scope plus one exact place allowlist:
+
+```json
+{
+  "scope_kind": "country",
+  "scope_key": "<the selected place's stored country value>",
+  "place_ids": ["<one exact place UUID>"],
+  "limit": 1,
+  "require_unverified_only": true
+}
+```
+
+The provider-free planner must return exactly one entity whose `place_id`
+equals that sole allowlisted UUID. Zero, a different place, or more than one
+entity stops the cohort. The idempotency key is recorded before the first
+request and reused byte-for-byte for the created/existed pair.
 
 Evidence must include:
 
@@ -236,12 +273,22 @@ Evidence must include:
 - a separate host-controlled egress-proxy access ledger for the closed
   worker's external verification traffic.
 
-The worker's existing explicit proxy seam is used with a dedicated C7 proxy
-identity. The counter logs bounded timestamp, worker/exercise label,
-destination host, disposition, and count—never a phone number, credential,
-response body, or full URL. C7-01 first proves the proxy is fail-closed and
-that bypassing it is impossible for the cohort process. An internal usage row
-alone is not represented as an independent provider counter.
+C7-01 adds a runtime-owned verifier/client seam to the closed handler. The
+production worker constructs that client only from its dedicated proxy
+configuration; job payload cannot select, replace, or disable it. The direct
+default verifier path is forbidden in production.
+
+Network isolation is the second enforcement layer: the worker is attached
+only to the internal contact network, while the proxy is dual-homed. Proxy
+absence therefore fails closed before a provider result or domain effect
+rather than allowing direct egress. Tests must replace the direct verifier
+path with a failure sentinel, prove all cohort traffic reaches the proxy, and
+prove proxy loss yields no effect.
+
+The counter logs bounded timestamp, worker/exercise label, destination host,
+disposition, and count—never a phone number, credential, response body, or
+full URL. An internal usage row alone is not represented as an independent
+provider counter.
 
 ## 9. C7 execution order
 
@@ -253,7 +300,8 @@ alone is not represented as an independent provider counter.
 4. measure connection budget and construct the capped domain pool;
 5. prove owner/operator/runtime/service-principal boundaries in disposable
    databases;
-6. add the disabled package facade/worker topology and backup support;
+6. add the disabled private-network facade/worker/proxy topology,
+   readiness-bearing health, and backup support;
 7. migrate and verify the lasting package database twice under the owner;
 8. provision IAM and queue under the operator, with the queue initially
    paused; and
@@ -294,13 +342,18 @@ true:
 8. the package database backup is not part of the recurring production job;
 9. the direct contact baseline is active, changes during drain, or cannot be
    recomputed exactly;
-10. the package facade is public, the ordinary app mounts its routes, or the
-    worker receives a database/enqueue credential;
-11. the egress counter can be bypassed or would log sensitive data;
-12. the bounded planner does not yield exactly one declared entity;
-13. any fallback, dual publication, row copy, manual queue DML, or direct
+10. the package facade has a host/public port, the ordinary app mounts its
+    routes, or any caller uses an origin other than the exact internal service;
+11. the worker joins an external network, receives a database/enqueue
+    credential, or can bypass the dedicated egress proxy;
+12. readiness can report success with wrong taskq metadata, unavailable
+    package/domain storage, or insufficient privileges;
+13. the egress counter would log sensitive data;
+14. the valid containing-scope plus one-item `place_ids` planner does not yield
+    exactly that one declared entity;
+15. any fallback, dual publication, row copy, manual queue DML, or direct
     recreation is proposed; or
-14. production state would change before the owning task and review explicitly
+16. production state would change before the owning task and review explicitly
     authorize it.
 
 ## 11. Acceptance and scope opened
