@@ -28,7 +28,7 @@
 | Stage | **Post-Stage-4 retirement eligibility + Stage-5 QDarte production pilot** — internal Round 19 accepts C7; C8's source-backed direct-retirement proposal is frozen and awaits targeted review. The legacy-tools observation continues independently |
 | Suite | taskq 505/505 regular with 1 opt-in skip on local PG18.3 using CI-shaped authenticated Redis, Ruff/format clean; QDarte runtime 1144/1144 + MyPy 192; workers 628/628 + Ruff/format/MyPy clean across 53 source files; expanded API C7/contact boundary 60/60 + Ruff/MyPy clean on the owned surface (broad local baseline remains separately recorded) |
 | Contracts | Protocol v1 document revision 1.0.8 + Function Manifest 0.1.5 (+ ADR-012..023); ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | Targeted C8 design review must return READY before caller migration or any producer/consumer retirement; targeted L1 acceptance separately gates legacy-tools L2 |
+| Next review | Round-20 remediation and targeted delta review must return READY before C8-R1 caller migration; targeted L1 acceptance separately gates legacy-tools L2 |
 
 ## Now
 
@@ -113,7 +113,11 @@
 
 - [x] **S5-QD-C8-REVIEW-REQUEST · Direct retirement design gate assembled** — Round 20 pins the docs-only C8 proposal and exact QDarte API/worker/runtime/admin source identities, then requires an independently derived executable inventory before reading the claimed dispositions. It attacks wrapper/mapping risk, caller response/list/cancel migration, exact-ID read and enqueue+read-only IAM, both direct producers, producer-before-consumer ordering, stale-worker no-claim, shared-ledger/package-domain preservation, two seven-day windows, both rollback floors, and R19-01's naturally scheduled backup. READY may open only C8-R1 after eligibility; no producer/consumer removal, data/schema deletion, another lane, or Stage 6 is authorized.
 
-- [ ] **S5-QD-C8-REVIEW · Direct retirement design response** — record Round 20 immutably. Only READY with no unresolved blocker/high and zero Contract questions may open C8-R1 after the scheduled-backup eligibility gate; later C8 slices remain independently gated.
+- [x] **S5-QD-C8-REVIEW · Round-20 BLOCKED response recorded** — registered the owner-authorized internal/non-independent response byte-for-byte (SHA-256 `df8b7e3b52432720072e3f5f14903eb31b8a0d8d8794f340e3cd20820a621574`). The audit re-derived every current direct/package/admin/worker/shared dependency and accepts the replacement architecture, producer-before-consumer ordering, no-claim guard, shared-ledger preservation, both seven-day windows, and paired rollback floors. R20-01 blocks because accepted production is draining/paused with worker/gateway absent while R1 assumed package service; R20-02 blocks an unreviewed jump from C7's one-place proof to the admin's `limit: 500`; R20-03 requires an explicit owner/UI decision for exact-ID-only rediscovery and operator-only cancellation. Zero Contract questions. Docs-only remediation plus targeted delta review is the sole path to C8-R1.
+
+- [ ] **S5-QD-C8-R20 · Retirement-design remediation** — freeze the exact draining/paused→bounded-package→safe-unwind choreography; measure the historical direct workload envelope, impose server-side entity/concurrency caps, stage production cohorts, reject over-limit before reservation/planning, and gate producer removal on acceptance of the intended operational envelope; record/vectorize the owner decision that exact-ID status replaces scope rediscovery and cancellation remains operator-only. No implementation or production action.
+
+- [ ] **S5-QD-C8-R20-DELTA-REQUEST · Targeted retirement-design recheck** — pin only the docs remediation and immutable response hash. READY may open C8-R1 only after the scheduled 03:15 backup gate; it cannot authorize enablement, a cohort, producer/consumer removal, data/schema deletion, another lane, or Stage 6.
 
 - [ ] **S5-QD-C8-R1 · Package caller and status floor** — after review READY and the scheduled-backup eligibility gate, migrate every active caller to backend-neutral package admission and exact-ID status using enqueue+read only; deploy and independently accept the caller floor before a direct producer changes.
 
