@@ -257,8 +257,8 @@ The package boundary enforces the workload independently of the UI:
   reservation, planning, or provider work—never silently clamped;
 - the completed plan is checked again and a plan over the current stage cap is
   cancelled at the reservation layer without creating a job or provider call;
-- every package job carries one fixed contact concurrency key whose operator
-  limit is exactly 1;
+- every package job carries the fixed contact concurrency key
+  `qdarte.contact_verify.scope`, whose operator limit is exactly 1;
 - queue `max_depth` is exactly 1; and
 - exactly one closed worker exists. No second worker or queued backlog is a
   way around the envelope.
