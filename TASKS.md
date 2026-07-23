@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches exact-pin a7 in API/workers; canonical models and the two-family reporter envelope pass 1168/1168 runtime tests with clean Ruff/196-file MyPy. Pure, content-follow-up and both native verification bindings pass 661/661 with clean Ruff/58-file MyPy. Seventeen focused API facade/auth/authority/domain vectors pass with clean Ruff/MyPy. The closed inventory is 295 files/23 declarations/21 handlers/30 relations/130 routes. A self-cleaning PostGIS rehearsal proves separate least-privilege taskq/business identities, real SQL/HTTP execution, one lost committed response and one provider call/receipt/mutation per verification family, two successful attempts, and zero old job/event/contact-effect rows. The API's unrelated whole-repository baseline is 1749 passed/11 failed and remains required cleanup before FR-AUDIT. No old worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..031). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters; ADR-031 adds only QDarte's private closed provider-control reporter member. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | Implement ADR-031's queue-independent provider-control boundary, then complete the classification family without an old client. Continue the remaining unaffected effect cohorts and all-handler disposable SQL/HTTP evidence; CQ-11 remains isolated |
+| Next review | S5-QD-FR-CQ-13 must resolve cross-attempt provider-reservation takeover before the classification hard-kill drill can run. The runtime models, host control kernel and fixed classification worker are implemented only on non-deploying branches; they must not activate until the unknown-cost transition is honest. CQ-11 remains isolated |
 
 ## Now
 
@@ -345,6 +345,53 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-13 — Cross-attempt reservation takeover can erase unknown provider cost *(open 2026-07-23)*
+
+**Blocking evidence:** implementing ADR-031's required classification
+hard-kill history exposed a contradiction between its unknown-cost rule and
+its current reclaim wording. The host control kernel finds the stable
+job/lane/entity/operation reservation. When a different taskq attempt arrives
+while that reservation is still `reserved`, it currently adds the new
+reporter-owned attempt id and returns `reserve_replayed`. The new worker may
+therefore call the provider again immediately. If the first process was killed
+after provider egress but before domain apply or settlement, the second call
+can settle the reservation as known usage. The first incurred call then has no
+event and no retained `expired_unsettled` posture. That is silent cost loss,
+not the owner-approved worker-loss semantics. The executable
+`test_reserve_replay_and_task_attempt_reclaim_consume_one_unit` currently pins
+the unsafe cross-attempt reuse, while same-attempt response-loss replay is
+legitimate.
+
+**Recommended adjudication:** distinguish same-attempt reserve replay from
+cross-attempt takeover without adding provider authority to taskq. Exact
+reserve replay by the same reporter-owned attempt remains byte-stable. A
+different attempt must not be authorized to perform provider egress while the
+earlier reservation is live; it receives a typed retryable
+`reservation_pending` posture and leaves the hold untouched. At the
+database-stamped expiry, the first observer atomically records and receives
+`expired_unsettled` with unknown cost. That exact attempt may replay the same
+expiry receipt. A later task attempt may create the next numbered reservation
+generation under the same stable logical control identity, preserving the old
+unknown-cost row and consuming a new honest budget unit before any new provider
+call. The host stores generation and expiry-observer identity in the existing
+bounded metadata, selects the latest generation under the existing advisory
+and row locks, and never mutates the old row back to known usage.
+
+The private reporter contract needs a docs-first ADR-031 amendment that adds
+the typed pending posture and freezes the generation transition. No taskq
+Protocol, Function Manifest, SQL migration or public client change is
+required. Required vectors are: same-attempt reserve response loss; different
+attempt before expiry with zero second provider call; database-time expiry
+with retained unknown cost; exact expiry-response replay; next-attempt new
+generation with a second budget unit; and a real process kill after provider
+egress proving either one settled provider event or one retained
+`expired_unsettled` row, with no silent call and no double settlement.
+
+**Stop:** do not reinterpret `reserve_replayed` as cross-attempt provider
+authority, do not overwrite an expired generation, do not invent client time
+or a taskq admission dependency, and do not claim the classification family or
+its hard-kill gate complete until this transition is adjudicated docs-first.
 
 ### S5-QD-FR-CQ-12 — Native LLM handlers need the durable provider-budget control plane *(approved 2026-07-23)*
 
