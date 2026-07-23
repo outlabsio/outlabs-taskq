@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 and FR-02A are complete; FR-02B now owns native dependencies/workflows before any all-lane replacement may begin. Production remains untouched |
 | Suite | taskq 521/521 regular with 1 opt-in skip on PostgreSQL 18.3 and exact 16.14 at CI run `29982347978`; Python 3.12/3.13 wheel/sdist × core/HTTP/OutLabs artifacts, Ruff/format, races, import isolation and Stage-3 audit are green. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers through 0007; QDarte remains pinned to immutable a6 until the native-orchestration release is deliberately cut |
 | Contracts | Protocol v1 document revision 1.0.9 + Function Manifest/installed SQL contract 0.2.0 (+ ADR-012..025); immutable migrations are 0001–0008 and `followups` is active. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | FR-02B must freeze the dependency/workflow contract docs-first before migration 0009 or any implementation: producer-safe workflow identity, atomic graph admission, deterministic promotion/cascade/finalization, bounded reads and dual-PG concurrency/plan/parity/artifact evidence. No production deployment, QDarte migration, old-ledger import or C8 observation work is part of the active goal |
+| Next review | FR-02B is paused at S5-QD-FR-CQ-03: the frozen multi-call workflow design has no graph-closure linearization point, so a bounded finalizer cannot distinguish a complete graph from a temporarily empty/all-terminal graph. Resolve the workflow-seal contract docs-first before migration 0009 or implementation. No production deployment, QDarte migration, old-ledger import or C8 observation work is part of the active goal |
 
 ## Now
 
@@ -305,6 +305,32 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-03 — Multi-call workflow construction has no graph-closure linearization point
+
+**Blocking evidence:** the frozen FR-02B design creates a replay-safe workflow,
+then admits member jobs through separate calls, while a bounded housekeeper
+finalizer derives terminal workflow status from the current member set. Neither
+the Native Orchestration Specification nor the Unified Design Spec defines when
+membership closes. An empty workflow, or one whose currently admitted members
+finish before a later HTTP enqueue arrives, is indistinguishable from a complete
+graph. Finalizing it would either permit post-terminal membership and reopen
+terminal state, or reject a legitimate planner retry. QDarte's current
+single-database transaction does not solve the general HTTP/client contract and
+cannot survive as a wrapper.
+
+**Recommended resolution:** add a producer-granted, replay-safe
+`seal_workflow` command in the docs-first 0.2.1 package. Creation leaves the
+workflow open. Workflow-row locking serializes member enqueue against sealing;
+only sealed workflows may finalize. After sealing, an exact replay of an
+already-admitted workflow step remains `existed`, while a new step is a typed,
+non-retryable conflict. A sealed empty workflow succeeds. Terminal workflow
+state is immutable in this minimum release, so individual member redrive is
+rejected and a corrected run uses a new workflow key; any future workflow-level
+redrive is a separate contract. The ADR must also reconcile the older
+`create_workflow(..., actor)` sketch with FR-02B's declared-queue authority by
+freezing both bounded declared queues and the authenticated actor in one
+identity.
 
 ### S5-QD-FR-CQ-02 — Inconsistent follow-up holder has no declared internal-error raise *(resolved)*
 
