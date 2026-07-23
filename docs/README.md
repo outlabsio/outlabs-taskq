@@ -19,7 +19,7 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 
 ## Tier 1 — decisions
 
-[ADR-001..024](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), ADR-023 (durable two-phase admission), and ADR-024 (native follow-up activation) are accepted. Reopening one requires new evidence and a new ADR.
+[ADR-001..025](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), ADR-023 (durable two-phase admission), ADR-024 (native follow-up activation), and ADR-025 (private follow-up return correction) are accepted. Reopening one requires new evidence and a new ADR.
 
 ## Tier 2 — operating plan
 

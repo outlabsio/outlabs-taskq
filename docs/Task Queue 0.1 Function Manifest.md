@@ -832,7 +832,8 @@ metadata exactly `0.1.5` and the exact 0007 capability set before changing anyth
 2. **Private helper.** Migration 0008 adds exactly:
 
    ```text
-   taskq._enqueue_followup(uuid,text,jsonb,integer) -> taskq.enqueue_result
+   taskq._enqueue_followup(uuid,text,jsonb,integer)
+     -> TABLE(job_id uuid, created boolean)
    arguments: parent_job_id, parent_queue, closed child spec, one-based spec index
    owner taskq_owner; SECURITY DEFINER; pinned search_path; VOLATILE; PUBLIC revoked;
    no application-role EXECUTE; raises TQ422

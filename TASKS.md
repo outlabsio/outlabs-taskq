@@ -27,7 +27,7 @@
 |---|---|
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 are complete; FR-02 now owns the native capabilities required before any all-lane replacement may begin. Production remains untouched |
 | Suite | taskq 505/505 regular with 1 opt-in skip on local PG18.3 using CI-shaped authenticated Redis, Ruff/format clean. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers: 0001–0007 + `verify()`, non-superuser privilege negatives, disabled refusal, `created -> existed -> existed`, one planner/verifier/effect, one successful attempt, exact-ID terminal read, read-only admission denial, and paused zero-DML rollback with zero provider calls |
-| Contracts | Protocol v1 document revision 1.0.9 + Function Manifest target 0.2.0 (+ ADR-012..024); installed SQL remains 0.1.5 until immutable migration 0008 lands. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
+| Contracts | Protocol v1 document revision 1.0.9 + Function Manifest target 0.2.0 (+ ADR-012..025); installed SQL remains 0.1.5 until immutable migration 0008 lands. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
 | Next review | FR-02A must implement the accepted follow-up contract through bridge-first runtime support, immutable migration 0008, typed registry/client/fake surfaces and dual-PG atomicity/race/parity/artifact evidence. No production deployment, QDarte migration, old-ledger import or C8 observation work is part of the active goal |
 
 ## Now
@@ -301,6 +301,21 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-01 — Manifest names a nonexistent private follow-up return composite *(resolved: ADR-025)*
+
+**Blocking evidence:** the first migration-0008 implementation pass found no
+`taskq.enqueue_result` type in migrations 0001–0007 or the machine catalog,
+while Manifest §15 named that type as `_enqueue_followup`'s return. Writing SQL
+against it would fail installation; adding the type would invent a contract
+surface not authorized by ADR-024. Migration work stopped before a file was
+created.
+
+**Resolution:** ADR-025 corrects only the private helper return to
+`TABLE(job_id uuid, created boolean)`, the existing ordinary-enqueue projection.
+It adds no type, route, wire field or application grant and leaves ADR-024's
+atomicity/authorization/key semantics unchanged. Docs-first correction landed
+before migration 0008; implementation may resume.
 
 ### S5-QD-C7-CQ-02 — Same-cluster package isolation conflicts with the incumbent superuser application login *(resolved: full runtime privilege separation)*
 
