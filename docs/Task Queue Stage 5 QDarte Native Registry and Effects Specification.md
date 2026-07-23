@@ -265,11 +265,58 @@ mutation. Invalid JSON/shape returns a fixed non-echoing validation error;
 stale authority or canonical-intent mismatch returns a fixed conflict. No
 request field, credential, domain error text or task fence is echoed.
 
-The first active union member is `contact_verification`. Future families extend
-the same union docs-first; they do not add arbitrary paths or a generic method
-selector. SQL-only tests may call the adapter directly, while HTTP parity must
-prove bad credentials and queue denial happen before body decode and produce
-zero ledger/domain writes.
+The active union members are `contact_verification` and
+`website_verification`. Future families extend the same union docs-first; they
+do not add arbitrary paths or a generic method selector. SQL-only tests may
+call the adapter directly, while HTTP parity must prove bad credentials and
+queue denial happen before body decode and produce zero ledger/domain writes.
+
+#### Website-verification member
+
+`website_verify_scope` uses the same private reporter route and
+`qdarte_verification` queue authorization as contact verification. Its stored
+`NativeWebsiteVerifyInput` is authoritative for the planned entity,
+`contact_point_id`, `content_item_id`, submitted website, venue identity, and
+browser plan. The handler supplies only the planned `entity_key`, fixed
+operation key `verify`, and this bounded provider result:
+
+- final verdict: `verified | blocked | needs_review | unreachable`;
+- network verdict: `reachable | blocked | unreachable | needs_review`, fixed
+  verifier version, optional final URL/status/content type/page title, at most
+  six bounded redirect hosts, and one bounded reason;
+- optional markdown extraction result: `success | error`, with only bounded
+  method/final URL/status/character-count/reason fields; and
+- optional identity judgment: `yes | no | maybe | error`, bounded confidence,
+  reason, model, elapsed milliseconds and error class.
+
+The result contains no caller-supplied contact-point id, content-item id,
+original URL, worker timestamp, arbitrary evidence dictionary, page body,
+prompt, response body, credential, or provider error text. PostgreSQL
+`clock_timestamp()` supplies the persisted `checked_at` and mutation
+timestamps. The domain owner constructs the exact
+`contact_meta_jsonb.website_verification` projection from the typed result,
+updates exactly the authoritative planned website contact point, and records
+the stable effect receipt in the same transaction. A missing or non-website
+contact point fails the transaction rather than recording an effect.
+
+The bounded result enforces the old lane's decision table rather than accepting
+contradictory evidence:
+
+- blocked or unreachable network evidence yields `unreachable` with no
+  extraction or identity result;
+- a network `needs_review` result yields `needs_review` with no extraction or
+  identity result;
+- reachable plus identity `yes` at confidence `>= 0.9` yields `verified`;
+- reachable plus identity `no` yields `blocked`; and
+- reachable with extraction failure, no configured judge, `maybe`, `error`, or
+  a lower-confidence `yes` yields `needs_review`.
+
+Inspect must complete before network, browser, or model work. A committed
+inspection skips every provider operation. Ambiguous apply response replays
+the byte-identical typed apply and must converge on the same receipt without a
+second provider call. Direct SQL and HTTP vectors prove authoritative entity
+selection, wrong task/queue/entity refusal before ledger access, missing-row
+rollback, canonical metadata, and provider-call conservation.
 
 ### 6.2 Non-domain operations
 
