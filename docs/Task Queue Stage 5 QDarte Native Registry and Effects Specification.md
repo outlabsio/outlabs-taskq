@@ -81,6 +81,36 @@ uses such a derivation. Missing or conflicting scope therefore fails typed
 payload/follow-up validation before settlement. Reporters obtain scope from
 the authoritative stored native payload, never a handler echo.
 
+### 3.1 Fully planned coordinator inputs
+
+Native coordinators cannot depend on the removed API enqueue layer to expand
+selectors after claim. `content_enrich_scope` therefore replaces its legacy
+target-flag input with a closed, maximum-20 tuple of fully planned children:
+
+```text
+ContentEnrichPhotoFollowup
+  kind = "photo"
+  step = stable bounded step
+  payload = NativePhotoFindInput
+
+ContentEnrichEditorialFollowup
+  kind = "editorial"
+  step = stable bounded step
+  payload = NativeEditorialEnrichInput
+```
+
+The union is discriminated by `kind`, every step is unique, and each child
+payload's `(scope_kind, scope_key)` must exactly equal the parent. The QDarte
+API producer owns the future planning query and supplies complete child
+payloads before enqueueing the coordinator. Entity-key/content-id selectors,
+unknown fields, and handler-time planning reads are forbidden.
+
+The native handler performs no I/O. It converts the already-validated tuple to
+taskq `Followup` values and returns one `Complete`, making validation and child
+insertion atomic with parent settlement. An empty tuple returns bounded
+`no_change`; more than 20 children, duplicate steps, or conflicting scope
+fails before settlement.
+
 ## 4. One task definition
 
 QDarte runtime owns one queue-neutral `NativeTaskDefinition` for each of the 21
@@ -256,7 +286,8 @@ because taskq receives complete/fail/release.
 - refactor handlers by pure, read-only, and effectful cohorts;
 - prohibit old job/client/settlement imports from the native module graph;
 - prove every handler through `taskq.testing`;
-- prove follow-up graphs and bounded concurrency; and
+- prove fully planned follow-up graphs, atomic child insertion, and bounded
+  concurrency; and
 - keep the old worker stopped and unchanged except for canonical model imports.
 
 ### FR-03D — general domain effects
