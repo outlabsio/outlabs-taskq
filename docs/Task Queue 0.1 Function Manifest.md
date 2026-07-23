@@ -1333,11 +1333,16 @@ catalog and activates only independently proven views.
    {"active":["admission_reservations","dependencies_workflows","followups","read_model_list_ready","schedules"]}
    ```
 
-   After proof, migration 0012 replaces metadata by exact equality with the
-   preceding set plus only the proven subset of
-   `read_model_list_running`, `read_model_list_finished`, and
-   `read_model_workflow`. Activation and deactivation are immutable metadata
-   migrations, never manual DML.
+   B9 evidence commit `988309c` proves all three candidates independently on
+   PostgreSQL 16.14 and 18.3. Migration 0012 therefore replaces metadata by
+   exact equality with:
+
+   ```json
+   {"active":["admission_reservations","dependencies_workflows","followups","read_model_list_finished","read_model_list_ready","read_model_list_running","read_model_workflow","schedules"]}
+   ```
+
+   No other projection is implied. Activation and deactivation are immutable
+   metadata migrations, never manual DML.
 
 7. **Evidence.** `verify()` and an independent oracle assert exact
    types/functions/tables/triggers/indexes/grants/metadata. Fresh/full chains
