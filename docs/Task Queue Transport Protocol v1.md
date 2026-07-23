@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, ADR-026 as additive protocol document revision 1.0.10 / SQL contract 0.2.1, and ADR-027 as additive protocol document revision **1.0.11** / SQL contract 0.2.2. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, ADR-026 as additive protocol document revision 1.0.10 / SQL contract 0.2.1, ADR-027 as additive protocol document revision 1.0.11 / SQL contract 0.2.2, and ADR-028 as additive protocol document revision **1.0.12**. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -67,6 +67,12 @@
     add the finite operator schedule definition routes and direct-SQL housekeeper
     claim/fire/error family specified in §2.9. Database time remains authoritative and the
     existing IAM actions and TQ registry are reused; wire major remains `1`.
+19. **ADR-028 maintenance-schedule HTTP boundary:** protocol document revision
+    1.0.12 excludes the exact package identity `taskq-janitor-daily` from the
+    HTTP schedule-name grammar. GET, PUT and DELETE reject it uniformly as
+    `TQ422` with details exactly `{"field":"name"}` after authentication and
+    request-id validation but before lookup, header/body decoding or SQL.
+    Ordinary schedules and SQL contract 0.2.2 are unchanged.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -520,8 +526,12 @@ manifest-backed direct-SQL commands only. They have no HTTP identity and are
 never generated on producer, runner, observer, or operator HTTP clients.
 The reserved seeded janitor definition has no HTTP mutation route.
 
-Schedule names are 1–120 UTF-8 bytes and match
-`[a-z0-9][a-z0-9_.-]*`. `If-Match` uses the exact strong ETag grammar
+HTTP schedule names are 1–120 UTF-8 bytes, match
+`[a-z0-9][a-z0-9_.-]*`, and are not the exact reserved identity
+`taskq-janitor-daily`. On all three routes that identity returns `TQ422` with
+details exactly `{"field":"name"}` after authentication/request-id validation
+and before lookup, authorization projection, `If-Match`, body decode or SQL.
+`If-Match` uses the exact strong ETag grammar
 `"taskq-schedule-<positive decimal version>"`; weak tags and `*` are invalid.
 The matrix is:
 
@@ -604,6 +614,13 @@ Processing order is normative:
 Unknown and denied existing names follow the facade's hiding posture and leave
 schedule/job/event state unchanged. No profile or recurrence data is disclosed
 before authorization.
+
+The reserved janitor is observed through runtime housekeeper health and bounded
+failure telemetry; privileged definition inspection is the direct-SQL operator
+`get_schedule` command. There is no schedule enumeration route. Any future
+schedule list/search/export surface excludes all package-owned maintenance
+definitions by contract and requires an explicit negative vector before
+activation.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

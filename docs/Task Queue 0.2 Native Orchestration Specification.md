@@ -199,6 +199,13 @@ exists. The only non-job target is the migration-seeded, caller-immutable
 `maintenance:janitor` row. There is no dynamic function, callback or payload
 factory target.
 
+ADR-028 excludes the exact seeded identity `taskq-janitor-daily` from the HTTP
+schedule-name grammar. GET, PUT and DELETE reject it uniformly before lookup or
+body processing; it remains inspectable only through the direct-SQL operator
+surface and observable through runtime housekeeper health. No schedule
+enumeration exists, and any future enumeration must exclude package-owned
+maintenance definitions.
+
 ### 6.2 Claim and fire
 
 The housekeeper claims due rows with `FOR UPDATE SKIP LOCKED`, bounded lease and
