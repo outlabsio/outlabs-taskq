@@ -340,3 +340,83 @@ async def test_read_model_sql_http_and_raw_row_parity(
         await client.aclose()
         await asgi.aclose()
         await transport.aclose()
+
+
+async def test_activated_running_and_finished_views_have_sql_http_raw_parity(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+) -> None:
+    queue = "parity_active_views"
+    await operator.fetchrow(
+        "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'parity-audit')", queue
+    )
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    resources = TaskqFacadeTransports(
+        producer=transport,
+        runner=transport,
+        observer=transport,
+        authorization=transport,
+        claim_wait_hub=ClaimWaitHub(),
+    )
+    app = _mounted(create_taskq_app(resources, authorizer=no_auth_for_tests()))
+    asgi = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    client = AsyncTaskqHttpClient("http://test", bearer_token="parity-test-only", client=asgi)
+    try:
+        running_job = await transport.enqueue(
+            EnqueueCommand(queue=queue, job_type="tests.running", payload={})
+        )
+        finished_job = await transport.enqueue(
+            EnqueueCommand(queue=queue, job_type="tests.finished", payload={})
+        )
+        running_claim = await transport.claim(
+            queue, "view-worker", job_id=running_job.job_id, lease_seconds=60
+        )
+        finished_claim = await transport.claim(
+            queue, "view-worker", job_id=finished_job.job_id, lease_seconds=60
+        )
+        assert len(running_claim.jobs) == len(finished_claim.jobs) == 1
+        finished_attempt = finished_claim.jobs[0]
+        await transport.complete(
+            finished_attempt.job_id,
+            finished_attempt.attempt_id,
+            "view-worker",
+            result={"done": True},
+        )
+
+        for view, expected_id in (
+            ("running", running_job.job_id),
+            ("finished", finished_job.job_id),
+        ):
+            sql_page = await transport.list_jobs(queue, view)
+            http_page = await client.list_jobs(queue=queue, view=view)
+            assert http_page.items == sql_page.items
+            assert len(http_page.items) == 1
+            item = http_page.items[0]
+            assert item.job_id == expected_id
+            raw = await pg.fetchrow(
+                "SELECT id, job_type, status, outcome, priority, attempt_count, failure_count, "
+                "max_attempts, created_at, scheduled_at, started_at, finished_at, updated_at "
+                "FROM taskq.jobs WHERE id=$1",
+                expected_id,
+            )
+            assert raw is not None
+            assert item.model_dump() == {
+                "job_id": raw["id"],
+                "job_type": raw["job_type"],
+                "status": raw["status"],
+                "outcome": raw["outcome"],
+                "priority": raw["priority"],
+                "attempt_count": raw["attempt_count"],
+                "failure_count": raw["failure_count"],
+                "max_attempts": raw["max_attempts"],
+                "created_at": raw["created_at"],
+                "scheduled_at": raw["scheduled_at"],
+                "started_at": raw["started_at"],
+                "finished_at": raw["finished_at"],
+                "updated_at": raw["updated_at"],
+            }
+    finally:
+        await client.aclose()
+        await asgi.aclose()
+        await transport.aclose()

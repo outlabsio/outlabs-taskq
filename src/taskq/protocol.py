@@ -1073,6 +1073,16 @@ class WorkflowPage(BaseModel):
     next_after: UUID | None = None
 
 
+class WorkflowPageWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    profile: WorkflowReadProfile
+    counts: WorkflowStateCounts
+    items: tuple[WorkflowMemberProjection, ...]
+    next_cursor: str | None = None
+
+
 class ScheduleState(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -1366,6 +1376,7 @@ class HttpCommandName(StrEnum):
     CREATE_WORKFLOW = "create_workflow"
     SEAL_WORKFLOW = "seal_workflow"
     CANCEL_WORKFLOW = "cancel_workflow"
+    GET_WORKFLOW_PAGE = "get_workflow_page"
     GET_SCHEDULE = "get_schedule"
     PUT_SCHEDULE = "put_schedule"
     RETIRE_SCHEDULE = "retire_schedule"
@@ -1984,6 +1995,16 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             request_model=WorkflowCancelWireRequest,
             data_model=WorkflowWireData,
         ),
+        HttpCommandName.GET_WORKFLOW_PAGE: _http(
+            "GET",
+            "/taskq/v1/workflows/{workflow_id}",
+            _READ,
+            QueueSource.WORKFLOW_LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_WORKFLOW_PAGE,
+            data_model=WorkflowPageWireData,
+        ),
         HttpCommandName.GET_SCHEDULE: _http(
             "GET",
             "/taskq/v1/schedules/{name}",
@@ -2414,6 +2435,7 @@ __all__ = [
     "WorkflowKind",
     "WorkflowMemberProjection",
     "WorkflowPage",
+    "WorkflowPageWireData",
     "WorkflowReadProfile",
     "WorkflowResult",
     "WorkflowStateCounts",

@@ -69,7 +69,11 @@ from taskq.protocol import (
     TqCode,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowMemberProjection,
+    WorkflowPage,
+    WorkflowReadProfile,
     WorkflowResult,
+    WorkflowStateCounts,
     WorkflowStatus,
 )
 from taskq.registry import FollowupTarget, RetryStrategy, RetryValue, Task, TaskRegistry
@@ -200,9 +204,13 @@ __all__ = [
     "WorkflowAuthorizationLookupTransport",
     "WorkflowAuthorizationProjection",
     "WorkflowKind",
+    "WorkflowMemberProjection",
+    "WorkflowPage",
+    "WorkflowReadProfile",
     "WorkflowOperatorTransport",
     "WorkflowProducerTransport",
     "WorkflowResult",
+    "WorkflowStateCounts",
     "WorkflowStatus",
     "__version__",
 ]

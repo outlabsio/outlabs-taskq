@@ -260,6 +260,10 @@ independently `TQ501`; a host may not emulate it by widening another route.
 ## 8. Clients, runtime and testing
 
 - Generated transports expose only metadata-active capabilities.
+- Hosts opt into the workflow page with `workflow_read_enabled`; runtime startup
+  requires SQL contract `0.2.3` plus both `dependencies_workflows` and
+  `read_model_workflow` before mounting that route. This flag is independent of
+  the workflow producer/control surface and defaults off.
 - `Complete.followups` becomes a typed tuple of the frozen child spec.
 - The registry validates closed child targets at startup.
 - Producer clients get typed workflow/dependency/schedule commands sized to

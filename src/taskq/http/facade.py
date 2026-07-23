@@ -81,6 +81,7 @@ from taskq.protocol import (
     TqCode,
     WorkerPresenceWireRequest,
     WorkflowCancelWireRequest,
+    WorkflowPage,
 )
 from taskq.transport import (
     AuthorizationLookupTransport,
@@ -138,6 +139,7 @@ _WORKFLOW_COMMANDS = frozenset(
         HttpCommandName.CANCEL_WORKFLOW,
     }
 )
+_WORKFLOW_READ_COMMANDS = frozenset({HttpCommandName.GET_WORKFLOW_PAGE})
 _SCHEDULE_COMMANDS = frozenset(
     {
         HttpCommandName.GET_SCHEDULE,
@@ -158,6 +160,7 @@ class TaskqFacadeTransports:
     workflow_producer: WorkflowProducerTransport | None = None
     workflow_authorization: WorkflowAuthorizationLookupTransport | None = None
     workflow_enabled: bool = False
+    workflow_read_enabled: bool = False
     schedule_enabled: bool = False
 
 
@@ -330,6 +333,41 @@ def _encode_cursor(value: Mapping[str, Any] | None) -> str | None:
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+def _decode_workflow_cursor(value: str | None, *, workflow_id: UUID) -> UUID | None:
+    if value is None:
+        return None
+    if len(value) > 1366 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise TaskqValidationError(details={"field": "cursor"})
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        decoded = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskqValidationError(details={"field": "cursor"}, cause=exc) from exc
+    if (
+        len(raw) > 1024
+        or not isinstance(decoded, dict)
+        or set(decoded) != {"after", "v", "workflow_id"}
+        or decoded.get("v") != 1
+        or decoded.get("workflow_id") != str(workflow_id)
+    ):
+        raise TaskqValidationError(details={"field": "cursor"})
+    try:
+        return UUID(str(decoded["after"]))
+    except (TypeError, ValueError) as exc:
+        raise TaskqValidationError(details={"field": "cursor"}, cause=exc) from exc
+
+
+def _encode_workflow_cursor(value: UUID | None, *, workflow_id: UUID) -> str | None:
+    if value is None:
+        return None
+    raw = json.dumps(
+        {"after": str(value), "v": 1, "workflow_id": str(workflow_id)},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
 def _path_uuid(request: Request, name: str = "job_id") -> UUID:
     try:
         return UUID(str(request.path_params[name]))
@@ -491,6 +529,8 @@ class _FacadeDispatcher:
             if name is HttpCommandName.GET_JOB
             else {"queue", "view", "limit", "cursor"}
             if name is HttpCommandName.LIST_JOBS
+            else {"limit", "cursor"}
+            if name is HttpCommandName.GET_WORKFLOW_PAGE
             else set()
         )
         if set(request.query_params) - allowed or any(
@@ -560,8 +600,9 @@ class _FacadeDispatcher:
                 await self._check_authorization(authorizer, request, context, spec.action, queue)
             return None
         if spec.queue_source is QueueSource.WORKFLOW_LOOKUP:
+            path_name = "workflow_id" if name is HttpCommandName.GET_WORKFLOW_PAGE else "id"
             await self._authorize_workflow(
-                request, context, authorizer, _path_uuid(request, "id"), spec.action
+                request, context, authorizer, _path_uuid(request, path_name), spec.action
             )
             return None
         if spec.queue_source is QueueSource.JOB_LOOKUP:
@@ -970,6 +1011,29 @@ class _FacadeDispatcher:
                 profile,
                 headers={"ETag": _profile_etag(profile.profile_version)},
             )
+        if name is HttpCommandName.GET_WORKFLOW_PAGE:
+            workflow_id = _path_uuid(request, "workflow_id")
+            limit = _parse_page_limit(request.query_params.get("limit"))
+            after = _decode_workflow_cursor(
+                request.query_params.get("cursor"), workflow_id=workflow_id
+            )
+            page: WorkflowPage = await r.observer.get_workflow_page(
+                workflow_id, limit=limit, after=after
+            )
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                {
+                    "as_of": page.as_of,
+                    "profile": page.profile,
+                    "counts": page.counts,
+                    "items": page.items,
+                    "next_cursor": _encode_workflow_cursor(
+                        page.next_after, workflow_id=workflow_id
+                    ),
+                },
+            )
         if name is HttpCommandName.LIST_JOBS:
             assert queue is not None
             view = request.query_params.get("view")
@@ -1285,12 +1349,12 @@ def create_taskq_app(
     resources = getattr(resources, "facade_transports", resources)
     if not isinstance(resources, TaskqFacadeTransports):
         raise TaskqConfigError("facade resources are not configured")
-    if resources.workflow_enabled and (
-        resources.workflow_producer is None or resources.workflow_authorization is None
-    ):
-        raise TaskqConfigError(
-            "workflow_enabled requires workflow producer and authorization transports"
-        )
+    if resources.workflow_enabled and resources.workflow_producer is None:
+        raise TaskqConfigError("workflow_enabled requires workflow producer transport")
+    if (
+        resources.workflow_enabled or resources.workflow_read_enabled
+    ) and resources.workflow_authorization is None:
+        raise TaskqConfigError("workflow surfaces require workflow authorization transport")
     if (
         resources.workflow_enabled
         and operator_transport is not None
@@ -1395,6 +1459,8 @@ def create_taskq_app(
         if name in _ADMISSION_COMMANDS and not resources.admission_enabled:
             continue
         if name in _WORKFLOW_COMMANDS and not resources.workflow_enabled:
+            continue
+        if name in _WORKFLOW_READ_COMMANDS and not resources.workflow_read_enabled:
             continue
         if name in _SCHEDULE_COMMANDS and not resources.schedule_enabled:
             continue

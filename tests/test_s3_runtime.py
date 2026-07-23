@@ -155,8 +155,13 @@ def _runtime(
         claim_wait_hub=hub,
         admission_enabled=bool(options and options.admission_enabled),
         workflow_producer=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
-        workflow_authorization=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
+        workflow_authorization=(
+            transport
+            if options and (options.workflow_enabled or options.workflow_read_enabled)
+            else None
+        ),  # type: ignore[arg-type]
         workflow_enabled=bool(options and options.workflow_enabled),
+        workflow_read_enabled=bool(options and options.workflow_read_enabled),
         schedule_enabled=bool(options and options.schedule_enabled),
     )
     kwargs: dict[str, Any] = {}
@@ -405,6 +410,41 @@ async def test_workflow_runtime_requires_exact_contract_and_capability() -> None
     await additive.start()
     assert additive.state is TaskqRuntimeState.RUNNING
     await additive.stop()
+
+
+async def test_workflow_read_runtime_requires_0_2_3_and_both_capabilities() -> None:
+    options = TaskqRuntimeOptions(
+        housekeeper_enabled=False,
+        long_poll_listener_enabled=False,
+        workflow_read_enabled=True,
+    )
+    wrong_version = _runtime(
+        _Transport(
+            version="0.2.2",
+            capabilities={"active": ["dependencies_workflows", "read_model_workflow"]},
+        ),
+        options=options,
+    )
+    with pytest.raises(TaskqVersionError):
+        await wrong_version.start()
+
+    missing = _runtime(
+        _Transport(version="0.2.3", capabilities={"active": ["dependencies_workflows"]}),
+        options=options,
+    )
+    with pytest.raises(TaskqCapabilityError):
+        await missing.start()
+
+    active = _runtime(
+        _Transport(
+            version="0.2.3",
+            capabilities={"active": ["dependencies_workflows", "read_model_workflow"]},
+        ),
+        options=options,
+    )
+    await active.start()
+    assert active.state is TaskqRuntimeState.RUNNING
+    await active.stop()
 
 
 def test_schedule_surface_is_explicitly_disabled_by_default() -> None:

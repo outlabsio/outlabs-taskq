@@ -106,6 +106,13 @@ EXPECTED_HTTP_IDENTITIES = {
         "workflow_lookup",
         "active",
     ),
+    "get_workflow_page": (
+        "GET",
+        "/taskq/v1/workflows/{workflow_id}",
+        "read",
+        "workflow_lookup",
+        "active",
+    ),
     "get_schedule": (
         "GET",
         "/taskq/v1/schedules/{name}",
@@ -290,6 +297,7 @@ EXPECTED_HTTP_OUTCOMES = {
         "already_requested": 202,
         "already_terminal": 200,
     },
+    "get_workflow_page": {"ok": 200},
     "get_schedule": {"ok": 200},
     "put_schedule": {"created": 201, "unchanged": 200, "updated": 200},
     "retire_schedule": {"retired": 200, "already_retired": 200},
@@ -475,7 +483,11 @@ def test_http_catalog_excludes_db_only_commands_and_has_honest_gates() -> None:
         CommandName.TICK,
         CommandName.JANITOR,
     }.isdisjoint(active_sql)
-    for name in (HttpCommandName.GET_QUEUE, HttpCommandName.LIST_JOBS):
+    for name in (
+        HttpCommandName.GET_QUEUE,
+        HttpCommandName.LIST_JOBS,
+        HttpCommandName.GET_WORKFLOW_PAGE,
+    ):
         assert HTTP_COMMAND_SPECS[name].surface is HttpSurface.ACTIVE
         assert HTTP_COMMAND_SPECS[name].outcomes == {"ok": 200}
     worker_list = HTTP_COMMAND_SPECS[HttpCommandName.LIST_WORKERS]

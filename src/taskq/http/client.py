@@ -77,6 +77,7 @@ from taskq.protocol import (
     WorkflowKind,
     WorkflowResult,
     WorkflowWireData,
+    WorkflowPageWireData,
 )
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -568,6 +569,16 @@ class AsyncTaskqHttpClient:
             body=WorkflowCancelWireRequest(reason=reason),
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
+
+    async def get_workflow_page(
+        self, workflow_id: UUID, *, limit: int = 50, cursor: str | None = None
+    ) -> WorkflowPageWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.GET_WORKFLOW_PAGE,
+            path_params={"workflow_id": workflow_id},
+            query={"limit": limit, **({"cursor": cursor} if cursor is not None else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_WORKFLOW_PAGE], outcome, data)
 
     async def get_schedule(self, name: str) -> ScheduleWireData:
         outcome, data, _ = await self._request(
@@ -1147,6 +1158,16 @@ class TaskqHttpClient:
             body=WorkflowCancelWireRequest(reason=reason),
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
+
+    def get_workflow_page(
+        self, workflow_id: UUID, *, limit: int = 50, cursor: str | None = None
+    ) -> WorkflowPageWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.GET_WORKFLOW_PAGE,
+            path_params={"workflow_id": workflow_id},
+            query={"limit": limit, **({"cursor": cursor} if cursor is not None else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_WORKFLOW_PAGE], outcome, data)
 
     def get_schedule(self, name: str) -> ScheduleWireData:
         outcome, data, _ = self._request(

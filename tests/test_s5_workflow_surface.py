@@ -32,7 +32,12 @@ def _mounted(taskq_app: FastAPI) -> FastAPI:
     return host
 
 
-def _resources(transport: SqlTaskqTransport, *, workflow_enabled: bool) -> TaskqFacadeTransports:
+def _resources(
+    transport: SqlTaskqTransport,
+    *,
+    workflow_enabled: bool,
+    workflow_read_enabled: bool = False,
+) -> TaskqFacadeTransports:
     return TaskqFacadeTransports(
         producer=transport,
         runner=transport,
@@ -40,8 +45,9 @@ def _resources(transport: SqlTaskqTransport, *, workflow_enabled: bool) -> Taskq
         authorization=transport,
         claim_wait_hub=ClaimWaitHub(),
         workflow_producer=transport if workflow_enabled else None,
-        workflow_authorization=transport if workflow_enabled else None,
+        workflow_authorization=transport if workflow_enabled or workflow_read_enabled else None,
         workflow_enabled=workflow_enabled,
+        workflow_read_enabled=workflow_read_enabled,
     )
 
 
@@ -97,7 +103,7 @@ async def test_workflow_routes_are_absent_until_runtime_gate_and_openapi_is_exac
         assert not any("/workflows" in path for path in disabled.openapi()["paths"])
 
         enabled = create_taskq_app(
-            _resources(transport, workflow_enabled=True),
+            _resources(transport, workflow_enabled=True, workflow_read_enabled=True),
             authorizer=no_auth_for_tests(),
             operator_transport=transport,
             operator_authorizer=no_auth_for_tests(),
@@ -107,6 +113,7 @@ async def test_workflow_routes_are_absent_until_runtime_gate_and_openapi_is_exac
             "/v1/workflows",
             "/v1/workflows/{id}/seal",
             "/v1/workflows/{id}/cancel",
+            "/v1/workflows/{workflow_id}",
         }
         create_schema = schema["paths"]["/v1/workflows"]["post"]["requestBody"]["content"][
             "application/json"
@@ -135,7 +142,7 @@ async def test_http_workflow_replay_dependency_promotion_and_raw_state(
     transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
     app = _mounted(
         create_taskq_app(
-            _resources(transport, workflow_enabled=True),
+            _resources(transport, workflow_enabled=True, workflow_read_enabled=True),
             authorizer=no_auth_for_tests(),
             operator_transport=transport,
             operator_authorizer=no_auth_for_tests(),
@@ -243,7 +250,7 @@ async def test_workflow_authorization_precedes_graph_access_and_rejection_writes
     authorizer = callable_auth(authenticate, authorize)
     app = _mounted(
         create_taskq_app(
-            _resources(transport, workflow_enabled=True),
+            _resources(transport, workflow_enabled=True, workflow_read_enabled=True),
             authorizer=authorizer,
             operator_transport=transport,
             operator_authorizer=authorizer,
@@ -324,6 +331,160 @@ async def test_workflow_authorization_precedes_graph_access_and_rejection_writes
                 is None
             )
     finally:
+        await transport.aclose()
+
+
+async def test_workflow_page_authorizes_all_queues_before_cursor_and_has_sql_http_parity(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+) -> None:
+    queues = ("workflow_page_a", "workflow_page_b")
+    await _make_queues(operator, *queues)
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    workflow = await transport.create_workflow(
+        "workflow-page",
+        "dag",
+        declared_queues=queues,
+        actor="setup",
+    )
+    members = [
+        await transport.enqueue(
+            EnqueueCommand(
+                queue=queue,
+                job_type="tests.workflow_page",
+                payload={},
+                workflow_id=workflow.workflow_id,
+                step_key=f"step-{index}",
+            )
+        )
+        for index, queue in enumerate(queues)
+    ]
+    calls: list[tuple[TaskqAction, str | None]] = []
+
+    async def authenticate(_: Any) -> AuthContext:
+        return AuthContext(actor="reader", principal="reader")
+
+    async def deny_second(
+        _: Any,
+        __: AuthContext,
+        action: TaskqAction,
+        queue: str | None,
+    ) -> None:
+        calls.append((action, queue))
+        if queue == queues[1]:
+            raise HTTPException(status_code=403)
+
+    denied_app = _mounted(
+        create_taskq_app(
+            _resources(transport, workflow_enabled=True, workflow_read_enabled=True),
+            authorizer=callable_auth(authenticate, deny_second),
+            not_found_on_forbidden=True,
+        )
+    )
+    allowed_app = _mounted(
+        create_taskq_app(
+            _resources(transport, workflow_enabled=True, workflow_read_enabled=True),
+            authorizer=no_auth_for_tests(),
+        )
+    )
+    denied_raw = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=denied_app), base_url="http://test"
+    )
+    allowed_raw = httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=allowed_app), base_url="http://test"
+    )
+    client = AsyncTaskqHttpClient("http://test", bearer_token="test", client=allowed_raw)
+    try:
+        denied = await denied_raw.get(
+            f"/taskq/v1/workflows/{workflow.workflow_id}?cursor=not-base64!"
+        )
+        missing = await denied_raw.get(f"/taskq/v1/workflows/{uuid4()}?cursor=not-base64!")
+        assert denied.status_code == missing.status_code == 404
+        assert calls == [
+            (TaskqAction.READ, queues[0]),
+            (TaskqAction.READ, queues[1]),
+        ]
+
+        sql_page = await transport.get_workflow_page(workflow.workflow_id, limit=1)
+        raw_page = await allowed_raw.get(f"/taskq/v1/workflows/{workflow.workflow_id}?limit=1")
+        assert raw_page.status_code == 200
+        wire = raw_page.json()["data"]
+        assert set(wire) == {"as_of", "profile", "counts", "items", "next_cursor"}
+        assert set(wire["profile"]) == {
+            "workflow_id",
+            "kind",
+            "status",
+            "sealed",
+            "cancel_requested",
+            "declared_queues",
+            "created_at",
+            "updated_at",
+            "finished_at",
+        }
+        assert set(wire["counts"]) == {
+            "blocked",
+            "queued",
+            "running",
+            "succeeded",
+            "failed",
+            "cancelled",
+        }
+        assert set(wire["items"][0]) == {
+            "job_id",
+            "queue",
+            "job_type",
+            "step_key",
+            "status",
+            "outcome",
+            "pending_deps",
+            "attempt_count",
+            "failure_count",
+            "created_at",
+            "scheduled_at",
+            "started_at",
+            "finished_at",
+            "updated_at",
+        }
+        encoded_wire = json.dumps(wire)
+        assert all(
+            field not in encoded_wire
+            for field in (
+                "workflow_key",
+                "params",
+                "payload",
+                "headers",
+                "result",
+                "progress",
+                "error",
+                "attempt_id",
+                "fence",
+                "worker_id",
+            )
+        )
+        first = await client.get_workflow_page(workflow.workflow_id, limit=1)
+        assert first.profile == sql_page.profile
+        assert first.counts == sql_page.counts
+        assert first.items == sql_page.items
+        assert first.next_cursor is not None
+
+        second = await client.get_workflow_page(
+            workflow.workflow_id,
+            limit=1,
+            cursor=first.next_cursor,
+        )
+        projected_ids = [first.items[0].job_id, second.items[0].job_id]
+        assert projected_ids == sorted(member.job_id for member in members)
+        assert second.next_cursor is None
+        raw_ids = await pg.fetch(
+            "SELECT id FROM taskq.jobs WHERE workflow_id=$1 ORDER BY id",
+            workflow.workflow_id,
+        )
+        assert projected_ids == [row["id"] for row in raw_ids]
+    finally:
+        await client.aclose()
+        await denied_raw.aclose()
+        await allowed_raw.aclose()
         await transport.aclose()
 
 

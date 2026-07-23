@@ -87,6 +87,7 @@ class TaskqRuntimeOptions(BaseModel):
     embedded_worker: EmbeddedWorkerOptions | None = None
     admission_enabled: bool = False
     workflow_enabled: bool = False
+    workflow_read_enabled: bool = False
     schedule_enabled: bool = False
     request_pool_max: int = Field(default=10, ge=1, le=1000)
     operator_pool_max: int = Field(default=0, ge=0, le=1000)
@@ -333,8 +334,11 @@ class TaskqRuntime:
             claim_wait_hub=hub,
             admission_enabled=resolved.admission_enabled,
             workflow_producer=ordinary if resolved.workflow_enabled else None,
-            workflow_authorization=ordinary if resolved.workflow_enabled else None,
+            workflow_authorization=(
+                ordinary if resolved.workflow_enabled or resolved.workflow_read_enabled else None
+            ),
             workflow_enabled=resolved.workflow_enabled,
+            workflow_read_enabled=resolved.workflow_read_enabled,
             schedule_enabled=resolved.schedule_enabled,
         )
         housekeeper: SqlTaskqTransport | None = None
@@ -456,6 +460,16 @@ class TaskqRuntime:
                 active = meta.capabilities.get("active")
                 if not isinstance(active, list) or "dependencies_workflows" not in active:
                     raise TaskqCapabilityError(details={"capability": "dependencies_workflows"})
+            if self.facade_transports.workflow_read_enabled:
+                if meta.contract_version != "0.2.3":
+                    raise TaskqVersionError(details={"contract_version": meta.contract_version})
+                active = meta.capabilities.get("active")
+                required = {
+                    "dependencies_workflows",
+                    "read_model_workflow",
+                }
+                if not isinstance(active, list) or not required.issubset(active):
+                    raise TaskqCapabilityError(details={"capability": "read_model_workflow"})
             if self.facade_transports.schedule_enabled:
                 if meta.contract_version not in SCHEDULE_SQL_CONTRACT_VERSIONS:
                     raise TaskqVersionError(details={"contract_version": meta.contract_version})

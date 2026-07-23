@@ -399,15 +399,18 @@ async def test_runtime_from_dsn_gates_workflow_routes_on_exact_live_metadata(
             housekeeper_enabled=False,
             long_poll_listener_enabled=False,
             workflow_enabled=True,
+            workflow_read_enabled=True,
         ),
     )
     try:
         await runtime.start()
         assert runtime.facade_transports.workflow_enabled
+        assert runtime.facade_transports.workflow_read_enabled
         assert runtime.facade_transports.workflow_producer is not None
         assert runtime.facade_transports.workflow_authorization is not None
         app = create_taskq_app(runtime, authorizer=no_auth_for_tests())
         assert "/v1/workflows" in app.openapi()["paths"]
+        assert "/v1/workflows/{workflow_id}" in app.openapi()["paths"]
         assert "/v1/workflows/{id}/cancel" not in app.openapi()["paths"]
     finally:
         await runtime.stop()
