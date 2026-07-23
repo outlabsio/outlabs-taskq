@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import asyncpg
 import pytest
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import _migrate_impl, discover_migrations, verify
@@ -46,7 +47,7 @@ async def _workflow_member(
     return workflow, member
 
 
-async def test_workflow_count_transitions_and_inactive_page(
+async def test_workflow_count_transitions_and_active_page(
     pg: asyncpg.Connection,
     operator: asyncpg.Connection,
     producer: asyncpg.Connection,
@@ -88,10 +89,12 @@ async def test_workflow_count_transitions_and_inactive_page(
     assert counts is not None
     assert tuple(counts)[1:] == (0, 0, 0, 1, 0, 0)
 
-    with pytest.raises(asyncpg.PostgresError) as inactive:
-        await observer.fetchrow("SELECT * FROM taskq.get_workflow_page($1)", workflow_id)
-    assert inactive.value.sqlstate == "TQ501"
-    assert inactive.value.detail == "reason=read_model_view_inactive view=workflow"
+    page = await observer.fetchrow("SELECT * FROM taskq.get_workflow_page($1)", workflow_id)
+    assert page is not None
+    assert page["profile"]["workflow_id"] == workflow_id
+    assert page["counts"]["succeeded"] == 1
+    assert len(page["items"]) == 1
+    assert page["items"][0]["job_id"] == member["job_id"]
 
     with pytest.raises(asyncpg.PostgresError) as missing:
         await observer.fetchrow("SELECT * FROM taskq.get_workflow_page($1)", uuid4())
@@ -154,7 +157,7 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
     engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
     try:
         migrations = discover_migrations()
-        assert migrations[-1].id == "0011_finite_projections"
+        assert migrations[-1].id == "0013_workflow_page_composite_repair"
         async with engine.connect() as conn:
             applied = await conn.run_sync(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[:10])
@@ -197,6 +200,30 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
                 )
             ).scalar_one()
             assert count == 1
+            inactive = await conn.exec_driver_sql(
+                "SELECT taskq.has_capability('read_model_workflow')"
+            )
+            assert inactive.scalar_one() is False
+            with pytest.raises(DBAPIError) as inactive_page:
+                await conn.exec_driver_sql(
+                    "SELECT * FROM taskq.get_workflow_page($1)",
+                    (workflow["workflow_id"],),
+                )
+            assert getattr(inactive_page.value, "orig", inactive_page.value).sqlstate == "TQ501"
+            await conn.rollback()
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[11:12])
+            )
+            assert applied == ["0012_activate_finite_projections"]
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[12:13])
+            )
+            assert applied == ["0013_workflow_page_composite_repair"]
+            page_size = await conn.exec_driver_sql(
+                "SELECT cardinality((taskq.get_workflow_page($1)).items)",
+                (workflow["workflow_id"],),
+            )
+            assert page_size.scalar_one() == 1
             report = await verify(conn)
             assert report.ok, report
             meta = (await conn.exec_driver_sql("SELECT * FROM taskq.get_contract_meta()")).one()
@@ -205,7 +232,10 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
                 "admission_reservations",
                 "dependencies_workflows",
                 "followups",
+                "read_model_list_finished",
                 "read_model_list_ready",
+                "read_model_list_running",
+                "read_model_workflow",
                 "schedules",
             ]
     finally:

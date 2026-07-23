@@ -79,6 +79,8 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             "0009_workflows",
             "0010_schedules",
             "0011_finite_projections",
+            "0012_activate_finite_projections",
+            "0013_workflow_page_composite_repair",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -118,6 +120,8 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 "0009_workflows",
                 "0010_schedules",
                 "0011_finite_projections",
+                "0012_activate_finite_projections",
+                "0013_workflow_page_composite_repair",
             ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "

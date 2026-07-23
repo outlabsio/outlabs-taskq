@@ -256,7 +256,10 @@ async def test_observer_projections_metrics_and_views(
             "admission_reservations",
             "dependencies_workflows",
             "followups",
+            "read_model_list_finished",
             "read_model_list_ready",
+            "read_model_list_running",
+            "read_model_workflow",
             "schedules",
         ]
     }

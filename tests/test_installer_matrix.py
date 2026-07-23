@@ -49,6 +49,8 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0009_workflows",
                 "0010_schedules",
                 "0011_finite_projections",
+                "0012_activate_finite_projections",
+                "0013_workflow_page_composite_repair",
             ],
         ]
         async with engines[0].connect() as conn:

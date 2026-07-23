@@ -537,7 +537,10 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
             "admission_reservations",
             "dependencies_workflows",
             "followups",
+            "read_model_list_finished",
             "read_model_list_ready",
+            "read_model_list_running",
+            "read_model_workflow",
             "schedules",
         ]
     }

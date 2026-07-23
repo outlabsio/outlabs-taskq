@@ -1618,7 +1618,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.get_workflow_page(uuid,integer,uuid)",
             _OBSERVER,
             ("ok",),
-            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.CAPABILITY),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.INTERNAL, TqCode.CAPABILITY),
         ),
         CommandName.GET_JOB: _spec(
             "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",

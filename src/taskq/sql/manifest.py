@@ -471,7 +471,7 @@ PUBLIC_ERRORS = {
     "taskq.get_schedule(text)": frozenset({"TQ001"}),
     "taskq.get_schedule_authorization_projection(text)": frozenset({"TQ001"}),
     "taskq.get_workflow_authorization_projection(uuid)": frozenset({"TQ001"}),
-    "taskq.get_workflow_page(uuid,integer,uuid)": frozenset({"TQ001", "TQ422", "TQ501"}),
+    "taskq.get_workflow_page(uuid,integer,uuid)": frozenset({"TQ001", "TQ422", "TQ500", "TQ501"}),
     "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)": frozenset({"TQ422"}),
     "taskq.janitor()": frozenset(),
     "taskq.list_jobs(text,text,integer,jsonb)": frozenset({"TQ001", "TQ422", "TQ501"}),
@@ -522,7 +522,8 @@ META_SEEDS = {
     "contract_version": '"0.2.3"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
-        '"followups", "read_model_list_ready", "schedules"]}'
+        '"followups", "read_model_list_finished", "read_model_list_ready", '
+        '"read_model_list_running", "read_model_workflow", "schedules"]}'
     ),
 }
 SCHEDULE_SEED = {
