@@ -365,13 +365,18 @@ source record or place, change force posture, set timestamps, supply raw JSON,
 or request an arbitrary alignment. A missing or drifted authoritative target
 rolls the reservation back.
 
-The native output contains only bounded aggregate counters, distinct bounded
-provider labels, stable effect receipts and the input warnings. It carries no
-old attempt/event projection and creates no follow-up. Response-loss replay
-must conserve one provider invocation and one mutation per target. Direct SQL,
-HTTP and fake vectors cover deterministic/provider/skipped outcomes, queue
-denial before malformed-body decode, wrong task/entity refusal, authoritative
-target drift, replay, and raw source-record/alignment conservation.
+The native output contains only bounded aggregate outcome/replay counters,
+stable effect receipts and the input warnings. Provider/model/endpoint labels
+are deliberately excluded: the generic replay receipt exposes only the stable
+result digest, so repeating those labels after reclaim would require either
+guessing the failover winner or widening every family's receipt. Provider
+identity remains inside the hashed effect intent and authoritative domain
+metadata. The output carries no old attempt/event projection and creates no
+follow-up. Response-loss replay must conserve one provider invocation and one
+mutation per target. Direct SQL, HTTP and fake vectors cover
+deterministic/provider/skipped outcomes, queue denial before malformed-body
+decode, wrong task/entity refusal, authoritative target drift, replay, and raw
+source-record/alignment conservation.
 
 ### 6.2 Non-domain operations
 
