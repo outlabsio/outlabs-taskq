@@ -1077,6 +1077,13 @@ class ScheduleCronRecurrence(BaseModel):
     expression: str = Field(min_length=1, max_length=255)
     timezone: str = Field(min_length=1, max_length=255)
 
+    @model_validator(mode="after")
+    def _closed_cron(self) -> ScheduleCronRecurrence:
+        from taskq.schedules import validate_cron
+
+        validate_cron(self.expression, self.timezone)
+        return self
+
 
 ScheduleRecurrence: TypeAlias = Annotated[
     ScheduleIntervalRecurrence | ScheduleCronRecurrence,
