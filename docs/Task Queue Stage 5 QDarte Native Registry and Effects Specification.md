@@ -338,7 +338,7 @@ request field, credential, domain error text or task fence is echoed.
 
 The active union members are `contact_verification`,
 `website_verification`, `tripadvisor_classification`, `photo_verification`,
-`editorial_enrichment`, `listing_research`, and the private
+`editorial_enrichment`, `listing_research`, `content_synthesis`, and the private
 `llm_provider_control` member. Future families
 extend the same union docs-first; they do not add arbitrary paths or a generic
 method selector. SQL-only tests may call the adapter directly, while HTTP
@@ -389,6 +389,41 @@ child. The synthesis domain reader later resolves the stable `bundle_id`;
 application artifacts are not copied into taskq, and no old queue/client or
 completion hook remains in that path. Response-loss replay returns the
 identical receipt, disposition and child.
+
+#### Content-synthesis member
+
+`content_synthesis_scope` uses the same private reporter route and
+`qdarte_content` authorization. Its producer-built input maps each entity to
+exactly one stable listing `bundle_id` and at most one fully materialized
+`review_scope` child. The branch is labelled `review` or `repair_review` by the
+producer from authoritative origin before enqueue; the handler never derives
+origin or calls a planner. Entity, bundle and plan sets are equal and unique,
+child scope equals parent scope, steps are distinct, and the job-wide child cap
+is 20.
+
+The closed family has a bounded `prepare` request and mutually exclusive
+terminal operations `synthesized`, `bundle_blocked`, `geo_blocked`, and
+`writer_blocked`. `prepare` authorizes the current task and exact planned
+bundle before reading the artifact. It returns either the already-committed
+receipt/outcome or the exact synthesis-ready writer bundle under the same
+64KB response ceiling. It never accepts an arbitrary artifact id, returns a
+filesystem path, or exposes a generic artifact reader. Missing, expired,
+superseded, entity-mismatched or firewall-invalid bundles return a typed
+blocked preparation; they never reach a model.
+
+The handler performs no discovery. It prepares before provider work, uses
+ADR-031's `content_synthesis` lane for every metered model/repair call, and
+applies exactly one terminal operation. `synthesized` carries one strict
+bounded draft whose entity and canonical locale match stored authority.
+Blocked operations carry only a closed bounded reason and, for
+`geo_blocked`, bounded matched terms. The API applies the draft or pipeline
+blocker at database time and records the stable effect receipt in the same
+transaction. Bundle usage is refreshed only through this authoritative path.
+
+Only a committed `synthesized` outcome selects the already-planned review or
+repair-review child. Blocked outcomes select no child. Inspect/prepare and
+apply response-loss replay return the identical receipt, outcome and child;
+replay cannot invoke a provider, change branch kind, or extend the graph.
 
 #### Editorial-enrichment member
 

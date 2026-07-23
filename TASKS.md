@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete and FR-03 is active. The native contact, website, classification, photo, editorial and listing-research effect families are complete. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on local PostgreSQL 18.3 using the CI-shaped Redis; the previously accepted exact-16.14 lane is unchanged and Ruff is clean. Published `v0.1.0a7` remains the exact QDarte pin. Runtime is 1174/1174 with one unrelated dependency warning, clean Ruff and 196-file MyPy; workers are 692/692 with clean Ruff and 64-file MyPy; the API is 1768 passed/10 unchanged unrelated baseline failures with clean Ruff and 203-file MyPy. The native listing family proves strict bundle/branch plans, shared synthesis-readiness validation, authoritative disposition, HTTP response preservation, response-loss replay and identical child selection without an old job/client/completion hook. No service, provider, persistent database or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..031). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters; ADR-031 adds only QDarte's private closed provider-control reporter member. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | Continue the source-swept FR-03D families with `content_synthesis_scope`: re-derive its result mutation and review/repair-review completion behavior, freeze the closed effect and mutually exclusive preplanned branch, then bind it without an old queue client |
+| Next review | CQ-16 freezes `content_synthesis_scope`: exact planned bundle preparation, four mutually exclusive terminal effects, ADR-031 metered synthesis control, and producer-selected review/repair-review branch. Implement the runtime/API/worker family next |
 
 ## Now
 
@@ -96,6 +96,7 @@
     - [x] **FR-03D-EDITORIAL · Native editorial-enrichment family complete** — runtime `ebf31d1` adds the strict draft/status effect, exact per-entity review plans and the editorial ADR-031 provider member under the 64KB aggregate boundary; the machine effect inventory now cites only the native handler and authoritative domain owner. API `eb0c8e7` authorizes the current content task from stored SQL authority, raises the private streamed ceiling only after authentication/queue-run authorization, applies bounded locales and review state at database time, and records the effect receipt atomically. Workers `d0dd596` inspects before egress, reserves/settles provider usage, applies once, and returns only the scope-equal preplanned review child; replay skips the provider and returns byte-equivalent result/child intent. Runtime passes 1173 with one unrelated dependency warning, workers 687, and the API baseline is 1766 pass/10 unchanged unrelated failures; focused warning-as-error, Ruff and configured MyPy gates are clean. No old job/attempt/client enters the native graph, no service/provider/database/queue/worker started, and production remains untouched.
     - [x] **FR-03D-LISTING-SPEC · Native listing-research artifact and branch contract frozen** — CQ-15 resolves the completion-time artifact identity and branch-selection gap without putting application blobs in taskq or restoring an old result route. Producers mint one stable bundle UUID and fully materialize an optional scope-equal synthesis child before parent enqueue. The closed `listing_research` effect carries only a bounded writer-firewalled bundle or bounded underfill result; the API persists it under that identity and atomically returns the stable receipt plus `synthesis_ready | curated_hold | blocked_exhausted` from authoritative current state. The worker only selects the preplanned child after that disposition commits; inspect and response-loss replay return the identical disposition, receipt and child. No Tier-0/1, SQL, migration, package, QDarte source, database, provider or production state changed.
     - [x] **FR-03D-LISTING · Native listing-research family complete** — taskq `1cb0ec1`/`a6bee9a` freezes producer-minted stable bundle identity, synthesis-ready exact-place evidence and an authoritative typed disposition before source. Runtime `4c75804`/`58f15df` adds strict branch/effect/response models, one shared canonical-plus-readiness firewall and exact native effect inventory. API `ef015aa` validates current SQL task authority and the planned bundle identity, persists the domain artifact and current pipeline decision atomically with the stable effect receipt, preserves the family-specific outcome over HTTP and removes no old data. Workers `173557a` inspects before research, applies once, selects the synthesis child only from `synthesis_ready`, preserves typed holds, and makes response-loss replay skip research and return the identical child. Runtime 1174, workers 692 and API 1768 pass/10 unchanged unrelated failures with clean Ruff and configured MyPy. No old job/client/completion hook enters the native graph; no service, provider, persistent database or production state changed.
+    - [x] **FR-03D-SYNTHESIS-SPEC · Native content-synthesis preparation, effect and branch contract frozen** — CQ-16 resolves the artifact-read and completion-hook boundary without copying application bundles into taskq or restoring an old client. Each entity has one exact stable bundle id and producer-selected `review | repair_review` branch. The closed family prepares only that authorized synthesis-ready artifact, then commits exactly one `synthesized | bundle_blocked | geo_blocked | writer_blocked` effect; only synthesized selects the preplanned child. The API owns database-time draft/blocker mutation and usage refresh, metered model/repair calls use ADR-031's new `content_synthesis` lane, and all responses remain bounded and replay-stable. No Tier-0/1, SQL, migration, package, QDarte source, database, provider or production state changed.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -350,6 +351,43 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-16 — Native synthesis cannot read its planned domain artifact or preserve completion outcomes *(resolved: exact prepare plus closed terminal effects)*
+
+**Blocking evidence:** CQ-15 deliberately keeps source bundles out of taskq
+and gives the synthesis child only a stable `bundle_id`, but the private
+reporter currently supports effect inspection/application rather than a
+bounded authoritative domain read. The old synthesis handler obtains the
+bundle through queue payload expansion and submits a draft through the old
+result route. Its completion hook applies content and selects either ordinary
+review or repair-review from old job origin. It also has non-submit exits for a
+missing/thin bundle, writer-contract failure and geographic contradiction.
+Binding only the happy path would either restore an old client, duplicate the
+bundle in taskq, call a planner after model work, or silently discard those
+blocked outcomes.
+
+**Resolution:** extend the closed private union with a
+`content_synthesis` family. A bounded `prepare` request may resolve only the
+exact bundle id already stored in the current strict task input and returns
+either committed terminal truth or the synthesis-ready writer bundle under
+the 64KB response ceiling. The terminal operation set is
+`synthesized | bundle_blocked | geo_blocked | writer_blocked`; at most one may
+commit per job/entity. The API applies either the strict draft or authoritative
+pipeline blocker and effect receipt atomically at database time. The producer
+preselects at most one fully materialized `review_scope` branch with kind
+`review | repair_review`; only a committed synthesized outcome returns it.
+
+Every metered synthesis and repair call uses ADR-031 provider control lane
+`content_synthesis`, operation `synthesize`. The handler performs no discovery,
+never sees an attempt id, and cannot request arbitrary artifacts. Prepare,
+apply and ambiguous-response replay return identical terminal truth and
+children. Missing, expired, superseded, entity-mismatched or firewall-invalid
+artifacts fail closed before provider work.
+
+This is a Tier-3 internal integration correction. It changes no taskq
+Protocol, Function Manifest, SQL contract, migration or public facade. The
+owner has authorized internal self-review while the external reviewer is
+unavailable; the resolution is recorded before implementation.
 
 ### S5-QD-FR-CQ-15 — Listing artifact identity and synthesis eligibility exist only at completion time *(resolved: producer-minted bundle identity plus authoritative typed disposition)*
 

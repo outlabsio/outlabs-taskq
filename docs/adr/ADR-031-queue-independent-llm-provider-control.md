@@ -2,7 +2,8 @@
 
 **Status:** Accepted 2026-07-23
 **Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13; amended by the approved
-S5-QD-FR-CQ-11 photo-verification binding
+S5-QD-FR-CQ-11 photo-verification, CQ-14 editorial-enrichment and CQ-16
+content-synthesis bindings
 **Amends:** ADR-022
 
 **Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
@@ -12,6 +13,11 @@ unknown-cost expiry.
 **Amended 2026-07-23:** CQ-11 adds the closed `photo_verification` lane with
 operation `verify`; it uses the same reserve/settle state machine and does not
 create a lane-specific provider wrapper.
+
+**Amended 2026-07-23:** CQ-14 adds `editorial_enrichment/enrich`, and CQ-16
+adds `content_synthesis/synthesize`. Both use the same control state machine;
+neither creates a provider wrapper or moves provider execution out of the
+worker.
 
 ## Context
 
@@ -90,7 +96,8 @@ without seeing an attempt id or fence.
    Taskq makes no exactly-once claim for external provider reads, but QDarte
    never silently rewrites possibly incurred cost as known or zero usage.
 9. The closed lane/operation pairs currently are
-   `tripadvisor_classifier/classify` and `photo_verification/verify`. The
+   `tripadvisor_classifier/classify`, `photo_verification/verify`,
+   `editorial_enrichment/enrich`, and `content_synthesis/synthesize`. The
    control family is shared by every native LLM lane. Per-lane provider
    wrappers, old queue job/attempt/client/lifecycle imports, caller clocks and
    caller idempotency are forbidden.
