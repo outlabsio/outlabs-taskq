@@ -1,6 +1,6 @@
 # taskq — 0.1.x / 0.2.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.2.3 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026/027/029: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0012 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.3 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.2.3 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026/027/029/030: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0013 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.3 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -1351,3 +1351,14 @@ catalog and activates only independently proven views.
    unknown/inactive outcomes, redaction, SQL/HTTP/raw-state parity,
    authorization-before-decode, bounded plans and artifacts. No timeline,
    arbitrary filter, raw relation grant or all-queue projection exists.
+
+8. **Immutable composite-assignment repair.** Migration
+   `0013_workflow_page_composite_repair.sql` requires the exact post-0012
+   contract/capability/catalog state and replaces only the body of the existing
+   `taskq.get_workflow_page(uuid,integer,uuid)` identity. Migration 0011's
+   single-composite `SELECT ... INTO` is preserved immutably; PostgreSQL treats
+   that form as one record literal assigned to the first bigint field.
+   Migration 0013 assigns all six count columns explicitly, raises TQ500 if the
+   invariant row is absent, and changes no identity, result shape, grants,
+   metadata, capability, SQL revision or wire behavior. Fresh installs and full
+   upgrades must execute 0011→0012→0013 and prove a non-empty page.
