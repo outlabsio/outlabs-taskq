@@ -73,6 +73,7 @@ def main() -> None:
         AdmissionReserveOutcome,
         CancellationToken,
         Complete,
+        Followup,
         JobContext,
         TaskQ,
         TaskRegistry,
@@ -113,6 +114,14 @@ def main() -> None:
     assert TaskQ is not None
     assert TaskRegistry is not None
     assert Complete is not None
+    assert Followup(step="artifact-child", job_type="artifact.child").model_dump(
+        mode="json", exclude_none=True
+    ) == {
+        "step": "artifact-child",
+        "job_type": "artifact.child",
+        "payload": {},
+        "headers": {},
+    }
     assert CancellationToken is not None
     assert JobContext is not None
     assert WorkerOptions().concurrency == 1
@@ -153,8 +162,9 @@ def main() -> None:
         "0005_read_model_conformance",
         "0006_activate_ready_read_model",
         "0007_admission_reservations",
+        "0008_followups",
     ]
-    assert len(FUNCTIONS) == 46
+    assert len(FUNCTIONS) == 47
 
     if args.mode != "core":
         return
