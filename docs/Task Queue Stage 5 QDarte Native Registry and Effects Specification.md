@@ -622,6 +622,58 @@ reservation, failover and usage-event behavior. No native handler imports the
 old job, attempt, client, lifecycle service, reservation route or execution
 table.
 
+Translation uses the same control in lane `translation`, operation
+`translate`. Its strict input contains the producer-read source locale,
+revision digest and bounded source fields, so the native handler performs no
+application-database or arbitrary filesystem read. Before provider egress a
+closed `translation` prepare request authorizes the current task and confirms
+that the current canonical source still has the planned revision. It returns
+committed terminal truth, `ready`, or the fixed `source_stale` posture; it
+never returns arbitrary domain content because the bounded source is already
+in the task input.
+
+The producer also materializes at most one `review_scope` child labelled
+`review | repair_review` before enqueue. A successful bounded translation
+effect upserts the exact target locale, stamps provenance and clears only the
+satisfied locale hold at PostgreSQL time; only then may the handler return
+the planned review child atomically with task settlement. `source_stale`
+performs no provider call, locale mutation or child insertion. Provider
+failure remains a retryable task failure with no translation effect. Exact
+prepare/apply replay returns the same terminal outcome, receipt and child.
+The old translation result route, provider-admission client, attempt/event
+objects and completion-time review planner are forbidden from the native
+module graph.
+
+#### Completion-hook reclassification sweep
+
+The CQ-11 source sweep is complete before the remaining FR-03 bindings. The
+old completion hooks establish these required native dispositions:
+
+- `buzz_discover_scope`: bounded result effect plus its already planned rescue
+  branch; no completion-time planner survives;
+- `region_rescue_scope`: authoritative rescue/media effects plus a preplanned
+  photo-find branch;
+- `photo_find_scope`: authoritative media effect plus mutually exclusive
+  preplanned verify or repair-review branches;
+- `translation_scope`: authoritative locale effect plus one preplanned normal
+  or repair-review branch, as frozen above;
+- `review_scope`: authoritative review effect plus closed preplanned publish,
+  repair and stale-translation branches; the current completion hook is not
+  read-only;
+- `region_completion_scope`, `publish_scope`, `discovery.import_batch`, and
+  `tripadvisor_region_import`: authoritative effect only, with no
+  completion-time child;
+- `open_source_discover_scope` and `tripadvisor_session_prime`: their
+  immutable artifact/operation receipt plus already-declared preplanned
+  children; and
+- `frontend_deploy_scope`: a separately inspected operation receipt with no
+  domain-effect or child-planning shortcut.
+
+Each binding must cite the old source marker in the machine effect inventory
+and replace it with the native handler/domain owner when implemented. Any
+later source trace that contradicts this table is a Contract question; it may
+not be coded around.
+
 ### 6.3 Settlement separation
 
 The old `publish_scope` mutation inside `complete_job` is a deletion target.

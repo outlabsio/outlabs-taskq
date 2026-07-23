@@ -3,7 +3,7 @@
 **Status:** Accepted 2026-07-23
 **Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13; amended by the approved
 S5-QD-FR-CQ-11 photo-verification, CQ-14 editorial-enrichment and CQ-16
-content-synthesis bindings
+content-synthesis bindings; amended by CQ-17 translation binding
 **Amends:** ADR-022
 
 **Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
@@ -18,6 +18,11 @@ create a lane-specific provider wrapper.
 adds `content_synthesis/synthesize`. Both use the same control state machine;
 neither creates a provider wrapper or moves provider execution out of the
 worker.
+
+**Amended 2026-07-23:** CQ-17 adds `translation/translate`. Translation uses
+the same control state machine over its producer-inlined, revision-bound
+source input; it does not retain the old provider-admission client or expose a
+translation-specific provider proxy.
 
 ## Context
 
@@ -97,10 +102,11 @@ without seeing an attempt id or fence.
    never silently rewrites possibly incurred cost as known or zero usage.
 9. The closed lane/operation pairs currently are
    `tripadvisor_classifier/classify`, `photo_verification/verify`,
-   `editorial_enrichment/enrich`, and `content_synthesis/synthesize`. The
-   control family is shared by every native LLM lane. Per-lane provider
-   wrappers, old queue job/attempt/client/lifecycle imports, caller clocks and
-   caller idempotency are forbidden.
+   `editorial_enrichment/enrich`, `content_synthesis/synthesize`, and
+   `translation/translate`. The control family is shared by every native LLM
+   lane. Per-lane provider wrappers, old queue
+   job/attempt/client/lifecycle imports, caller clocks and caller idempotency
+   are forbidden.
 
 ## Consequences
 
