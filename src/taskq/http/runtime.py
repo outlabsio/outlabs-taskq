@@ -33,8 +33,8 @@ logger = logging.getLogger("taskq.runtime")
 # Set membership alone exposes no newly added capability surface; it only lets
 # an already-deployed runtime survive additive metadata revisions while each
 # later transport/facade surface remains separately gated.
-SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0"})
-ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0"})
+SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1"})
+ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0", "0.2.1"})
 
 
 def _require_supported_sql_contract(
