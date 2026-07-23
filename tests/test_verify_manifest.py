@@ -300,12 +300,13 @@ def _failed_check(report: object, name: str) -> object:
     return matches[0]
 
 
-def test_machine_manifest_has_closed_0_2_0_function_surface() -> None:
-    assert len(FUNCTIONS) == 47
+def test_machine_manifest_has_closed_0_2_1_function_surface() -> None:
+    assert len(FUNCTIONS) == 55
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
     assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS
     assert "taskq.reserve_admission(text,text,text,uuid,integer,integer)" in FUNCTIONS
     assert "taskq._enqueue_followup(uuid,text,jsonb,integer)" in FUNCTIONS
+    assert "taskq.create_workflow(text,text,jsonb,text[],text)" in FUNCTIONS
     assert all("PUBLIC" not in spec.grants for spec in FUNCTIONS.values())
 
 

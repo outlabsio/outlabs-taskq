@@ -33,6 +33,9 @@ from taskq.protocol import (
     QueueProfile,
     RedriveFailedResult,
     SettleResult,
+    WorkflowAuthorizationProjection,
+    WorkflowKind,
+    WorkflowResult,
 )
 
 TTransport = TypeVar("TTransport")
@@ -268,6 +271,35 @@ class HousekeeperTransport(ClosableTransport, Protocol):
 
 
 @runtime_checkable
+class WorkflowProducerTransport(ClosableTransport, Protocol):
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+    ) -> WorkflowResult: ...
+
+    async def seal_workflow(self, workflow_id: UUID, actor: str) -> WorkflowResult: ...
+
+
+@runtime_checkable
+class WorkflowAuthorizationLookupTransport(ClosableTransport, Protocol):
+    async def get_workflow_authorization_projection(
+        self, workflow_id: UUID
+    ) -> WorkflowAuthorizationProjection: ...
+
+
+@runtime_checkable
+class WorkflowOperatorTransport(ClosableTransport, Protocol):
+    async def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult: ...
+
+
+@runtime_checkable
 class TaskqTransport(
     ProducerTransport,
     RunnerTransport,
@@ -275,6 +307,9 @@ class TaskqTransport(
     AuthorizationLookupTransport,
     OperatorTransport,
     HousekeeperTransport,
+    WorkflowProducerTransport,
+    WorkflowAuthorizationLookupTransport,
+    WorkflowOperatorTransport,
     Protocol,
 ):
     """Complete direct-SQL transport intersection retained for compatibility."""
@@ -289,5 +324,8 @@ __all__ = [
     "ProducerTransport",
     "RunnerTransport",
     "TaskqTransport",
+    "WorkflowAuthorizationLookupTransport",
+    "WorkflowOperatorTransport",
+    "WorkflowProducerTransport",
     "non_owning_transport_view",
 ]

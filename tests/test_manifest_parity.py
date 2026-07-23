@@ -33,6 +33,12 @@ BEHAVIOR_GROUPS = {
         "taskq.enqueue_many(text,jsonb)",
         "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
     },
+    "workflow": {
+        "taskq.cancel_workflow(uuid,text,text)",
+        "taskq.create_workflow(text,text,jsonb,text[],text)",
+        "taskq.get_workflow_authorization_projection(uuid)",
+        "taskq.seal_workflow(uuid,text)",
+    },
     "runner": {
         "taskq.cancel_running_job(uuid,uuid,text,text)",
         "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
@@ -231,9 +237,14 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.2.0"
+    assert meta["contract_version"] == "0.2.1"
     assert _json(meta["capabilities"]) == {
-        "active": ["admission_reservations", "followups", "read_model_list_ready"]
+        "active": [
+            "admission_reservations",
+            "dependencies_workflows",
+            "followups",
+            "read_model_list_ready",
+        ]
     }
 
     await runner.fetchrow(
@@ -414,4 +425,4 @@ async def test_registered_error_representatives(
             "r3_errors",
             ZERO_UUID,
         )
-    assert capability.value.sqlstate == "TQ501"
+    assert capability.value.sqlstate == "TQ422"

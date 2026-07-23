@@ -79,6 +79,9 @@ def main() -> None:
         TaskRegistry,
         WorkerOptions,
         WorkerSupervisor,
+        WorkflowKind,
+        WorkflowResult,
+        WorkflowStatus,
     )
     from taskq.sql import discover_migrations
     from taskq.sql.manifest import FUNCTIONS
@@ -125,6 +128,13 @@ def main() -> None:
     assert CancellationToken is not None
     assert JobContext is not None
     assert WorkerOptions().concurrency == 1
+    workflow = WorkflowResult(
+        outcome="created",
+        workflow_id=uuid4(),
+        status=WorkflowStatus.RUNNING,
+    )
+    assert workflow.status is WorkflowStatus.RUNNING
+    assert WorkflowKind.DAG.value == "dag"
 
     async def smoke_testing() -> None:
         fake = FakeTaskQClient(queues=("artifact",))
@@ -163,8 +173,9 @@ def main() -> None:
         "0006_activate_ready_read_model",
         "0007_admission_reservations",
         "0008_followups",
+        "0009_workflows",
     ]
-    assert len(FUNCTIONS) == 47
+    assert len(FUNCTIONS) == 55
 
     if args.mode != "core":
         return

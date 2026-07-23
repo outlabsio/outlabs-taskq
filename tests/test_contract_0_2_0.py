@@ -341,6 +341,10 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 )
             ).first()
             assert settled is not None and settled.result == "ok"
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[8:9])
+            )
+            assert applied == ["0009_workflows"]
             report = await verify(conn)
             assert report.ok
     finally:

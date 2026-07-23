@@ -55,6 +55,10 @@ from taskq.protocol import (
     SettleOkResult,
     SettleRetryScheduledResult,
     TqCode,
+    WorkflowAuthorizationProjection,
+    WorkflowKind,
+    WorkflowResult,
+    WorkflowStatus,
 )
 from taskq.registry import FollowupTarget, RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.settings import WorkerSettings
@@ -66,6 +70,9 @@ from taskq.transport import (
     ProducerTransport,
     RunnerTransport,
     TaskqTransport,
+    WorkflowAuthorizationLookupTransport,
+    WorkflowOperatorTransport,
+    WorkflowProducerTransport,
     non_owning_transport_view,
 )
 from taskq.worker import (
@@ -164,5 +171,12 @@ __all__ = [
     "WorkerServiceState",
     "WorkerSettings",
     "WorkerSupervisor",
+    "WorkflowAuthorizationLookupTransport",
+    "WorkflowAuthorizationProjection",
+    "WorkflowKind",
+    "WorkflowOperatorTransport",
+    "WorkflowProducerTransport",
+    "WorkflowResult",
+    "WorkflowStatus",
     "__version__",
 ]

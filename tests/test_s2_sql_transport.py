@@ -24,6 +24,7 @@ from taskq.protocol import (
     EnqueueStatus,
     Followup,
     SettleOutcome,
+    WorkflowKind,
 )
 from taskq.sql.manifest import (
     FUNCTIONS,
@@ -55,7 +56,7 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
 
 def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
-    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 36
+    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 40
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
@@ -174,6 +175,43 @@ async def test_concurrent_transport_dedup_matches_protocol_outcomes(
     assert len({result.job_id for result in results}) == 1
 
 
+async def test_sql_transport_workflow_surface_is_typed_and_capability_sized(
+    pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    queue = "s2_workflow"
+    await _queue(transports, queue)
+    workflow = await transports["producer"].create_workflow(
+        "s2-workflow",
+        WorkflowKind.DAG,
+        declared_queues=[queue],
+        actor="planner",
+    )
+    assert workflow.outcome == "created"
+    projection = await transports["observer"].get_workflow_authorization_projection(
+        workflow.workflow_id
+    )
+    assert projection.workflow_id == workflow.workflow_id
+    assert projection.declared_queues == (queue,)
+
+    command = EnqueueCommand(
+        queue=queue,
+        job_type="tests.workflow",
+        payload={"value": 1},
+        workflow_id=workflow.workflow_id,
+        step_key="root",
+    )
+    root = await transports["producer"].enqueue(command)
+    sealed = await transports["producer"].seal_workflow(workflow.workflow_id, "planner")
+    assert sealed.outcome == "sealed"
+    replay = await transports["producer"].enqueue(command)
+    assert replay.created is False and replay.job_id == root.job_id
+    cancelled = await transports["operator"].cancel_workflow(
+        workflow.workflow_id, "operator", "stop"
+    )
+    assert cancelled.outcome == "cancel_requested"
+
+
 async def test_runner_transport_all_commands_and_fence_redaction(
     pg: object, transports: dict[str, SqlTaskqTransport], caplog: pytest.LogCaptureFixture
 ) -> None:
@@ -273,7 +311,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.2.0"
+    assert meta.contract_version == "0.2.1"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -364,7 +402,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.2.0"
+    assert (await transport.get_contract_meta()).contract_version == "0.2.1"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

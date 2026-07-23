@@ -394,6 +394,40 @@ def test_inbound_command_typo_is_rejected() -> None:
         )
 
 
+def test_workflow_enqueue_shape_is_closed_before_transport() -> None:
+    workflow_id = uuid4()
+    dependency = uuid4()
+    valid = EnqueueCommand(
+        queue="default",
+        job_type="math.double",
+        payload={"value": 3},
+        workflow_id=workflow_id,
+        step_key="step-1",
+        depends_on=(dependency,),
+    )
+    assert valid.workflow_id == workflow_id
+    assert valid.depends_on == (dependency,)
+
+    invalid = (
+        {"workflow_id": workflow_id},
+        {"step_key": "step-1"},
+        {"depends_on": (dependency,)},
+        {
+            "workflow_id": workflow_id,
+            "step_key": "step-1",
+            "depends_on": (dependency, dependency),
+        },
+    )
+    for values in invalid:
+        with pytest.raises(ValidationError):
+            EnqueueCommand(
+                queue="default",
+                job_type="math.double",
+                payload={"value": 3},
+                **values,
+            )
+
+
 def test_outbound_result_ignores_unknown_additive_field() -> None:
     result = ENQUEUE_RESULT_ADAPTER.validate_python(
         {
@@ -512,7 +546,7 @@ def test_closed_tq_registry_normalizes_from_sqlstate_only(
 
 def test_protocol_command_registry_is_closed_and_self_consistent() -> None:
     assert set(COMMAND_SPECS) == set(CommandName)
-    assert len(COMMAND_SPECS) == 36
+    assert len(COMMAND_SPECS) == 40
     for spec in COMMAND_SPECS.values():
         assert spec.outcomes
         assert spec.retryable_errors == frozenset(

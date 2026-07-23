@@ -33,6 +33,14 @@ _PLAN_QUERIES = {
         SELECT j.id FROM taskq.jobs j
          WHERE j.queue = 'plan_a' AND j.status = 'queued'
            AND j.scheduled_at <= now() AND j.cancel_requested_at IS NULL
+           AND (
+               j.workflow_id IS NULL
+               OR NOT EXISTS (
+                   SELECT 1 FROM taskq.workflows w
+                    WHERE w.id = j.workflow_id
+                      AND w.cancel_requested_at IS NOT NULL
+               )
+           )
          ORDER BY j.priority, j.scheduled_at, j.id
          LIMIT 1 FOR UPDATE OF j SKIP LOCKED
     """,
@@ -69,6 +77,24 @@ _PLAN_QUERIES = {
          WHERE status IN ('succeeded','failed','cancelled')
            AND finished_at <= now()
     """,
+    "dependency_frontier": """
+        SELECT d.job_id
+          FROM taskq.job_deps d
+          JOIN taskq.jobs j ON j.id = d.job_id
+         WHERE d.depends_on = md5('workflow-plan-parent')::uuid
+           AND j.status = 'blocked'
+         ORDER BY d.job_id
+         LIMIT 100
+         FOR UPDATE OF j SKIP LOCKED
+    """,
+    "workflow_finalizer": """
+        SELECT id
+          FROM taskq.workflows
+         WHERE sealed_at IS NOT NULL AND status = 'running'
+         ORDER BY updated_at, id
+         LIMIT 100
+         FOR UPDATE SKIP LOCKED
+    """,
 }
 
 # ADR-019's B9 gate measures the exact finite H-08 view shapes.  These are
@@ -101,8 +127,9 @@ _PLAN_BINDINGS = {
     "claim": PlanBinding(
         functions=("taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",),
         body_fragments=(
-            "from taskq.jobs j where j.queue = p_queue and j.status = 'queued'",
+            "from taskq.jobs as j where j.queue = p_queue and j.status = 'queued'",
             "and j.scheduled_at <= now() and j.cancel_requested_at is null",
+            "or not exists ( select 1 from taskq.workflows as w",
             "order by j.priority, j.scheduled_at, j.id limit 1 for update of j skip locked",
         ),
     ),
@@ -140,6 +167,21 @@ _PLAN_BINDINGS = {
         body_fragments=(
             "where j.queue = q.name and j.status in ('succeeded','cancelled')",
             "and j.finished_at < now() - make_interval(hours => q.retention_hours)",
+        ),
+    ),
+    "dependency_frontier": PlanBinding(
+        functions=("taskq.cancel_dependents(uuid,text,integer)",),
+        body_fragments=(
+            "from taskq.job_deps as d join taskq.jobs as j on j.id = d.job_id",
+            "where d.depends_on = p_job_id and j.status = 'blocked'",
+            "order by d.job_id limit p_limit for update of j skip locked",
+        ),
+    ),
+    "workflow_finalizer": PlanBinding(
+        functions=("taskq.finalize_workflows(integer)",),
+        body_fragments=(
+            "from taskq.workflows where sealed_at is not null and status = 'running'",
+            "order by updated_at, id limit p_limit for update skip locked",
         ),
     ),
 }
@@ -273,12 +315,66 @@ async def _seed_million(pg: asyncpg.Connection) -> None:
     assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == _MILLION
 
 
+async def _seed_workflow_plan_frontiers(pg: asyncpg.Connection) -> None:
+    # Synthetic owner-only plan data: 5,000 direct edges make an accidental
+    # graph-wide scan visible, while 1,000 sealed workflows prove the ordered
+    # finalizer frontier uses its partial index.
+    await pg.execute(
+        """
+        INSERT INTO taskq.workflows (
+            id, workflow_key, kind, status, params, stats, created_by,
+            declared_queues, sealed_at, sealed_by, created_at, updated_at
+        )
+        SELECT md5('workflow-plan:' || g::text)::uuid,
+               'workflow-plan-' || g::text,
+               'dag', 'running', '{}'::jsonb, '{}'::jsonb, 'plans',
+               ARRAY['plan_a'], now(), 'plans',
+               now() - interval '2 hours',
+               now() - interval '1 hour' + g * interval '1 microsecond'
+          FROM generate_series(0, 999) AS g
+        """
+    )
+    await pg.execute(
+        """
+        INSERT INTO taskq.jobs (
+            id, queue, job_type, status, priority, payload,
+            workflow_id, step_key, workflow_intent_hash, pending_deps,
+            scheduled_at, lease_seconds, max_attempts, backoff_mode,
+            backoff_base_seconds, backoff_cap_seconds, finished_at
+        )
+        SELECT md5('workflow-plan-parent')::uuid,
+               'plan_a', 'test.plan', 'succeeded', 100, '{}'::jsonb,
+               md5('workflow-plan:0')::uuid, 'parent', repeat('a', 64), 0,
+               now() - interval '1 hour', 300, 5, 'fixed', 30, 300, now()
+        UNION ALL
+        SELECT md5('workflow-plan-child:' || g::text)::uuid,
+               'plan_a', 'test.plan', 'blocked', 100, '{}'::jsonb,
+               md5('workflow-plan:0')::uuid, 'child-' || g::text,
+               repeat('b', 64), 1,
+               now() - interval '1 hour', 300, 5, 'fixed', 30, 300, NULL
+          FROM generate_series(1, 5000) AS g
+        """
+    )
+    await pg.execute(
+        """
+        INSERT INTO taskq.job_deps(job_id, depends_on)
+        SELECT md5('workflow-plan-child:' || g::text)::uuid,
+               md5('workflow-plan-parent')::uuid
+          FROM generate_series(1, 5000) AS g
+        """
+    )
+    await pg.execute("ANALYZE taskq.jobs")
+    await pg.execute("ANALYZE taskq.workflows")
+    await pg.execute("ANALYZE taskq.job_deps")
+
+
 async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     if os.environ.get("TASKQ_PLAN_CHECKS") != "1":
         pytest.skip("set TASKQ_PLAN_CHECKS=1 to seed 1M rows and run structural EXPLAIN checks")
 
     await _assert_hot_path_bindings(pg)
     await _seed_million(pg)
+    await _seed_workflow_plan_frontiers(pg)
     await pg.execute("SET jit = off")
 
     claim = await _explain(
@@ -322,6 +418,22 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     )
     _assert_index_family(finished_stats, "jobs_finished_idx")
 
+    dependency_frontier = await _explain(pg, _PLAN_QUERIES["dependency_frontier"])
+    dependency_indexes = {node.get("Index Name") for node in _walk_plan(dependency_frontier)}
+    assert "job_deps_reverse_idx" in dependency_indexes
+    assert not _sort_nodes(dependency_frontier)
+    assert dependency_frontier["Actual Rows"] <= 100
+    assert not any(
+        node.get("Node Type") == "Seq Scan" and node.get("Relation Name") in {"job_deps", "jobs"}
+        for node in _walk_plan(dependency_frontier)
+    )
+
+    workflow_finalizer = await _explain(pg, _PLAN_QUERIES["workflow_finalizer"])
+    workflow_indexes = {node.get("Index Name") for node in _walk_plan(workflow_finalizer)}
+    assert "workflows_finalize_idx" in workflow_indexes
+    assert not _sort_nodes(workflow_finalizer)
+    assert workflow_finalizer["Actual Rows"] <= 100
+
     # Execute the exact owner helper too; EXPLAIN cannot expose SQL nested in
     # PL/pgSQL, so the representative subqueries above provide plan evidence.
     await pg.fetchval("SELECT taskq.refresh_stats_snapshot()")
@@ -351,7 +463,12 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
 
     capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
     assert json.loads(capabilities) == {
-        "active": ["admission_reservations", "followups", "read_model_list_ready"]
+        "active": [
+            "admission_reservations",
+            "dependencies_workflows",
+            "followups",
+            "read_model_list_ready",
+        ]
     }
 
 

@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.9"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.10"
 T = TypeVar("T")
 
 
@@ -241,7 +241,25 @@ class EnqueueCommand(BaseModel):
     backoff_mode: Literal["fixed", "exponential"] | None = None
     backoff_base: int | None = None
     backoff_cap: int | None = None
+    workflow_id: UUID | None = None
+    step_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    depends_on: tuple[UUID, ...] | None = Field(default=None, max_length=100)
     headers: dict[str, Any] | None = None
+
+    @model_validator(mode="after")
+    def _workflow_shape(self) -> EnqueueCommand:
+        if (self.workflow_id is None) != (self.step_key is None):
+            raise ValueError("workflow_id and step_key must be supplied together")
+        if self.workflow_id is None and self.depends_on:
+            raise ValueError("depends_on requires workflow_id")
+        if self.depends_on is not None and len(set(self.depends_on)) != len(self.depends_on):
+            raise ValueError("depends_on must contain distinct job ids")
+        return self
 
 
 class EnqueueManyItem(BaseModel):
@@ -925,12 +943,49 @@ class RedriveFailedResult(BaseModel):
     skipped: int
 
 
+class WorkflowKind(StrEnum):
+    DAG = "dag"
+    BATCH = "batch"
+
+
+class WorkflowStatus(StrEnum):
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class WorkflowResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: Literal[
+        "created",
+        "existed",
+        "sealed",
+        "already_sealed",
+        "cancel_requested",
+        "already_requested",
+        "already_terminal",
+    ]
+    workflow_id: UUID
+    status: WorkflowStatus
+
+
+class WorkflowAuthorizationProjection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: UUID
+    declared_queues: tuple[str, ...]
+
+
 class CommandName(StrEnum):
     RESERVE_ADMISSION = "reserve_admission"
     FINISH_ADMISSION = "finish_admission"
     CANCEL_ADMISSION = "cancel_admission"
     ENQUEUE = "enqueue"
     ENQUEUE_MANY = "enqueue_many"
+    CREATE_WORKFLOW = "create_workflow"
+    SEAL_WORKFLOW = "seal_workflow"
     CLAIM = "claim"
     HEARTBEAT = "heartbeat"
     COMPLETE = "complete"
@@ -940,6 +995,7 @@ class CommandName(StrEnum):
     CANCEL_RUNNING = "cancel_running"
     WORKER_HEARTBEAT = "worker_heartbeat"
     GET_AUTHORIZATION_PROJECTION = "get_authorization_projection"
+    GET_WORKFLOW_AUTHORIZATION_PROJECTION = "get_workflow_authorization_projection"
     GET_JOB = "get_job"
     GET_QUEUE_STATS = "get_queue_stats"
     GET_QUEUE_PROFILE = "get_queue_profile"
@@ -956,6 +1012,7 @@ class CommandName(StrEnum):
     RUN_NOW = "run_now"
     REPRIORITIZE = "reprioritize"
     CANCEL = "cancel"
+    CANCEL_WORKFLOW = "cancel_workflow"
     REDRIVE = "redrive"
     REDRIVE_FAILED = "redrive_failed"
     EXPIRE_JOB = "expire_job"
@@ -1143,10 +1200,10 @@ COMMAND_SPECS: Final = MappingProxyType(
             tuple(item.value for item in EnqueueStatus),
             (
                 TqCode.NOT_FOUND,
+                TqCode.CONFLICT,
                 TqCode.VALIDATION,
                 TqCode.BACKPRESSURE,
                 TqCode.INTERNAL,
-                TqCode.CAPABILITY,
             ),
         ),
         CommandName.ENQUEUE_MANY: _spec(
@@ -1154,6 +1211,18 @@ COMMAND_SPECS: Final = MappingProxyType(
             _PRODUCER,
             tuple(item.value for item in EnqueueStatus),
             (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.BACKPRESSURE, TqCode.INTERNAL),
+        ),
+        CommandName.CREATE_WORKFLOW: _spec(
+            "taskq.create_workflow(text,text,jsonb,text[],text)",
+            _PRODUCER,
+            ("created", "existed"),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
+        CommandName.SEAL_WORKFLOW: _spec(
+            "taskq.seal_workflow(uuid,text)",
+            _PRODUCER,
+            ("sealed", "already_sealed"),
+            (TqCode.NOT_FOUND,),
         ),
         CommandName.CLAIM: _spec(
             "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
@@ -1209,6 +1278,12 @@ COMMAND_SPECS: Final = MappingProxyType(
         ),
         CommandName.GET_AUTHORIZATION_PROJECTION: _spec(
             "taskq.get_authorization_projection(uuid)", _OBSERVER, ("ok", "missing")
+        ),
+        CommandName.GET_WORKFLOW_AUTHORIZATION_PROJECTION: _spec(
+            "taskq.get_workflow_authorization_projection(uuid)",
+            _OBSERVER,
+            ("ok",),
+            (TqCode.NOT_FOUND,),
         ),
         CommandName.GET_JOB: _spec(
             "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
@@ -1281,6 +1356,12 @@ COMMAND_SPECS: Final = MappingProxyType(
             _OPERATOR,
             tuple(item.value for item in CancelOutcome),
             (TqCode.NOT_FOUND,),
+        ),
+        CommandName.CANCEL_WORKFLOW: _spec(
+            "taskq.cancel_workflow(uuid,text,text)",
+            _OPERATOR,
+            ("cancel_requested", "already_requested", "already_terminal"),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION),
         ),
         CommandName.REDRIVE: _spec(
             "taskq.redrive_job(uuid,text,boolean)",
@@ -1871,4 +1952,8 @@ __all__ = [
     "TqErrorSpec",
     "WorkerPresenceWireData",
     "WorkerPresenceWireRequest",
+    "WorkflowAuthorizationProjection",
+    "WorkflowKind",
+    "WorkflowResult",
+    "WorkflowStatus",
 ]

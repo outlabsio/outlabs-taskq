@@ -57,6 +57,9 @@ from taskq.protocol import (
     RedriveFailedResult,
     SettleResult,
     SETTLE_RESULT_ADAPTER,
+    WorkflowAuthorizationProjection,
+    WorkflowKind,
+    WorkflowResult,
 )
 
 T = TypeVar("T")
@@ -68,6 +71,15 @@ _ADMISSION_CONFLICT_REASONS = frozenset(
         "reservation_expired",
         "reservation_cancelled",
         "finish_mismatch",
+    }
+)
+_WORKFLOW_CONFLICT_REASONS = frozenset(
+    {
+        "dependency_terminal",
+        "workflow_member_redrive_forbidden",
+        "workflow_mismatch",
+        "workflow_sealed",
+        "workflow_step_mismatch",
     }
 )
 
@@ -112,6 +124,38 @@ def _admission_conflict(error: TaskqConflictError) -> TaskqConflictError:
                 isinstance(value, dict)
                 and set(value) == {"reason"}
                 and value["reason"] in _ADMISSION_CONFLICT_REASONS
+            ):
+                return TaskqConflictError(details={"reason": value["reason"]}, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
+
+
+def _workflow_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason"}
+                and value["reason"] in _WORKFLOW_CONFLICT_REASONS
             ):
                 return TaskqConflictError(details={"reason": value["reason"]}, cause=error.cause)
             raise TaskqInternalError(cause=error.cause)
@@ -216,11 +260,14 @@ class SqlTaskqTransport:
                     :queue, :job_type, CAST(:payload AS jsonb), :priority, :scheduled_at,
                     :idempotency_key, :concurrency_key, :affinity_key, :max_attempts,
                     :lease_seconds, :backoff_mode, :backoff_base, :backoff_cap,
-                    NULL, NULL, NULL, NULL, CAST(:headers AS jsonb))""",
+                    :depends_on, :workflow_id, :step_key, NULL, CAST(:headers AS jsonb))""",
                 {
-                    **command.model_dump(exclude={"payload", "headers"}),
+                    **command.model_dump(exclude={"payload", "headers", "depends_on"}),
                     "payload": _json_param(command.payload),
                     "headers": _json_param(command.headers),
+                    "depends_on": (
+                        list(command.depends_on) if command.depends_on is not None else None
+                    ),
                 },
             )
             created = row["created"]
@@ -238,6 +285,60 @@ class SqlTaskqTransport:
                     "scheduled_at": command.scheduled_at,
                 }
             )
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _workflow_conflict(error) from error
+
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.create_workflow("
+                ":workflow_key,:kind,CAST(:params AS jsonb),:declared_queues,:actor)",
+                {
+                    "workflow_key": workflow_key,
+                    "kind": str(kind),
+                    "params": _json_param(params or {}),
+                    "declared_queues": list(declared_queues),
+                    "actor": actor,
+                },
+            )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.CREATE_WORKFLOW, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _workflow_conflict(error) from error
+
+    async def seal_workflow(
+        self,
+        workflow_id: UUID,
+        actor: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.seal_workflow(:workflow_id,:actor)",
+                {"workflow_id": workflow_id, "actor": actor},
+            )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.SEAL_WORKFLOW, result.outcome)
+            return result
 
         return await self._run(operation, connection=connection)
 
@@ -670,6 +771,19 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def get_workflow_authorization_projection(
+        self, workflow_id: UUID
+    ) -> WorkflowAuthorizationProjection:
+        async def operation(conn: AsyncConnection) -> WorkflowAuthorizationProjection:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_workflow_authorization_projection(:workflow_id)",
+                {"workflow_id": workflow_id},
+            )
+            return WorkflowAuthorizationProjection.model_validate(row)
+
+        return await self._run(operation)
+
     async def get_job(
         self,
         job_id: UUID,
@@ -899,6 +1013,21 @@ class SqlTaskqTransport:
             )
             result = CancelResult.model_validate(row)
             self._validated_outcome(CommandName.CANCEL, result.result)
+            return result
+
+        return await self._run(operation)
+
+    async def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult:
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.cancel_workflow(:workflow_id,:actor,:reason)",
+                {"workflow_id": workflow_id, "actor": actor, "reason": reason},
+            )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.CANCEL_WORKFLOW, result.outcome)
             return result
 
         return await self._run(operation)
