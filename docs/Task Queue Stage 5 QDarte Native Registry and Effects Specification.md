@@ -191,8 +191,8 @@ executable task, including tasks with no authoritative domain write:
 | `publish_scope` | `qdarte_publish` | `publish` domain effect; never settlement-triggered |
 | `region_completion_scope` | `qdarte_content` | metered model call plus `region_completion` domain effect |
 | `region_rescue_scope` | `qdarte_discovery` | provider reads plus `media_application` and `region_rescue` domain effects |
-| `review_scope` | `qdarte_content` | metered model call plus `review` domain effect |
-| `translation_scope` | `qdarte_content` | metered model call, bounded source-file read, `translation` domain effect |
+| `review_scope` | `qdarte_content` | revision-bound packet, metered model call, `review` domain effect and preplanned native branch selection |
+| `translation_scope` | `qdarte_content` | revision-bound source input, metered model call, `translation` domain effect and preplanned review selection |
 | `tripadvisor_classification_scope` | `qdarte_discovery` | metered model call plus `tripadvisor_classification` domain effect |
 | `tripadvisor_region_import` | `qdarte_discovery` | provider/filesystem operation plus `tripadvisor_import` domain effect |
 | `tripadvisor_session_prime` | `qdarte_discovery` | separately idempotent `tripadvisor_session` operation plus native follow-up |
@@ -643,6 +643,78 @@ prepare/apply replay returns the same terminal outcome, receipt and child.
 The old translation result route, provider-admission client, attempt/event
 objects and completion-time review planner are forbidden from the native
 module graph.
+
+#### Review member
+
+`review_scope` uses the existing private reporter route and
+`qdarte_content` authorization. Its old execution path is not read-only: it
+fetches live review material through the retiring queue client, writes review
+and media decisions, evaluates publication gates, chooses one of three repair
+families, and may queue a stale-English translation after a passing review.
+The native member replaces every one of those authorities rather than
+retaining the old result route or completion hook.
+
+The producer materializes a strict bounded review packet for each planned
+entity before enqueue. The packet contains only the authoritative content
+identity, canonical locale/title/body and their revision digest, bounded
+locale availability, bounded media references and classifications, bounded
+location/context fields, and the exact review policy inputs needed by the
+worker. It contains no database row, queue/job/attempt identity, credential,
+absolute host path, prompt, raw provider response, exception text or arbitrary
+metadata. A packet and all of its text plus media references fit inside the
+64KB native model ceiling. The worker performs no old review-entity HTTP read;
+local media bytes remain a worker-owned read reached only through canonical
+packet references.
+
+Each entity also carries a closed branch matrix materialized by the producer:
+
+- one `publish` child targeting `publish_scope`;
+- one `repair_copy` child targeting `content_synthesis_scope`;
+- one `repair_photo` child targeting `photo_find_scope`;
+- one `repair_translation` child targeting `translation_scope`; and
+- when the canonical source can require English refresh, one separately
+  identified `stale_translation` child targeting `translation_scope`.
+
+Every child is a full strict native input with a unique step and retry policy.
+Child scope equals parent scope. The handler may select at most one child per
+reviewed entity and at most 20 children for the job. The bounded packet,
+entity-plan and branch-matrix sets are equal and unique. Before provider work,
+the host validates that every outcome possible for the authoritative entity
+has its required branch; an incomplete matrix fails closed and produces no
+provider call or effect. Repair-ladder exhaustion is producer/domain state,
+not a handler counter: an exhausted repair returns a terminal blocked outcome
+and replay cannot extend the ladder.
+
+The closed `review` request carries only the packet revision, a bounded verdict,
+an optional bounded media decision and bounded provider-evidence fingerprints.
+It never carries attempt/worker identity, caller time, arbitrary result
+metadata, filesystem paths, prompts or raw model output. PostgreSQL time owns
+review history, current-review, media-selection, pipeline-state and
+repair-attempt mutations. The authoritative apply response is exactly one of:
+
+`publish | repair_copy | repair_photo | repair_translation |
+stale_translation | human_review | blocked | rejected | input_stale`.
+
+`input_stale` means the current authoritative content/media revision no longer
+matches the producer packet; it records no review/media mutation and selects no
+child. `publish` means only that the already-planned publish child may be
+returned; publication remains the child handler's domain effect.
+`repair_*` and `stale_translation` select only their matching preplanned child.
+`human_review`, `blocked`, and `rejected` select none. Publishable-minimum,
+geography/catalog/media gates, deterministic confidence policy, media
+selection, review current/history, pipeline blockers and repair-attempt
+accounting remain in the authoritative effect transaction.
+
+The handler inspects the review effect before egress. A committed inspection
+skips all provider work and returns the same outcome, receipt and child. A
+pending effect reserves ADR-031 lane `review`, operation `review`, invokes the
+provider in the worker against the exact packet, applies the effect, then
+settles provider usage. Provider failure is retryable and creates no review
+effect. A response-lost apply replays byte-equivalent terminal truth and can
+never choose another branch. The old review-entity/result routes, provider
+reservation client, job/attempt/event models, result files and
+completion-time publish/repair/translation planners are forbidden from the
+native module graph.
 
 #### Completion-hook reclassification sweep
 

@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete and FR-03 is active. The native contact, website, classification, photo, editorial, listing-research, content-synthesis and translation effect families are complete. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on local PostgreSQL 18.3 using the CI-shaped Redis; the previously accepted exact-16.14 lane is unchanged and Ruff is clean. Published `v0.1.0a7` remains the exact QDarte pin. Runtime is 1176/1176 with one unrelated dependency warning, clean Ruff and 196-file MyPy; workers are 702/702 with clean Ruff and 64-file MyPy; the API is 1773 passed/10 unchanged unrelated baseline failures with clean Ruff and 205-file MyPy. The native translation family proves current-source revision preparation, shared provider admission/settlement, authoritative locale mutation, durable `source_stale`, response-loss replay and identical preplanned review selection without an old job/client/result route/completion hook. No service, provider, persistent database or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..031). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters; ADR-031 adds only QDarte's private closed provider-control reporter member. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | Freeze `review_scope` next: authoritative review/blocker effects plus closed producer-planned publish, repair and stale-translation branches. Re-derive its current completion hook before source work and preserve the 20-child/scope-equality rules |
+| Next review | Implement the frozen `review_scope` packet, ADR-031 provider member, authoritative effect and complete publish/copy/photo/translation branch matrix next; stop if the source-derived review/media/pipeline behavior cannot remain atomic with the effect |
 
 ## Now
 
@@ -100,6 +100,7 @@
     - [x] **FR-03D-SYNTHESIS · Native content-synthesis family complete** — runtime `c75be6b` adds exact bundle/review plans, the closed prepare/apply union, bounded terminal response and the ADR-031 `content_synthesis/synthesize` control member while narrowing the native child graph to review only. API `2e0504a` authorizes the current content task and exact planned bundle before returning a synthesis-ready artifact, uses database time, mutually excludes all four outcomes, applies draft or blocker truth plus artifact usage in the effect transaction, and validates provider reservation identity from the stored plan. Workers `e9d2685` prepare before egress, reserve/settle provider usage, commit one terminal outcome, select only the preplanned review child after `synthesized`, and make replay skip the provider. Runtime passes 1175, workers 697, taskq passes 584/1, and API passes 1770 with the same 10 unrelated baseline failures; Ruff and configured MyPy are clean throughout. No old queue client, attempt model or result route enters the native path; no service, provider, persistent database or production state changed.
     - [x] **FR-03D-TRANSLATION-SPEC · Native translation revision, effect and review contract frozen** — CQ-17 replaces the old provider-admission client and completion-time handoff with a current-source revision prepare, the shared ADR-031 `translation/translate` lane, a closed `translated | source_stale` effect and at most one producer-planned `review | repair_review` child. Only translated mutates the target locale and selects the child; stale source performs no egress, mutation or follow-up. The CQ-11 completion-hook sweep is now recorded for every remaining unbound family. No Tier-0 contract, SQL, migration, public route, QDarte source, database, provider or production state changed.
     - [x] **FR-03D-TRANSLATION · Native translation family complete** — runtime `0a019fb` replaces the filesystem/read-result shape with a strict source-revision plan, closed prepare/apply response and exact optional review branch while adding the private ADR-031 `translation/translate` member. API `a057ceb` authorizes the current content task and stored revision before egress, records stale source as durable terminal truth, reuses the queue-independent locale mutation kernel at database time and refuses unplanned provider/model pairs. Workers `a962fe9` prepares before provider use, reserves/settles metered usage, commits once, selects only the producer-planned review child after `translated`, and makes replay or `source_stale` perform zero provider calls. Runtime passes 1176, workers 702 and API 1773 pass/10 unchanged unrelated failures with clean Ruff and configured MyPy. No old queue client, attempt model, result route, result file or completion-time planner enters the native path; no service, provider, persistent database or production state changed.
+    - [x] **FR-03D-REVIEW-SPEC · Native review packet, effect and branch matrix frozen** — CQ-18 replaces the old review-entity read, result route and completion-time publish/repair/stale-translation planning with one producer-materialized revision-bound packet, the shared ADR-031 `review/review` member, a closed authoritative review effect and exact preplanned publish/copy/photo/translation alternatives. Database-time review/media/pipeline/repair mutation and branch selection share the effect transaction; only its typed outcome may select one matching child. Replay never reruns the provider or changes branch, incomplete matrices fail before egress, and stale input performs no review mutation or follow-up. No Tier-0 contract, SQL, migration, public route, QDarte source, database, provider or production state changed.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -354,6 +355,31 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-18 — Review needs authoritative input plus conditional publish/repair/translation branches *(resolved: revision-bound packet, closed review effect and complete preplanned branch matrix)*
+
+**Blocking evidence:** the old `review_scope` handler reads a live review
+entity through the retiring queue client and submits an attempt-bound result.
+The completion hook does substantially more than persist a grade: it applies
+media and review-current/history mutations, evaluates publishable-minimum and
+preflight gates, chooses copy/photo/translation repair, records repair-ladder
+state, may queue a stale-English translation after a pass, and writes pipeline
+blockers. The frozen native definition had only the inherited review payload
+and no exact input revision, effect outcome, or fully planned alternatives.
+Binding that shape would either preserve the old client/hook or silently remove
+business behavior.
+
+**Resolution:** the producer materializes one bounded revision-stamped review
+packet and complete applicable branch matrix per entity before enqueue. The
+private reporter adds the closed `review` effect and ADR-031 adds only
+`review/review`. The API authorizes the current stored task/packet, rejects
+stale input without mutation, applies review/media/pipeline/repair truth at
+database time, and returns one closed branch-selection outcome. The handler
+inspects before provider work, uses shared provider control, applies once and
+returns only the matching preplanned child. Missing alternatives fail before
+egress; repair exhaustion is structural/domain-owned; replay returns the same
+receipt and child. No old review read/result route, queue client, attempt model,
+result file or completion-time planner enters the native graph.
 
 ### S5-QD-FR-CQ-17 — Translation still depends on old provider admission and completion-time review planning *(resolved: revision prepare, native effect and preplanned review)*
 

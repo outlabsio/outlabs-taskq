@@ -3,7 +3,8 @@
 **Status:** Accepted 2026-07-23
 **Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13; amended by the approved
 S5-QD-FR-CQ-11 photo-verification, CQ-14 editorial-enrichment and CQ-16
-content-synthesis bindings; amended by CQ-17 translation binding
+content-synthesis bindings; amended by CQ-17 translation and CQ-18 review
+bindings
 **Amends:** ADR-022
 
 **Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
@@ -23,6 +24,11 @@ worker.
 the same control state machine over its producer-inlined, revision-bound
 source input; it does not retain the old provider-admission client or expose a
 translation-specific provider proxy.
+
+**Amended 2026-07-23:** CQ-18 adds `review/review`. The exact bounded,
+producer-materialized review packet is the provider request authority. Review
+provider execution remains in the worker; the control member neither fetches
+application state nor becomes a review proxy.
 
 ## Context
 
@@ -102,9 +108,9 @@ without seeing an attempt id or fence.
    never silently rewrites possibly incurred cost as known or zero usage.
 9. The closed lane/operation pairs currently are
    `tripadvisor_classifier/classify`, `photo_verification/verify`,
-   `editorial_enrichment/enrich`, `content_synthesis/synthesize`, and
-   `translation/translate`. The control family is shared by every native LLM
-   lane. Per-lane provider wrappers, old queue
+   `editorial_enrichment/enrich`, `content_synthesis/synthesize`,
+   `translation/translate`, and `review/review`. The control family is shared
+   by every native LLM lane. Per-lane provider wrappers, old queue
    job/attempt/client/lifecycle imports, caller clocks and caller idempotency
    are forbidden.
 
