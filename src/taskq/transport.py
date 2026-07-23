@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any, Literal, Protocol, TypeVar, cast, runtime_checkable
 from uuid import UUID
 
@@ -32,6 +33,12 @@ from taskq.protocol import (
     QueueStats,
     QueueProfile,
     RedriveFailedResult,
+    ScheduleActionResult,
+    ScheduleAuthorizationProjection,
+    ScheduleClaimResult,
+    ScheduleDefinition,
+    ScheduleProfile,
+    ScheduleWriteResult,
     SettleResult,
     WorkflowAuthorizationProjection,
     WorkflowKind,
@@ -269,6 +276,51 @@ class HousekeeperTransport(ClosableTransport, Protocol):
 
     async def janitor(self) -> dict[str, Any]: ...
 
+    async def claim_schedules(
+        self, worker_id: str, *, limit: int = 10, lease_seconds: int = 60
+    ) -> ScheduleClaimResult: ...
+
+    async def fire_schedule(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        occurrences: Sequence[datetime],
+        next_fire_at: datetime,
+    ) -> ScheduleActionResult: ...
+
+    async def schedule_error(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        error: str,
+        *,
+        retry_seconds: int = 30,
+    ) -> ScheduleActionResult: ...
+
+
+@runtime_checkable
+class ScheduleOperatorTransport(ClosableTransport, Protocol):
+    async def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        actor: str,
+        *,
+        expected_version: int | None = None,
+    ) -> ScheduleWriteResult: ...
+
+    async def get_schedule(self, name: str) -> ScheduleProfile: ...
+
+    async def retire_schedule(
+        self, name: str, expected_version: int, actor: str
+    ) -> ScheduleWriteResult: ...
+
+    async def get_schedule_authorization_projection(
+        self, name: str
+    ) -> ScheduleAuthorizationProjection: ...
+
 
 @runtime_checkable
 class WorkflowProducerTransport(ClosableTransport, Protocol):
@@ -310,6 +362,7 @@ class TaskqTransport(
     WorkflowProducerTransport,
     WorkflowAuthorizationLookupTransport,
     WorkflowOperatorTransport,
+    ScheduleOperatorTransport,
     Protocol,
 ):
     """Complete direct-SQL transport intersection retained for compatibility."""
@@ -323,6 +376,7 @@ __all__ = [
     "OperatorTransport",
     "ProducerTransport",
     "RunnerTransport",
+    "ScheduleOperatorTransport",
     "TaskqTransport",
     "WorkflowAuthorizationLookupTransport",
     "WorkflowOperatorTransport",

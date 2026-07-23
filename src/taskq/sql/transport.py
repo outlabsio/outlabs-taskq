@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import datetime
 from decimal import Decimal
 from types import MappingProxyType
 from typing import Any, Literal, TypeVar
@@ -55,6 +56,13 @@ from taskq.protocol import (
     QueueProfile,
     QueueControlOutcome,
     RedriveFailedResult,
+    ScheduleActionResult,
+    ScheduleAuthorizationProjection,
+    ScheduleClaim,
+    ScheduleClaimResult,
+    ScheduleDefinition,
+    ScheduleProfile,
+    ScheduleWriteResult,
     SettleResult,
     SETTLE_RESULT_ADAPTER,
     WorkflowAuthorizationProjection,
@@ -81,6 +89,35 @@ _WORKFLOW_CONFLICT_REASONS = frozenset(
         "workflow_sealed",
         "workflow_step_mismatch",
     }
+)
+_SCHEDULE_CONFLICT_REASONS = frozenset(
+    {"schedule_mismatch", "schedule_version_conflict", "schedule_retired"}
+)
+_SCHEDULE_PROFILE_FIELDS = (
+    "schedule_id",
+    "name",
+    "target",
+    "recurrence",
+    "catchup_policy",
+    "max_catchup",
+    "state",
+    "next_fire_at",
+    "last_fire_at",
+    "version",
+)
+_SCHEDULE_CLAIM_FIELDS = (
+    "schedule_id",
+    "name",
+    "definition_version",
+    "as_of",
+    "target",
+    "recurrence",
+    "catchup_policy",
+    "max_catchup",
+    "initialized",
+    "next_fire_at",
+    "token",
+    "lease_seconds",
 )
 
 METHOD_FUNCTIONS = MappingProxyType(
@@ -168,6 +205,50 @@ def _workflow_conflict(error: TaskqConflictError) -> TaskqConflictError:
             if isinstance(candidate, BaseException):
                 pending.append(candidate)
     raise TaskqInternalError(cause=error.cause)
+
+
+def _schedule_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    """Recover only the frozen reason and current version from SQL."""
+
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason", "current_version"}
+                and value["reason"] in _SCHEDULE_CONFLICT_REASONS
+                and isinstance(value["current_version"], int)
+                and not isinstance(value["current_version"], bool)
+                and value["current_version"] > 0
+            ):
+                return TaskqConflictError(details=value, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
+
+
+def _schedule_profile(value: Any) -> ScheduleProfile:
+    data = _nested_mapping(value, _SCHEDULE_PROFILE_FIELDS)
+    data["target"] = _json(data["target"])
+    data["recurrence"] = _json(data["recurrence"])
+    return ScheduleProfile.model_validate(data)
 
 
 class SqlTaskqTransport:
@@ -1032,6 +1113,97 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        actor: str,
+        *,
+        expected_version: int | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.put_schedule("
+                ":name,CAST(:definition AS jsonb),:actor,:expected_version)",
+                {
+                    "name": name,
+                    "definition": _json_param(request.model_dump(mode="json", exclude_none=True)),
+                    "actor": actor,
+                    "expected_version": expected_version,
+                },
+            )
+            result = ScheduleWriteResult(
+                outcome=str(row["outcome"]),
+                profile=_schedule_profile(row["profile"]),
+            )
+            self._validated_outcome(CommandName.PUT_SCHEDULE, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _schedule_conflict(error) from error
+
+    async def get_schedule(
+        self, name: str, *, connection: AsyncConnection | None = None
+    ) -> ScheduleProfile:
+        async def operation(conn: AsyncConnection) -> ScheduleProfile:
+            row = await self._one(conn, "SELECT * FROM taskq.get_schedule(:name)", {"name": name})
+            return _schedule_profile(row)
+
+        return await self._run(operation, connection=connection)
+
+    async def retire_schedule(
+        self,
+        name: str,
+        expected_version: int,
+        actor: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.retire_schedule(:name,:expected_version,:actor)",
+                {
+                    "name": name,
+                    "expected_version": expected_version,
+                    "actor": actor,
+                },
+            )
+            result = ScheduleWriteResult(
+                outcome=str(row["outcome"]),
+                profile=_schedule_profile(row["profile"]),
+            )
+            self._validated_outcome(CommandName.RETIRE_SCHEDULE, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _schedule_conflict(error) from error
+
+    async def get_schedule_authorization_projection(
+        self, name: str, *, connection: AsyncConnection | None = None
+    ) -> ScheduleAuthorizationProjection:
+        async def operation(conn: AsyncConnection) -> ScheduleAuthorizationProjection:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_schedule_authorization_projection(:name)",
+                {"name": name},
+            )
+            return ScheduleAuthorizationProjection.model_validate(row)
+
+        return await self._run(operation, connection=connection)
+
     async def redrive(self, job_id: UUID, actor: str, reset_progress: bool = False) -> bool:
         return bool(
             await self._operator_scalar(
@@ -1077,6 +1249,94 @@ class SqlTaskqTransport:
 
     async def janitor(self) -> dict[str, Any]:
         return dict(_json(await self._operator_scalar("taskq.janitor()", {})))
+
+    async def claim_schedules(
+        self,
+        worker_id: str,
+        *,
+        limit: int = 10,
+        lease_seconds: int = 60,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleClaimResult:
+        async def operation(conn: AsyncConnection) -> ScheduleClaimResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.claim_schedules(:worker_id,:limit,:lease_seconds)",
+                {
+                    "worker_id": worker_id,
+                    "limit": limit,
+                    "lease_seconds": lease_seconds,
+                },
+            )
+            schedules = []
+            for value in row["schedules"]:
+                data = _nested_mapping(value, _SCHEDULE_CLAIM_FIELDS)
+                data["target"] = _json(data["target"])
+                data["recurrence"] = _json(data["recurrence"])
+                schedules.append(ScheduleClaim.model_validate(data))
+            result = ScheduleClaimResult(state=str(row["state"]), schedules=tuple(schedules))
+            self._validated_outcome(CommandName.CLAIM_SCHEDULES, result.state)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def fire_schedule(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        occurrences: Sequence[datetime],
+        next_fire_at: datetime,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleActionResult:
+        async def operation(conn: AsyncConnection) -> ScheduleActionResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.fire_schedule("
+                ":schedule_id,:token,:definition_version,:occurrences,:next_fire_at)",
+                {
+                    "schedule_id": schedule_id,
+                    "token": token,
+                    "definition_version": definition_version,
+                    "occurrences": list(occurrences),
+                    "next_fire_at": next_fire_at,
+                },
+            )
+            result = ScheduleActionResult.model_validate(row)
+            self._validated_outcome(CommandName.FIRE_SCHEDULE, result.outcome)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def schedule_error(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        error: str,
+        *,
+        retry_seconds: int = 30,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleActionResult:
+        async def operation(conn: AsyncConnection) -> ScheduleActionResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.schedule_error("
+                ":schedule_id,:token,:definition_version,:error,:retry_seconds)",
+                {
+                    "schedule_id": schedule_id,
+                    "token": token,
+                    "definition_version": definition_version,
+                    "error": error,
+                    "retry_seconds": retry_seconds,
+                },
+            )
+            result = ScheduleActionResult.model_validate(row)
+            self._validated_outcome(CommandName.SCHEDULE_ERROR, result.outcome)
+            return result
+
+        return await self._run(operation, connection=connection)
 
 
 __all__ = ["METHOD_FUNCTIONS", "SqlTaskqTransport"]

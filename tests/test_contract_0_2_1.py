@@ -803,6 +803,10 @@ async def test_0008_to_0009_transition_is_atomic_and_capability_gated(
                     "read_model_list_ready",
                 ]
             }
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[9:10])
+            )
+            assert applied == ["0010_schedules"]
             report = await verify(conn)
             assert report.ok
     finally:

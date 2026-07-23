@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.2.1.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.2.2.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.2.1"
+CONTRACT_VERSION = "0.2.2"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -48,6 +48,8 @@ TABLES = frozenset(
         "jobs",
         "meta",
         "queues",
+        "schedule_occurrences",
+        "schedules",
         "schema_migrations",
         "workers",
         "workflows",
@@ -67,6 +69,8 @@ TABLE_SHAPES = {
     "jobs": (40, "62de93a7f2572cc9e3258ce631c632c6"),
     "meta": (3, "6b0aa3a5745ebdd662479daa8c766d1d"),
     "queues": (16, "56a64a19b9cdef25b8e842e5f0c16fa2"),
+    "schedule_occurrences": (4, "2a0e232576d3f28da82529575ca0815e"),
+    "schedules": (25, "88fc147fc072032e53292d85d4221ab0"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
     "workers": (9, "25f0d3e2a63909dd4c52719c1f53bae4"),
     "workflows": (16, "d3f3ac436c0c6b69a9f2a11ac8357018"),
@@ -86,6 +90,8 @@ CONSTRAINTS = {
     "jobs": (18, "d6ca78cf0e4b21e572cb0d70061280e9"),
     "meta": (1, "b8a6f433ca275e289861f29159c6d4f3"),
     "queues": (9, "b565d95eb81c18bd78660ebe7230dc2a"),
+    "schedule_occurrences": (2, "97470a067f0883a02ce785a3b0ac99ba"),
+    "schedules": (11, "ebdc41f67bf31c91d1fe215f9c59304f"),
     "schema_migrations": (1, "9a70b629e02d9c9c4c87285047e4c5fa"),
     "workers": (1, "21a9c8f0ac7e4e770db780e76f5c2909"),
     "workflows": (8, "57da0d13fc463f4e7034b21ecee615a9"),
@@ -117,6 +123,10 @@ INDEXES = {
     "jobs_workflow_step_uq": "7eeaab0df8faf0900e8ed4f24fc763d4",
     "meta_pkey": "0d779a67c6f4038a1c416b7775e6c96e",
     "queues_pkey": "afbb7fc868e58dcae6742808a3d01d91",
+    "schedule_occurrences_pkey": "76763c65afff61f8d950037577eda8b1",
+    "schedules_due_idx": "bba121e2f729b581d4a53a43d0ca809b",
+    "schedules_name_key": "5d8cd04fb9b1c0d04672afd153c405b8",
+    "schedules_pkey": "33ee4ba106b1ccf4848cd53cf216614f",
     "schema_migrations_pkey": "c72ebe664c34fb56088d702ab3bb8864",
     "uq_job_attempts_running": "dc6b831d4b3259c15d2a6c7f68b6794a",
     "workers_pkey": "c800776a247ce583b0e856c87493c7c4",
@@ -213,6 +223,50 @@ COMPOSITES = {
         ("profile", "taskq.queue_profile"),
         ("current_version", "bigint"),
     ),
+    "schedule_action_result": (
+        ("outcome", "text"),
+        ("replayed", "boolean"),
+        ("schedule_id", "uuid"),
+        ("jobs_enqueued", "integer"),
+        ("next_fire_at", "timestamp with time zone"),
+        ("state", "text"),
+        ("version", "bigint"),
+    ),
+    "schedule_auth_projection": (("name", "text"), ("queue", "text")),
+    "schedule_claim": (
+        ("schedule_id", "uuid"),
+        ("name", "text"),
+        ("definition_version", "bigint"),
+        ("as_of", "timestamp with time zone"),
+        ("target", "jsonb"),
+        ("recurrence", "jsonb"),
+        ("catchup_policy", "text"),
+        ("max_catchup", "integer"),
+        ("initialized", "boolean"),
+        ("next_fire_at", "timestamp with time zone"),
+        ("token", "uuid"),
+        ("lease_seconds", "integer"),
+    ),
+    "schedule_claim_batch": (
+        ("state", "text"),
+        ("schedules", "taskq.schedule_claim[]"),
+    ),
+    "schedule_profile": (
+        ("schedule_id", "uuid"),
+        ("name", "text"),
+        ("target", "jsonb"),
+        ("recurrence", "jsonb"),
+        ("catchup_policy", "text"),
+        ("max_catchup", "integer"),
+        ("state", "text"),
+        ("next_fire_at", "timestamp with time zone"),
+        ("last_fire_at", "timestamp with time zone"),
+        ("version", "bigint"),
+    ),
+    "schedule_write_result": (
+        ("outcome", "text"),
+        ("profile", "taskq.schedule_profile"),
+    ),
     "settle_result": (
         ("result", "text"),
         ("job_status", "text"),
@@ -252,6 +306,7 @@ taskq.cancel_running_job(uuid,uuid,text,text)|p_job_id uuid, p_attempt_id uuid, 
 taskq.cancel_workflow(uuid,text,text)|p_workflow_id uuid, p_actor text, p_reason text|taskq.workflow_result|plpgsql|v|u|taskq_operator
 taskq.claim_janitor_due()||boolean|plpgsql|v|u|
 taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid|taskq.claim_batch|plpgsql|v|u|taskq_runner
+taskq.claim_schedules(text,integer,integer)|p_worker_id text, p_limit integer DEFAULT 10, p_lease_seconds integer DEFAULT 60|taskq.schedule_claim_batch|plpgsql|v|u|taskq_housekeeper
 taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_result jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb, p_followups jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.create_workflow(text,text,jsonb,text[],text)|p_workflow_key text, p_kind text, p_params jsonb, p_declared_queues text[], p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.emit_event(uuid,uuid,text,text,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_event_type text, p_actor text, p_message text, p_data jsonb DEFAULT NULL::jsonb|void|plpgsql|v|u|
@@ -261,6 +316,7 @@ taskq.ensure_queue(text,jsonb,text)|p_name text, p_profile jsonb DEFAULT '{}'::j
 taskq.expire_job(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.expire_worker_leases(text,text)|p_worker_id text, p_actor text|jsonb|plpgsql|v|u|taskq_operator
 taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_error text, p_retryable boolean DEFAULT true, p_retry_after_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
+taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_occurrences timestamp with time zone[], p_next_fire_at timestamp with time zone|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.finish_admission(text,text,uuid,jsonb,jsonb)|p_queue text, p_idempotency_key text, p_handle uuid, p_job jsonb, p_receipt jsonb DEFAULT '{}'::jsonb|taskq.admission_finish_result|plpgsql|v|u|taskq_producer
 taskq.finalize_cancel_stragglers(integer)|p_limit integer|integer|plpgsql|v|u|
 taskq.finalize_dep_stragglers(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
@@ -270,6 +326,8 @@ taskq.get_contract_meta()||TABLE(contract_version text, capabilities jsonb)|sql|
 taskq.get_job(uuid,boolean,boolean,boolean,boolean)|p_job_id uuid, p_include_error boolean DEFAULT false, p_include_result boolean DEFAULT false, p_include_progress boolean DEFAULT false, p_include_payload boolean DEFAULT false|TABLE(job_id uuid, queue text, job_type text, status text, outcome text, priority smallint, attempt_count smallint, failure_count smallint, max_attempts smallint, created_at timestamp with time zone, scheduled_at timestamp with time zone, started_at timestamp with time zone, finished_at timestamp with time zone, updated_at timestamp with time zone, error text, result jsonb, progress jsonb, payload jsonb)|sql|s|u|taskq_observer
 taskq.get_queue_profile(text)|p_queue text|taskq.queue_profile|sql|s|u|taskq_observer
 taskq.get_queue_stats(text)|p_queue text DEFAULT NULL::text|TABLE(as_of timestamp with time zone, queue text, stats jsonb)|sql|s|u|taskq_observer
+taskq.get_schedule(text)|p_name text|taskq.schedule_profile|plpgsql|s|u|taskq_operator
+taskq.get_schedule_authorization_projection(text)|p_name text|taskq.schedule_auth_projection|plpgsql|s|u|taskq_operator
 taskq.get_workflow_authorization_projection(uuid)|p_workflow_id uuid|taskq.workflow_auth_projection|plpgsql|s|u|taskq_observer
 taskq.has_capability(text)|p_name text|boolean|sql|s|u|
 taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|TABLE(ok boolean, cancel_requested boolean, lease_expires_at timestamp with time zone)|plpgsql|v|u|taskq_runner
@@ -278,6 +336,7 @@ taskq.list_jobs(text,text,integer,jsonb)|p_queue text, p_view text, p_limit inte
 taskq.metrics()||TABLE(name text, labels jsonb, value numeric)|sql|s|u|taskq_observer
 taskq.pause_queue(text,text,text)|p_name text, p_actor text, p_reason text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.purge_queued(text,integer,text,text)|p_queue text, p_limit integer, p_actor text, p_reason text DEFAULT NULL::text|integer|plpgsql|v|u|taskq_operator
+taskq.put_schedule(text,jsonb,text,bigint)|p_name text, p_definition jsonb, p_actor text, p_expected_version bigint DEFAULT NULL::bigint|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.reap_expired(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
 taskq.reap_job(uuid)|p_job_id uuid|boolean|plpgsql|v|u|
 taskq.redrive_failed(text,integer,text)|p_queue text, p_limit integer, p_actor text|TABLE(redriven integer, skipped integer)|plpgsql|v|u|taskq_operator
@@ -285,10 +344,12 @@ taskq.redrive_job(uuid,text,boolean)|p_job_id uuid, p_actor text, p_reset_progre
 taskq.refresh_stats_snapshot()||void|plpgsql|v|u|
 taskq.release_job(uuid,uuid,text,text,integer,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_cause text DEFAULT 'released'::text, p_delay_seconds integer DEFAULT 0, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.reprioritize(uuid,smallint,text)|p_job_id uuid, p_priority smallint, p_actor text|text|plpgsql|v|u|taskq_operator
+taskq.retire_schedule(text,bigint,text)|p_name text, p_expected_version bigint, p_actor text|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.reserve_admission(text,text,text,uuid,integer,integer)|p_queue text, p_idempotency_key text, p_intent_hash text, p_handle uuid, p_reservation_ttl_seconds integer DEFAULT 300, p_receipt_ttl_seconds integer DEFAULT 2592000|taskq.admission_reservation|plpgsql|v|u|taskq_producer
 taskq.request_worker_shutdown(text,text,text)|p_worker_id text, p_queue text, p_actor text|integer|plpgsql|v|u|taskq_operator
 taskq.resume_queue(text,text)|p_name text, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.run_now(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_operator
+taskq.schedule_error(uuid,uuid,bigint,text,integer)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_error text, p_retry_seconds integer DEFAULT 30|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.seal_workflow(uuid,text)|p_workflow_id uuid, p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.set_concurrency_limit(text,integer,text)|p_key text, p_max_running integer, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_delay_seconds integer, p_reason text DEFAULT NULL::text, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
@@ -328,6 +389,7 @@ PUBLIC_ERRORS = {
     "taskq.cancel_job(uuid,text,text)": frozenset({"TQ001"}),
     "taskq.cancel_running_job(uuid,uuid,text,text)": frozenset(),
     "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)": frozenset({"TQ422"}),
+    "taskq.claim_schedules(text,integer,integer)": frozenset({"TQ422"}),
     "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)": frozenset({"TQ422", "TQ501"}),
     "taskq.create_workflow(text,text,jsonb,text[],text)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ422", "TQ429", "TQ500"}),
@@ -338,6 +400,9 @@ PUBLIC_ERRORS = {
     "taskq.expire_job(uuid,text)": frozenset({"TQ001"}),
     "taskq.expire_worker_leases(text,text)": frozenset(),
     "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)": frozenset({"TQ422"}),
+    "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)": frozenset(
+        {"TQ001", "TQ422", "TQ500"}
+    ),
     "taskq.finish_admission(text,text,uuid,jsonb,jsonb)": frozenset(
         {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
     ),
@@ -346,6 +411,8 @@ PUBLIC_ERRORS = {
     "taskq.get_job(uuid,boolean,boolean,boolean,boolean)": frozenset(),
     "taskq.get_queue_profile(text)": frozenset(),
     "taskq.get_queue_stats(text)": frozenset(),
+    "taskq.get_schedule(text)": frozenset({"TQ001"}),
+    "taskq.get_schedule_authorization_projection(text)": frozenset({"TQ001"}),
     "taskq.get_workflow_authorization_projection(uuid)": frozenset({"TQ001"}),
     "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)": frozenset({"TQ422"}),
     "taskq.janitor()": frozenset(),
@@ -353,16 +420,19 @@ PUBLIC_ERRORS = {
     "taskq.metrics()": frozenset(),
     "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
     "taskq.purge_queued(text,integer,text,text)": frozenset({"TQ001", "TQ422"}),
+    "taskq.put_schedule(text,jsonb,text,bigint)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.redrive_failed(text,integer,text)": frozenset({"TQ422"}),
     "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
     "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
     "taskq.reprioritize(uuid,smallint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
+    "taskq.retire_schedule(text,bigint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.reserve_admission(text,text,text,uuid,integer,integer)": frozenset(
         {"TQ001", "TQ409", "TQ422"}
     ),
     "taskq.request_worker_shutdown(text,text,text)": frozenset(),
     "taskq.resume_queue(text,text)": frozenset({"TQ001"}),
     "taskq.run_now(uuid,text)": frozenset({"TQ001", "TQ409"}),
+    "taskq.schedule_error(uuid,uuid,bigint,text,integer)": frozenset({"TQ001", "TQ422"}),
     "taskq.seal_workflow(uuid,text)": frozenset({"TQ001"}),
     "taskq.set_concurrency_limit(text,integer,text)": frozenset({"TQ422"}),
     "taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)": frozenset({"TQ422"}),
@@ -391,9 +461,18 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.2.1"',
+    "contract_version": '"0.2.2"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
-        '"followups", "read_model_list_ready"]}'
+        '"followups", "read_model_list_ready", "schedules"]}'
     ),
+}
+SCHEDULE_SEED = {
+    "name": "taskq-janitor-daily",
+    "target": '{"kind": "maintenance", "maintenance": "janitor"}',
+    "recurrence": '{"kind": "cron", "timezone": "UTC", "expression": "0 3 * * *"}',
+    "catchup_policy": "fire_once",
+    "max_catchup": 1,
+    "state": "active",
+    "version": 1,
 }

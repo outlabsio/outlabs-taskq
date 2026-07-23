@@ -23,6 +23,7 @@ from taskq.protocol import (
     EnqueueManyItem,
     EnqueueStatus,
     Followup,
+    ScheduleDefinition,
     SettleOutcome,
     WorkflowKind,
 )
@@ -56,7 +57,7 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
 
 def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
-    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 40
+    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 47
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
@@ -125,6 +126,69 @@ async def _claim(
     result = await transports["runner"].claim(queue, worker)
     assert result.state is ClaimState.CLAIMED
     return result.jobs[0].job_id, result.jobs[0].attempt_id
+
+
+async def test_schedule_operator_and_housekeeper_transports_are_typed_and_separate(
+    transports: dict[str, SqlTaskqTransport],
+) -> None:
+    suffix = uuid4().hex[:8]
+    queue = f"scheduled_{suffix}"
+    schedule_name = f"typed.{suffix}"
+    error_name = f"typed.error.{suffix}"
+    await _queue(transports, queue)
+    definition = ScheduleDefinition.model_validate(
+        {
+            "target": {
+                "kind": "job",
+                "queue": queue,
+                "job_type": "tests.echo",
+                "payload": {"value": 1},
+            },
+            "recurrence": {"kind": "interval", "interval_seconds": 60},
+            "catchup_policy": "fire_once",
+            "max_catchup": 1,
+        }
+    )
+
+    created = await transports["operator"].put_schedule(schedule_name, definition, "s2-test")
+    error_schedule = await transports["operator"].put_schedule(error_name, definition, "s2-test")
+    assert created.outcome == "created"
+    assert created.profile.target["queue"] == queue
+    projection = await transports["operator"].get_schedule_authorization_projection(schedule_name)
+    assert (projection.name, projection.queue) == (schedule_name, queue)
+    assert await transports["operator"].get_schedule(schedule_name) == created.profile
+
+    batch = await transports["housekeeper"].claim_schedules(
+        "schedule-worker", limit=100, lease_seconds=60
+    )
+    claim = next(item for item in batch.schedules if item.name == schedule_name)
+    initialized = await transports["housekeeper"].fire_schedule(
+        claim.schedule_id,
+        claim.token,
+        claim.definition_version,
+        (),
+        claim.as_of + timedelta(seconds=60),
+    )
+    assert initialized.outcome == "initialized"
+    assert initialized.replayed is False
+
+    error_claim = next(item for item in batch.schedules if item.name == error_name)
+    recorded = await transports["housekeeper"].schedule_error(
+        error_claim.schedule_id,
+        error_claim.token,
+        error_claim.definition_version,
+        "typed transport proof",
+    )
+    assert recorded.outcome == "error_recorded"
+
+    retired = await transports["operator"].retire_schedule(
+        schedule_name, created.profile.version, "s2-test"
+    )
+    assert retired.outcome == "retired"
+    assert retired.profile.state == "retired"
+    await transports["operator"].retire_schedule(
+        error_name, error_schedule.profile.version, "s2-test"
+    )
 
 
 async def test_producer_transport_created_existed_bulk_and_typed_error(
@@ -311,7 +375,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.2.1"
+    assert meta.contract_version == "0.2.2"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -402,7 +466,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.2.1"
+    assert (await transport.get_contract_meta()).contract_version == "0.2.2"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

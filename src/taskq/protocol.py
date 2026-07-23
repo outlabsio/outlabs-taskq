@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.10"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.11"
 T = TypeVar("T")
 
 
@@ -1019,6 +1019,146 @@ class WorkflowAuthorizationProjection(BaseModel):
     declared_queues: tuple[str, ...]
 
 
+class ScheduleState(StrEnum):
+    ACTIVE = "active"
+    PAUSED = "paused"
+    RETIRED = "retired"
+
+
+class ScheduleCatchupPolicy(StrEnum):
+    SKIP = "skip"
+    FIRE_ONCE = "fire_once"
+    FIRE_ALL = "fire_all"
+
+
+class ScheduleJobTarget(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["job"] = "job"
+    queue: str = Field(pattern=r"^[a-z0-9_]{1,57}$")
+    job_type: str = Field(
+        min_length=1,
+        max_length=120,
+        pattern=r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$",
+    )
+    payload: dict[str, Any] = Field(default_factory=dict)
+    headers: dict[str, Any] = Field(default_factory=dict)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    max_attempts: int | None = Field(default=None, ge=1, le=100)
+    lease_seconds: int | None = Field(default=None, ge=15, le=86400)
+    backoff_mode: Literal["fixed", "exponential"] | None = None
+    backoff_base: int | None = Field(default=None, ge=0, le=86400)
+    backoff_cap: int | None = Field(default=None, ge=0, le=604800)
+    concurrency_key: str | None = Field(default=None, min_length=1, max_length=255)
+    affinity_key: str | None = Field(default=None, min_length=1, max_length=255)
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 65536, "schedule payload")
+
+    @field_validator("headers")
+    @classmethod
+    def _headers_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 8192, "schedule headers")
+
+
+class ScheduleIntervalRecurrence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["interval"] = "interval"
+    interval_seconds: int = Field(ge=60, le=31_536_000)
+
+
+class ScheduleCronRecurrence(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["cron"] = "cron"
+    expression: str = Field(min_length=1, max_length=255)
+    timezone: str = Field(min_length=1, max_length=255)
+
+
+ScheduleRecurrence: TypeAlias = Annotated[
+    ScheduleIntervalRecurrence | ScheduleCronRecurrence,
+    Field(discriminator="kind"),
+]
+
+
+class ScheduleDefinition(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    target: ScheduleJobTarget
+    recurrence: ScheduleRecurrence
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int = Field(ge=1, le=100)
+    paused: bool = False
+
+
+class ScheduleProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    schedule_id: UUID
+    name: str
+    target: dict[str, Any]
+    recurrence: dict[str, Any]
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int
+    state: ScheduleState
+    next_fire_at: datetime
+    last_fire_at: datetime | None
+    version: int
+
+
+class ScheduleAuthorizationProjection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    queue: str | None
+
+
+class ScheduleWriteResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: Literal["created", "unchanged", "updated", "retired", "already_retired"]
+    profile: ScheduleProfile
+
+
+class ScheduleClaim(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    schedule_id: UUID
+    name: str
+    definition_version: int
+    as_of: datetime
+    target: dict[str, Any]
+    recurrence: dict[str, Any]
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int
+    initialized: bool
+    next_fire_at: datetime
+    token: UUID
+    lease_seconds: int
+
+
+class ScheduleClaimResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    state: Literal["empty", "claimed"]
+    schedules: tuple[ScheduleClaim, ...]
+
+
+class ScheduleActionResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: Literal["initialized", "fired", "skipped", "error_recorded", "stale"]
+    replayed: bool
+    schedule_id: UUID
+    jobs_enqueued: int
+    next_fire_at: datetime
+    state: ScheduleState
+    version: int
+
+
 class CreateWorkflowWireRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1104,6 +1244,13 @@ class CommandName(StrEnum):
     REPRIORITIZE = "reprioritize"
     CANCEL = "cancel"
     CANCEL_WORKFLOW = "cancel_workflow"
+    PUT_SCHEDULE = "put_schedule"
+    GET_SCHEDULE = "get_schedule"
+    RETIRE_SCHEDULE = "retire_schedule"
+    GET_SCHEDULE_AUTHORIZATION_PROJECTION = "get_schedule_authorization_projection"
+    CLAIM_SCHEDULES = "claim_schedules"
+    FIRE_SCHEDULE = "fire_schedule"
+    SCHEDULE_ERROR = "schedule_error"
     REDRIVE = "redrive"
     REDRIVE_FAILED = "redrive_failed"
     EXPIRE_JOB = "expire_job"
@@ -1456,6 +1603,48 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.cancel_workflow(uuid,text,text)",
             _OPERATOR,
             ("cancel_requested", "already_requested", "already_terminal"),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION),
+        ),
+        CommandName.PUT_SCHEDULE: _spec(
+            "taskq.put_schedule(text,jsonb,text,bigint)",
+            _OPERATOR,
+            ("created", "unchanged", "updated"),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
+        CommandName.GET_SCHEDULE: _spec(
+            "taskq.get_schedule(text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.RETIRE_SCHEDULE: _spec(
+            "taskq.retire_schedule(text,bigint,text)",
+            _OPERATOR,
+            ("retired", "already_retired"),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+        ),
+        CommandName.GET_SCHEDULE_AUTHORIZATION_PROJECTION: _spec(
+            "taskq.get_schedule_authorization_projection(text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.NOT_FOUND,),
+        ),
+        CommandName.CLAIM_SCHEDULES: _spec(
+            "taskq.claim_schedules(text,integer,integer)",
+            _HOUSEKEEPER,
+            ("empty", "claimed"),
+            (TqCode.VALIDATION,),
+        ),
+        CommandName.FIRE_SCHEDULE: _spec(
+            "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)",
+            _HOUSEKEEPER,
+            ("initialized", "fired", "skipped", "stale"),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.INTERNAL),
+        ),
+        CommandName.SCHEDULE_ERROR: _spec(
+            "taskq.schedule_error(uuid,uuid,bigint,text,integer)",
+            _HOUSEKEEPER,
+            ("error_recorded", "stale"),
             (TqCode.NOT_FOUND, TqCode.VALIDATION),
         ),
         CommandName.REDRIVE: _spec(
@@ -2058,6 +2247,19 @@ __all__ = [
     "RedriveWireRequest",
     "ReprioritizeWireRequest",
     "RetryClass",
+    "ScheduleActionResult",
+    "ScheduleAuthorizationProjection",
+    "ScheduleCatchupPolicy",
+    "ScheduleClaim",
+    "ScheduleClaimResult",
+    "ScheduleCronRecurrence",
+    "ScheduleDefinition",
+    "ScheduleIntervalRecurrence",
+    "ScheduleJobTarget",
+    "ScheduleProfile",
+    "ScheduleRecurrence",
+    "ScheduleState",
+    "ScheduleWriteResult",
     "SETTLE_RESULT_ADAPTER",
     "SettleAlreadySettledResult",
     "SettleConflictResult",

@@ -1063,6 +1063,28 @@ def _check_seed_state(conn: Connection) -> VerifyCheck:
         and conn.execute(text(f"SELECT 1 FROM {SCHEMA}.queues WHERE name = '_system'")).scalar()
     ):
         details.append("deferred seed queue '_system' is present")
+    if "schedules" in live:
+        schedule_seed = (
+            conn.execute(
+                text(
+                    f"""
+                SELECT name, target::text, recurrence::text, catchup_policy,
+                       max_catchup, state, version
+                  FROM {SCHEMA}.schedules
+                 WHERE target->>'kind' = 'maintenance'
+                """
+                )
+            )
+            .mappings()
+            .all()
+        )
+        if len(schedule_seed) != 1 or dict(schedule_seed[0]) != _manifest.SCHEDULE_SEED:
+            details.append(
+                f"maintenance schedule seed is {list(map(dict, schedule_seed))!r}, "
+                f"expected {_manifest.SCHEDULE_SEED!r}"
+            )
+    else:
+        details.append("cannot verify schedule seed: table 'schedules' is missing")
     return VerifyCheck(name="seed_state", ok=not details, details=tuple(details))
 
 

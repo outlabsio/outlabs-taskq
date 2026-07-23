@@ -224,6 +224,21 @@ async def _truncate_taskq(conn: asyncpg.Connection) -> None:
         ON CONFLICT (key) DO NOTHING
         """
     )
+    await conn.execute(
+        """
+        INSERT INTO taskq.schedules (
+            name, target, recurrence, catchup_policy, max_catchup, state,
+            initialized, next_fire_at, version, created_by, updated_by
+        ) VALUES (
+            'taskq-janitor-daily',
+            '{"kind":"maintenance","maintenance":"janitor"}'::jsonb,
+            '{"kind":"cron","expression":"0 3 * * *","timezone":"UTC"}'::jsonb,
+            'fire_once', 1, 'active', false, now(), 1,
+            'test-reset', 'test-reset'
+        )
+        ON CONFLICT (name) DO NOTHING
+        """
+    )
 
 
 @pytest.fixture

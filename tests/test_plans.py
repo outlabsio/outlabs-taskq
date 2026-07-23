@@ -95,6 +95,17 @@ _PLAN_QUERIES = {
          LIMIT 100
          FOR UPDATE SKIP LOCKED
     """,
+    "schedule_claim": """
+        SELECT id
+          FROM taskq.schedules
+         WHERE state = 'active'
+           AND next_fire_at <= now()
+           AND (retry_not_before IS NULL OR retry_not_before <= now())
+           AND (claim_token IS NULL OR claim_expires_at <= now())
+         ORDER BY next_fire_at, id
+         LIMIT 100
+         FOR UPDATE SKIP LOCKED
+    """,
 }
 
 # ADR-019's B9 gate measures the exact finite H-08 view shapes.  These are
@@ -182,6 +193,14 @@ _PLAN_BINDINGS = {
         body_fragments=(
             "from taskq.workflows where sealed_at is not null and status = 'running'",
             "order by updated_at, id limit p_limit for update skip locked",
+        ),
+    ),
+    "schedule_claim": PlanBinding(
+        functions=("taskq.claim_schedules(text,integer,integer)",),
+        body_fragments=(
+            "from taskq.schedules where state = 'active'",
+            "and next_fire_at <= v_now",
+            "order by next_fire_at, id limit p_limit for update skip locked",
         ),
     ),
 }
@@ -368,6 +387,34 @@ async def _seed_workflow_plan_frontiers(pg: asyncpg.Connection) -> None:
     await pg.execute("ANALYZE taskq.job_deps")
 
 
+async def _seed_schedule_plan_frontier(pg: asyncpg.Connection) -> None:
+    # 100k definitions are enough to make accidental schedule scans/sorts
+    # visible without multiplying the already-million-row job fixture's disk
+    # footprint. The schedule target/recurrence are static contract-valid JSON.
+    await pg.execute(
+        """
+        INSERT INTO taskq.schedules (
+            id, name, target, recurrence, catchup_policy, max_catchup, state,
+            initialized, next_fire_at, version, created_by, updated_by
+        )
+        SELECT md5('schedule-plan:' || g::text)::uuid,
+               'schedule-plan-' || g::text,
+               '{"kind":"job","queue":"plan_a","job_type":"test.plan",'
+               '"payload":{},"headers":{},"priority":null,"max_attempts":null,'
+               '"lease_seconds":null,"backoff_mode":null,"backoff_base":null,'
+               '"backoff_cap":null,"concurrency_key":null,"affinity_key":null}'::jsonb,
+               '{"kind":"interval","interval_seconds":3600}'::jsonb,
+               'fire_all', 10,
+               CASE WHEN g % 10 = 0 THEN 'paused' ELSE 'active' END,
+               true,
+               now() - interval '1 hour' + g * interval '1 microsecond',
+               1, 'plans', 'plans'
+          FROM generate_series(1, 100000) AS g
+        """
+    )
+    await pg.execute("ANALYZE taskq.schedules")
+
+
 async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     if os.environ.get("TASKQ_PLAN_CHECKS") != "1":
         pytest.skip("set TASKQ_PLAN_CHECKS=1 to seed 1M rows and run structural EXPLAIN checks")
@@ -375,6 +422,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     await _assert_hot_path_bindings(pg)
     await _seed_million(pg)
     await _seed_workflow_plan_frontiers(pg)
+    await _seed_schedule_plan_frontier(pg)
     await pg.execute("SET jit = off")
 
     claim = await _explain(
@@ -434,6 +482,16 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     assert not _sort_nodes(workflow_finalizer)
     assert workflow_finalizer["Actual Rows"] <= 100
 
+    schedule_claim = await _explain(pg, _PLAN_QUERIES["schedule_claim"])
+    schedule_indexes = {node.get("Index Name") for node in _walk_plan(schedule_claim)}
+    assert "schedules_due_idx" in schedule_indexes
+    assert not _sort_nodes(schedule_claim)
+    assert schedule_claim["Actual Rows"] <= 100
+    assert not any(
+        node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "schedules"
+        for node in _walk_plan(schedule_claim)
+    )
+
     # Execute the exact owner helper too; EXPLAIN cannot expose SQL nested in
     # PL/pgSQL, so the representative subqueries above provide plan evidence.
     await pg.fetchval("SELECT taskq.refresh_stats_snapshot()")
@@ -468,6 +526,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
             "dependencies_workflows",
             "followups",
             "read_model_list_ready",
+            "schedules",
         ]
     }
 

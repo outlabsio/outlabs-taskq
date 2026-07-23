@@ -39,6 +39,12 @@ BEHAVIOR_GROUPS = {
         "taskq.get_workflow_authorization_projection(uuid)",
         "taskq.seal_workflow(uuid,text)",
     },
+    "schedule_operator": {
+        "taskq.get_schedule(text)",
+        "taskq.get_schedule_authorization_projection(text)",
+        "taskq.put_schedule(text,jsonb,text,bigint)",
+        "taskq.retire_schedule(text,bigint,text)",
+    },
     "runner": {
         "taskq.cancel_running_job(uuid,uuid,text,text)",
         "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
@@ -74,7 +80,13 @@ BEHAVIOR_GROUPS = {
         "taskq.set_concurrency_limit(text,integer,text)",
         "taskq.update_queue_profile(text,jsonb,text,bigint)",
     },
-    "housekeeping": {"taskq.janitor()", "taskq.tick(integer)"},
+    "housekeeping": {
+        "taskq.claim_schedules(text,integer,integer)",
+        "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)",
+        "taskq.janitor()",
+        "taskq.schedule_error(uuid,uuid,bigint,text,integer)",
+        "taskq.tick(integer)",
+    },
 }
 
 
@@ -237,13 +249,14 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.2.1"
+    assert meta["contract_version"] == "0.2.2"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",
             "dependencies_workflows",
             "followups",
             "read_model_list_ready",
+            "schedules",
         ]
     }
 
@@ -358,7 +371,7 @@ async def test_expire_worker_bulk_redrive_and_housekeeping(
     assert {"terminal_deleted", "failed_deleted", "events_pruned", "workers_pruned"} <= set(janitor)
     tick = _json(await housekeeper.fetchval("SELECT taskq.tick(10)"))
     assert isinstance(tick, dict)
-    assert "janitor" in tick
+    assert "janitor" not in tick
 
 
 async def test_every_function_has_exact_grants_and_no_public_execute(

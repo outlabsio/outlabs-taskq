@@ -1,4 +1,4 @@
-"""Hand-derived Protocol-v1.0.10 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.11 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
@@ -37,6 +37,7 @@ from taskq.transport import (
     OperatorTransport,
     ProducerTransport,
     RunnerTransport,
+    ScheduleOperatorTransport,
     WorkflowAuthorizationLookupTransport,
     WorkflowOperatorTransport,
     WorkflowProducerTransport,
@@ -344,7 +345,21 @@ def test_capability_protocol_method_sets_are_exact() -> None:
         "get_authorization_projection",
         "aclose",
     }
-    assert _method_names(HousekeeperTransport) == {"tick", "janitor", "aclose"}
+    assert _method_names(HousekeeperTransport) == {
+        "tick",
+        "janitor",
+        "claim_schedules",
+        "fire_schedule",
+        "schedule_error",
+        "aclose",
+    }
+    assert _method_names(ScheduleOperatorTransport) == {
+        "put_schedule",
+        "get_schedule",
+        "retire_schedule",
+        "get_schedule_authorization_projection",
+        "aclose",
+    }
     assert "redrive_failed" in _method_names(OperatorTransport)
     assert _method_names(WorkflowProducerTransport) == {
         "create_workflow",
@@ -411,7 +426,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.10"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.11"
     _assert_catalog_matches_hand_derived_oracle()
 
 

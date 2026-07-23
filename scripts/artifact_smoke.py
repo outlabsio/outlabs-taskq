@@ -197,8 +197,9 @@ def main() -> None:
         "0007_admission_reservations",
         "0008_followups",
         "0009_workflows",
+        "0010_schedules",
     ]
-    assert len(FUNCTIONS) == 55
+    assert len(FUNCTIONS) == 62
 
     if args.mode != "core":
         return
