@@ -219,7 +219,10 @@ async def test_taskq_lifespan_removes_new_state_and_startup_failure_unwinds() ->
     assert failing.state is TaskqRuntimeState.FAILED
 
 
-@pytest.mark.parametrize("version", ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1"])
+@pytest.mark.parametrize(
+    "version",
+    ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2"],
+)
 async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_rejection(
     version: str,
 ) -> None:
@@ -228,14 +231,20 @@ async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_re
     assert bridge.state is TaskqRuntimeState.RUNNING
     await bridge.stop()
 
-    # This preserved historical set is the deliberate negative proof: the
-    # pre-0.2.1 bridge must still fail closed on the new metadata.
+    # These preserved historical sets are deliberate negative proofs: each
+    # preceding bridge still fails closed on the next metadata revision.
     with pytest.raises(TaskqVersionError) as exc_info:
         _require_supported_sql_contract(
             "0.2.1",
             supported_versions=frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0"}),
         )
     assert exc_info.value.details == {"contract_version": "0.2.1"}
+    with pytest.raises(TaskqVersionError) as exc_info:
+        _require_supported_sql_contract(
+            "0.2.2",
+            supported_versions=frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1"}),
+        )
+    assert exc_info.value.details == {"contract_version": "0.2.2"}
 
 
 async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capability() -> None:
@@ -298,6 +307,25 @@ async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capabi
     assert workflow_contract.state is TaskqRuntimeState.RUNNING
     await workflow_contract.stop()
 
+    schedule_contract = _runtime(
+        _Transport(
+            version="0.2.2",
+            capabilities={
+                "active": [
+                    "admission_reservations",
+                    "dependencies_workflows",
+                    "followups",
+                    "read_model_list_ready",
+                    "schedules",
+                ]
+            },
+        ),
+        options=options,
+    )
+    await schedule_contract.start()
+    assert schedule_contract.state is TaskqRuntimeState.RUNNING
+    await schedule_contract.stop()
+
 
 async def test_workflow_runtime_requires_exact_contract_and_capability() -> None:
     options = TaskqRuntimeOptions(
@@ -330,6 +358,30 @@ async def test_workflow_runtime_requires_exact_contract_and_capability() -> None
     await active.start()
     assert active.state is TaskqRuntimeState.RUNNING
     await active.stop()
+
+    additive = _runtime(
+        _Transport(
+            version="0.2.2",
+            capabilities={
+                "active": [
+                    "admission_reservations",
+                    "dependencies_workflows",
+                    "followups",
+                    "read_model_list_ready",
+                    "schedules",
+                ]
+            },
+        ),
+        options=options,
+    )
+    await additive.start()
+    assert additive.state is TaskqRuntimeState.RUNNING
+    await additive.stop()
+
+
+def test_schedule_bridge_exposes_no_surface_before_activation_implementation() -> None:
+    assert "schedule_enabled" not in TaskqRuntimeOptions.model_fields
+    assert "schedule_operator" not in TaskqFacadeTransports.__dataclass_fields__
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:
