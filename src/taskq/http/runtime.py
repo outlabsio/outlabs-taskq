@@ -21,6 +21,7 @@ from taskq.errors import TaskqCapabilityError, TaskqConfigError, TaskqError, Tas
 from taskq.http.facade import TaskqFacadeTransports
 from taskq.http.hub import ClaimWaitHub
 from taskq.registry import TaskRegistry
+from taskq.schedules import evaluate_schedule
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.transport import HousekeeperTransport
@@ -38,6 +39,7 @@ SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
 )
 ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0", "0.2.1", "0.2.2"})
 WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset({"0.2.1", "0.2.2"})
+SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.2"})
 
 
 def _require_supported_sql_contract(
@@ -85,6 +87,7 @@ class TaskqRuntimeOptions(BaseModel):
     embedded_worker: EmbeddedWorkerOptions | None = None
     admission_enabled: bool = False
     workflow_enabled: bool = False
+    schedule_enabled: bool = False
     request_pool_max: int = Field(default=10, ge=1, le=1000)
     operator_pool_max: int = Field(default=0, ge=0, le=1000)
     housekeeper_pool_max: int = Field(default=1, ge=1, le=1000)
@@ -95,6 +98,9 @@ class TaskqRuntimeOptions(BaseModel):
     housekeeper_interval: float = Field(default=5.0, ge=0.1, le=3600)
     housekeeper_jitter: float = Field(default=0.1, ge=0, le=0.5)
     housekeeper_backoff_cap: float = Field(default=30.0, ge=0.1, le=3600)
+    schedule_claim_limit: int = Field(default=10, ge=1, le=100)
+    schedule_lease_seconds: int = Field(default=60, ge=5, le=300)
+    schedule_error_retry_seconds: int = Field(default=30, ge=1, le=3600)
     long_poll_listener_backoff: float = Field(default=0.25, ge=0.01, le=30)
     soft_stop_timeout: float | None = Field(default=None, ge=0)
     asgi_graceful_timeout: float | None = Field(default=None, ge=0)
@@ -120,6 +126,8 @@ class TaskqRuntimeOptions(BaseModel):
     def _validate_runtime(self) -> TaskqRuntimeOptions:
         if self.expected_environment == "production" and not self.allow_production:
             raise ValueError("production requires allow_production=True")
+        if self.schedule_enabled and not self.housekeeper_enabled:
+            raise ValueError("schedule_enabled requires housekeeper_enabled")
         ceiling = self.database_connection_ceiling
         if ceiling is not None and self.database_connection_reserve >= ceiling:
             raise ValueError("database connection reserve must be below the ceiling")
@@ -327,6 +335,7 @@ class TaskqRuntime:
             workflow_producer=ordinary if resolved.workflow_enabled else None,
             workflow_authorization=ordinary if resolved.workflow_enabled else None,
             workflow_enabled=resolved.workflow_enabled,
+            schedule_enabled=resolved.schedule_enabled,
         )
         housekeeper: SqlTaskqTransport | None = None
         if resolved.housekeeper_enabled:
@@ -447,6 +456,12 @@ class TaskqRuntime:
                 active = meta.capabilities.get("active")
                 if not isinstance(active, list) or "dependencies_workflows" not in active:
                     raise TaskqCapabilityError(details={"capability": "dependencies_workflows"})
+            if self.facade_transports.schedule_enabled:
+                if meta.contract_version not in SCHEDULE_SQL_CONTRACT_VERSIONS:
+                    raise TaskqVersionError(details={"contract_version": meta.contract_version})
+                active = meta.capabilities.get("active")
+                if not isinstance(active, list) or "schedules" not in active:
+                    raise TaskqCapabilityError(details={"capability": "schedules"})
             self._log_budget()
             if self.housekeeper_transport is not None:
                 await self._tick(startup=True)
@@ -497,6 +512,8 @@ class TaskqRuntime:
         assert self.housekeeper_transport is not None
         try:
             await self.housekeeper_transport.tick()
+            if self.options.schedule_enabled:
+                await self._run_schedules()
         except asyncio.CancelledError:
             raise
         except TaskqError as exc:
@@ -521,6 +538,42 @@ class TaskqRuntime:
             if recovered and self._state is TaskqRuntimeState.DEGRADED:
                 self._state = TaskqRuntimeState.RUNNING
                 logger.info("housekeeper.recovered")
+
+    async def _run_schedules(self) -> None:
+        assert self.housekeeper_transport is not None
+        batch = await self.housekeeper_transport.claim_schedules(
+            f"runtime:{socket.gethostname()}:{os.getpid()}",
+            limit=self.options.schedule_claim_limit,
+            lease_seconds=self.options.schedule_lease_seconds,
+        )
+        for claim in batch.schedules:
+            try:
+                evaluation = evaluate_schedule(
+                    recurrence=claim.recurrence,
+                    catchup_policy=claim.catchup_policy.value,
+                    max_catchup=claim.max_catchup,
+                    initialized=claim.initialized,
+                    next_fire_at=claim.next_fire_at,
+                    as_of=claim.as_of,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                await self.housekeeper_transport.schedule_error(
+                    claim.schedule_id,
+                    claim.token,
+                    claim.definition_version,
+                    f"calendar:{type(exc).__name__}",
+                    retry_seconds=self.options.schedule_error_retry_seconds,
+                )
+                continue
+            await self.housekeeper_transport.fire_schedule(
+                claim.schedule_id,
+                claim.token,
+                claim.definition_version,
+                evaluation.occurrences,
+                evaluation.next_fire_at,
+            )
 
     async def _housekeeper_loop(self) -> None:
         backoff = self.options.housekeeper_interval

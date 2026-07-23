@@ -65,6 +65,9 @@ from taskq.protocol import (
     RetryClass,
     QueueControlOutcome,
     QueueStatsWireData,
+    ScheduleDefinition,
+    ScheduleHttpWriteResult,
+    ScheduleWireData,
     SettleResult,
     SettleWireData,
     TqCode,
@@ -212,6 +215,13 @@ def _decode_domain(spec: HttpCommandSpec, outcome: str, data: dict[str, Any]) ->
     }:
         wire = WorkflowWireData.model_validate(data)
         return WorkflowResult(outcome=outcome, **wire.model_dump())
+    if command is CommandName.GET_SCHEDULE:
+        return ScheduleWireData.model_validate(data)
+    if command in {CommandName.PUT_SCHEDULE, CommandName.RETIRE_SCHEDULE}:
+        return ScheduleHttpWriteResult(
+            outcome=outcome,
+            profile=ScheduleWireData.model_validate(data),
+        )
     if command is CommandName.ENSURE_QUEUE:
         wire = EnsureQueueWireData.model_validate(data)
         return EnsureQueueResult(
@@ -287,6 +297,18 @@ def _decode_envelope(
     expected_status = spec.outcomes.get(envelope.outcome)
     if expected_status is None or expected_status != response.status_code:
         raise TaskqInternalError(details={"reason": "unexpected_outcome_or_status"})
+    if spec.sql_command in {
+        CommandName.GET_SCHEDULE,
+        CommandName.PUT_SCHEDULE,
+        CommandName.RETIRE_SCHEDULE,
+    }:
+        version = envelope.data.get("version")
+        if (
+            not isinstance(version, int)
+            or isinstance(version, bool)
+            or response.headers.get("ETag") != f'"taskq-schedule-{version}"'
+        ):
+            raise TaskqInternalError(details={"reason": "schedule_etag_mismatch"})
     return envelope.outcome, envelope.data, envelope.request_id
 
 
@@ -546,6 +568,45 @@ class AsyncTaskqHttpClient:
             body=WorkflowCancelWireRequest(reason=reason),
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
+
+    async def get_schedule(self, name: str) -> ScheduleWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.GET_SCHEDULE,
+            path_params={"name": name},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_SCHEDULE], outcome, data)
+
+    async def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        *,
+        expected_version: int | None = None,
+    ) -> ScheduleHttpWriteResult:
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+        outcome, data, _ = await self._request(
+            HttpCommandName.PUT_SCHEDULE,
+            path_params={"name": name},
+            body=request,
+            extra_headers=(
+                {"If-Match": f'"taskq-schedule-{expected_version}"'}
+                if expected_version is not None
+                else None
+            ),
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.PUT_SCHEDULE], outcome, data)
+
+    async def retire_schedule(self, name: str, expected_version: int) -> ScheduleHttpWriteResult:
+        outcome, data, _ = await self._request(
+            HttpCommandName.RETIRE_SCHEDULE,
+            path_params={"name": name},
+            extra_headers={"If-Match": f'"taskq-schedule-{expected_version}"'},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.RETIRE_SCHEDULE], outcome, data)
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)
@@ -1086,6 +1147,45 @@ class TaskqHttpClient:
             body=WorkflowCancelWireRequest(reason=reason),
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
+
+    def get_schedule(self, name: str) -> ScheduleWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.GET_SCHEDULE,
+            path_params={"name": name},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_SCHEDULE], outcome, data)
+
+    def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        *,
+        expected_version: int | None = None,
+    ) -> ScheduleHttpWriteResult:
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+        outcome, data, _ = self._request(
+            HttpCommandName.PUT_SCHEDULE,
+            path_params={"name": name},
+            body=request,
+            extra_headers=(
+                {"If-Match": f'"taskq-schedule-{expected_version}"'}
+                if expected_version is not None
+                else None
+            ),
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.PUT_SCHEDULE], outcome, data)
+
+    def retire_schedule(self, name: str, expected_version: int) -> ScheduleHttpWriteResult:
+        outcome, data, _ = self._request(
+            HttpCommandName.RETIRE_SCHEDULE,
+            path_params={"name": name},
+            extra_headers={"If-Match": f'"taskq-schedule-{expected_version}"'},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.RETIRE_SCHEDULE], outcome, data)
 
     def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)

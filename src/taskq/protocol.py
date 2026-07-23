@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.11"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.12"
 T = TypeVar("T")
 
 
@@ -1116,6 +1116,27 @@ class ScheduleProfile(BaseModel):
     version: int
 
 
+class ScheduleWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    target: ScheduleJobTarget
+    recurrence: ScheduleRecurrence
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int
+    state: ScheduleState
+    next_fire_at: datetime
+    last_fire_at: datetime | None
+    version: int
+
+
+class ScheduleHttpWriteResult(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    outcome: Literal["created", "unchanged", "updated", "retired", "already_retired"]
+    profile: ScheduleWireData
+
+
 class ScheduleAuthorizationProjection(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -1290,6 +1311,9 @@ class HttpCommandName(StrEnum):
     CREATE_WORKFLOW = "create_workflow"
     SEAL_WORKFLOW = "seal_workflow"
     CANCEL_WORKFLOW = "cancel_workflow"
+    GET_SCHEDULE = "get_schedule"
+    PUT_SCHEDULE = "put_schedule"
+    RETIRE_SCHEDULE = "retire_schedule"
     CLAIM = "claim"
     HEARTBEAT = "heartbeat"
     COMPLETE = "complete"
@@ -1330,6 +1354,7 @@ class QueueSource(StrEnum):
     PATH = "path"
     JOB_LOOKUP = "job_lookup"
     WORKFLOW_LOOKUP = "workflow_lookup"
+    SCHEDULE_LOOKUP = "schedule_lookup"
     DECLARED_QUEUES = "declared_queues"
     GLOBAL = "global"
     DEPLOYMENT = "deployment_policy"
@@ -1352,7 +1377,7 @@ class RetryClass(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class HttpCommandSpec:
-    method: Literal["GET", "POST", "PUT"]
+    method: Literal["DELETE", "GET", "POST", "PUT"]
     path: str
     action: TaskqAction | None
     queue_source: QueueSource
@@ -1745,7 +1770,7 @@ def _status_map(**outcomes: int) -> Mapping[str, int]:
 
 
 def _http(
-    method: Literal["GET", "POST", "PUT"],
+    method: Literal["DELETE", "GET", "POST", "PUT"],
     path: str,
     action: TaskqAction | None,
     queue_source: QueueSource,
@@ -1897,6 +1922,37 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             CommandName.CANCEL_WORKFLOW,
             request_model=WorkflowCancelWireRequest,
             data_model=WorkflowWireData,
+        ),
+        HttpCommandName.GET_SCHEDULE: _http(
+            "GET",
+            "/taskq/v1/schedules/{name}",
+            _CONTROL,
+            QueueSource.SCHEDULE_LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.GET_SCHEDULE,
+            data_model=ScheduleWireData,
+        ),
+        HttpCommandName.PUT_SCHEDULE: _http(
+            "PUT",
+            "/taskq/v1/schedules/{name}",
+            _CONTROL,
+            QueueSource.SCHEDULE_LOOKUP,
+            _status_map(created=201, unchanged=200, updated=200),
+            _SAFE,
+            CommandName.PUT_SCHEDULE,
+            request_model=ScheduleDefinition,
+            data_model=ScheduleWireData,
+        ),
+        HttpCommandName.RETIRE_SCHEDULE: _http(
+            "DELETE",
+            "/taskq/v1/schedules/{name}",
+            _CONTROL,
+            QueueSource.SCHEDULE_LOOKUP,
+            _status_map(retired=200, already_retired=200),
+            _SAFE,
+            CommandName.RETIRE_SCHEDULE,
+            data_model=ScheduleWireData,
         ),
         HttpCommandName.CLAIM: _http(
             "POST",
@@ -2262,11 +2318,13 @@ __all__ = [
     "ScheduleCronRecurrence",
     "ScheduleDefinition",
     "ScheduleIntervalRecurrence",
+    "ScheduleHttpWriteResult",
     "ScheduleJobTarget",
     "ScheduleProfile",
     "ScheduleRecurrence",
     "ScheduleState",
     "ScheduleWriteResult",
+    "ScheduleWireData",
     "SETTLE_RESULT_ADAPTER",
     "SettleAlreadySettledResult",
     "SettleConflictResult",

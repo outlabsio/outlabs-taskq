@@ -106,6 +106,27 @@ EXPECTED_HTTP_IDENTITIES = {
         "workflow_lookup",
         "active",
     ),
+    "get_schedule": (
+        "GET",
+        "/taskq/v1/schedules/{name}",
+        "control",
+        "schedule_lookup",
+        "active",
+    ),
+    "put_schedule": (
+        "PUT",
+        "/taskq/v1/schedules/{name}",
+        "control",
+        "schedule_lookup",
+        "active",
+    ),
+    "retire_schedule": (
+        "DELETE",
+        "/taskq/v1/schedules/{name}",
+        "control",
+        "schedule_lookup",
+        "active",
+    ),
     "claim": ("POST", "/taskq/v1/queues/{queue}/claims", "run", "path", "active"),
     "heartbeat": (
         "POST",
@@ -269,6 +290,9 @@ EXPECTED_HTTP_OUTCOMES = {
         "already_requested": 202,
         "already_terminal": 200,
     },
+    "get_schedule": {"ok": 200},
+    "put_schedule": {"created": 201, "unchanged": 200, "updated": 200},
+    "retire_schedule": {"retired": 200, "already_retired": 200},
     "claim": {"claimed": 200, "empty": 200, "timeout": 200, "paused": 200, "unavailable": 200},
     "heartbeat": {"ok": 200, "lost": 409},
     "complete": {"ok": 200, "already_settled": 200, "settle_conflict": 409, "lost": 409},
@@ -426,7 +450,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.11"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.12"
     _assert_catalog_matches_hand_derived_oracle()
 
 

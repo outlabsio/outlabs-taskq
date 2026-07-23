@@ -72,6 +72,9 @@ from taskq.protocol import (
     RedriveWireRequest,
     ReleaseWireRequest,
     ReprioritizeWireRequest,
+    ScheduleDefinition,
+    ScheduleProfile,
+    ScheduleWireData,
     ShutdownRequestWireRequest,
     SnoozeWireRequest,
     TaskqAction,
@@ -85,6 +88,7 @@ from taskq.transport import (
     OperatorTransport,
     ProducerTransport,
     RunnerTransport,
+    ScheduleOperatorTransport,
     WorkflowAuthorizationLookupTransport,
     WorkflowOperatorTransport,
     WorkflowProducerTransport,
@@ -92,6 +96,9 @@ from taskq.transport import (
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _PROFILE_ETAG_RE = re.compile(r'^"taskq-profile-([1-9][0-9]*)"$')
+_SCHEDULE_ETAG_RE = re.compile(r'^"taskq-schedule-([1-9][0-9]*)"$')
+_SCHEDULE_NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_.-]*$")
+_RESERVED_SCHEDULE_NAME = "taskq-janitor-daily"
 _MAX_BODY_BYTES = 4 * 1024 * 1024
 _OPERATOR_COMMANDS = frozenset(
     name
@@ -104,6 +111,9 @@ _OPERATOR_COMMANDS = frozenset(
         CommandName.RESUME_QUEUE,
         CommandName.CANCEL,
         CommandName.CANCEL_WORKFLOW,
+        CommandName.GET_SCHEDULE,
+        CommandName.PUT_SCHEDULE,
+        CommandName.RETIRE_SCHEDULE,
         CommandName.REDRIVE,
         CommandName.EXPIRE_JOB,
         CommandName.EXPIRE_WORKER_LEASES,
@@ -128,6 +138,13 @@ _WORKFLOW_COMMANDS = frozenset(
         HttpCommandName.CANCEL_WORKFLOW,
     }
 )
+_SCHEDULE_COMMANDS = frozenset(
+    {
+        HttpCommandName.GET_SCHEDULE,
+        HttpCommandName.PUT_SCHEDULE,
+        HttpCommandName.RETIRE_SCHEDULE,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -141,6 +158,7 @@ class TaskqFacadeTransports:
     workflow_producer: WorkflowProducerTransport | None = None
     workflow_authorization: WorkflowAuthorizationLookupTransport | None = None
     workflow_enabled: bool = False
+    schedule_enabled: bool = False
 
 
 def _selected_request_id(request: Request) -> tuple[str, bool]:
@@ -253,6 +271,23 @@ def _parse_if_match(value: str | None) -> int | None:
     if match is None:
         raise TaskqValidationError(details={"header": "If-Match"})
     return int(match.group(1))
+
+
+def _schedule_etag(version: int) -> str:
+    return f'"taskq-schedule-{version}"'
+
+
+def _parse_schedule_if_match(value: str | None) -> int | None:
+    if value is None:
+        return None
+    match = _SCHEDULE_ETAG_RE.fullmatch(value)
+    if match is None:
+        raise TaskqValidationError(details={"header": "If-Match"})
+    return int(match.group(1))
+
+
+def _schedule_wire(profile: ScheduleProfile) -> ScheduleWireData:
+    return ScheduleWireData.model_validate(profile.model_dump(exclude={"schedule_id"}))
 
 
 def _parse_page_limit(value: str | None) -> int:
@@ -388,6 +423,9 @@ class _FacadeDispatcher:
             self._validate_headers(request)
             body = await self._body(request, spec)
             return await self._execute(request, name, spec, body, context, queue)
+
+        if name in _SCHEDULE_COMMANDS:
+            return await self._schedule(request, name, spec, context, authorizer)
 
         if spec.queue_source is QueueSource.WORKFLOW_LOOKUP:
             self._validate_query(request, name)
@@ -542,6 +580,97 @@ class _FacadeDispatcher:
             return projection.queue
         await self._check_authorization(authorizer, request, context, spec.action, None)
         return None
+
+    async def _schedule(
+        self,
+        request: Request,
+        name: HttpCommandName,
+        spec: HttpCommandSpec,
+        context: AuthContext,
+        authorizer: QueueAuthorizer,
+    ) -> Response:
+        self._validate_query(request, name)
+        self._validate_headers(request)
+        schedule_name = str(request.path_params["name"])
+        if (
+            len(schedule_name.encode("utf-8")) > 120
+            or _SCHEDULE_NAME_RE.fullmatch(schedule_name) is None
+            or schedule_name == _RESERVED_SCHEDULE_NAME
+        ):
+            raise TaskqValidationError(details={"field": "name"})
+        operator = self.operator_transport
+        if not isinstance(operator, ScheduleOperatorTransport):
+            raise TaskqCapabilityError(details={"capability": "schedules"})
+
+        projection = None
+        try:
+            projection = await operator.get_schedule_authorization_projection(schedule_name)
+        except TaskqNotFoundError:
+            if name is not HttpCommandName.PUT_SCHEDULE:
+                raise
+        if projection is not None:
+            if projection.queue is None:
+                raise TaskqInternalError()
+            await self._check_authorization(
+                authorizer,
+                request,
+                context,
+                TaskqAction.CONTROL,
+                projection.queue,
+                hide_forbidden=self.not_found_on_forbidden,
+            )
+
+        expected_version = _parse_schedule_if_match(request.headers.get("If-Match"))
+        body = await self._body(request, spec)
+        if name is HttpCommandName.PUT_SCHEDULE:
+            assert isinstance(body, ScheduleDefinition)
+            if projection is None and expected_version is not None:
+                raise TaskqNotFoundError()
+            target_queue = body.target.queue
+            if projection is None or target_queue != projection.queue:
+                await self._check_authorization(
+                    authorizer,
+                    request,
+                    context,
+                    TaskqAction.CONTROL,
+                    target_queue,
+                )
+            result = await operator.put_schedule(
+                schedule_name,
+                body,
+                context.actor,
+                expected_version=expected_version,
+            )
+            return _command_response(
+                request,
+                spec,
+                result.outcome,
+                _schedule_wire(result.profile).model_dump(mode="json"),
+                headers={"ETag": _schedule_etag(result.profile.version)},
+            )
+        if name is HttpCommandName.GET_SCHEDULE:
+            profile = await operator.get_schedule(schedule_name)
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                _schedule_wire(profile).model_dump(mode="json"),
+                headers={"ETag": _schedule_etag(profile.version)},
+            )
+        if expected_version is None:
+            raise TaskqValidationError(details={"header": "If-Match"})
+        result = await operator.retire_schedule(
+            schedule_name,
+            expected_version,
+            context.actor,
+        )
+        return _command_response(
+            request,
+            spec,
+            result.outcome,
+            _schedule_wire(result.profile).model_dump(mode="json"),
+            headers={"ETag": _schedule_etag(result.profile.version)},
+        )
 
     async def _authorize_workflow(
         self,
@@ -1170,6 +1299,14 @@ def create_taskq_app(
         raise TaskqConfigError(
             "workflow-enabled operator transport must implement workflow cancellation"
         )
+    if (
+        resources.schedule_enabled
+        and operator_transport is not None
+        and not isinstance(operator_transport, ScheduleOperatorTransport)
+    ):
+        raise TaskqConfigError(
+            "schedule-enabled operator transport must implement schedule operations"
+        )
 
     app = FastAPI(lifespan=None, openapi_url="/openapi.json", docs_url=None, redoc_url=None)
     dispatcher = _FacadeDispatcher(
@@ -1258,6 +1395,8 @@ def create_taskq_app(
         if name in _ADMISSION_COMMANDS and not resources.admission_enabled:
             continue
         if name in _WORKFLOW_COMMANDS and not resources.workflow_enabled:
+            continue
+        if name in _SCHEDULE_COMMANDS and not resources.schedule_enabled:
             continue
         if name in _OPERATOR_COMMANDS and operator_transport is None:
             continue

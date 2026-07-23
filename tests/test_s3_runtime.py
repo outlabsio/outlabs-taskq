@@ -6,7 +6,9 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import pytest
 import httpx
@@ -32,7 +34,7 @@ from taskq.http import (
     taskq_lifespan,
 )
 from taskq.http.runtime import _require_supported_sql_contract
-from taskq.protocol import ContractMeta
+from taskq.protocol import ContractMeta, ScheduleClaim, ScheduleClaimResult
 
 
 class _Transport:
@@ -48,6 +50,9 @@ class _Transport:
         self.ticks = list(ticks or [{}])
         self.tick_calls = 0
         self.close_calls = 0
+        self.schedule_batches: list[ScheduleClaimResult] = []
+        self.schedule_fires: list[tuple[Any, ...]] = []
+        self.schedule_errors: list[tuple[Any, ...]] = []
 
     async def get_contract_meta(self) -> ContractMeta:
         return ContractMeta(contract_version=self.version, capabilities=self.capabilities)
@@ -62,6 +67,20 @@ class _Transport:
 
     async def aclose(self) -> None:
         self.close_calls += 1
+
+    async def claim_schedules(
+        self, worker_id: str, *, limit: int = 10, lease_seconds: int = 60
+    ) -> ScheduleClaimResult:
+        del worker_id, limit, lease_seconds
+        if self.schedule_batches:
+            return self.schedule_batches.pop(0)
+        return ScheduleClaimResult(state="empty")
+
+    async def fire_schedule(self, *args: Any) -> None:
+        self.schedule_fires.append(args)
+
+    async def schedule_error(self, *args: Any, **kwargs: Any) -> None:
+        self.schedule_errors.append((*args, kwargs))
 
 
 class _Clock:
@@ -138,6 +157,7 @@ def _runtime(
         workflow_producer=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
         workflow_authorization=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
         workflow_enabled=bool(options and options.workflow_enabled),
+        schedule_enabled=bool(options and options.schedule_enabled),
     )
     kwargs: dict[str, Any] = {}
     if process_exit is not None:
@@ -379,9 +399,72 @@ async def test_workflow_runtime_requires_exact_contract_and_capability() -> None
     await additive.stop()
 
 
-def test_schedule_bridge_exposes_no_surface_before_activation_implementation() -> None:
-    assert "schedule_enabled" not in TaskqRuntimeOptions.model_fields
+def test_schedule_surface_is_explicitly_disabled_by_default() -> None:
+    assert TaskqRuntimeOptions().schedule_enabled is False
     assert "schedule_operator" not in TaskqFacadeTransports.__dataclass_fields__
+
+
+async def test_schedule_runtime_requires_exact_gate_and_settles_each_claim() -> None:
+    options = TaskqRuntimeOptions(
+        housekeeper_enabled=True,
+        housekeeper_interval=60,
+        long_poll_listener_enabled=False,
+        schedule_enabled=True,
+    )
+    wrong = _runtime(_Transport(version="0.2.1"), options=options)
+    with pytest.raises(TaskqVersionError):
+        await wrong.start()
+
+    missing = _runtime(_Transport(version="0.2.2"), options=options)
+    with pytest.raises(TaskqCapabilityError):
+        await missing.start()
+
+    now = datetime(2026, 1, 1, tzinfo=UTC)
+    transport = _Transport(
+        version="0.2.2",
+        capabilities={"active": ["schedules"]},
+    )
+    good = ScheduleClaim(
+        schedule_id=uuid4(),
+        name="tests.good",
+        definition_version=1,
+        as_of=now,
+        target={"kind": "job", "queue": "tests", "job_type": "tests.good"},
+        recurrence={"kind": "interval", "interval_seconds": 60},
+        catchup_policy="fire_all",
+        max_catchup=1,
+        initialized=False,
+        next_fire_at=now,
+        token=uuid4(),
+        lease_seconds=60,
+    )
+    invalid = good.model_copy(
+        update={
+            "schedule_id": uuid4(),
+            "name": "tests.invalid",
+            "recurrence": {"kind": "unknown"},
+            "token": uuid4(),
+        }
+    )
+    transport.schedule_batches.append(
+        ScheduleClaimResult(state="claimed", schedules=(good, invalid))
+    )
+    runtime = _runtime(transport, options=options)
+    await runtime.start()
+    assert len(transport.schedule_fires) == 1
+    assert transport.schedule_fires[0][0:3] == (
+        good.schedule_id,
+        good.token,
+        good.definition_version,
+    )
+    assert len(transport.schedule_errors) == 1
+    assert transport.schedule_errors[0][0:3] == (
+        invalid.schedule_id,
+        invalid.token,
+        invalid.definition_version,
+    )
+    assert transport.schedule_errors[0][3] == "calendar:TaskqValidationError"
+    await runtime.stop()
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:

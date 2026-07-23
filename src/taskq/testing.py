@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import dataclass
@@ -48,6 +48,14 @@ from taskq.protocol import (
     Followup,
     HeartbeatResult,
     JobStatus,
+    ScheduleActionResult,
+    ScheduleAuthorizationProjection,
+    ScheduleClaim,
+    ScheduleClaimResult,
+    ScheduleDefinition,
+    ScheduleProfile,
+    ScheduleState,
+    ScheduleWriteResult,
     SettleAlreadySettledResult,
     SettleConflictResult,
     SettleDeadResult,
@@ -183,6 +191,24 @@ class _FakeWorkflow:
             self.steps = {}
 
 
+@dataclass(slots=True)
+class _FakeSchedule:
+    schedule_id: UUID
+    name: str
+    definition: ScheduleDefinition
+    state: ScheduleState
+    next_fire_at: datetime
+    version: int = 1
+    initialized: bool = False
+    last_fire_at: datetime | None = None
+    token: UUID | None = None
+    claim_as_of: datetime | None = None
+    claim_expires_at: datetime | None = None
+    retry_not_before: datetime | None = None
+    last_action_token: UUID | None = None
+    last_action: ScheduleActionResult | None = None
+
+
 _SAFE_FIELDS = {
     "job_id",
     "queue",
@@ -236,6 +262,13 @@ class FakeTaskQClient:
         "seal_workflow",
         "cancel_workflow",
         "get_workflow_authorization_projection",
+        "put_schedule",
+        "get_schedule",
+        "retire_schedule",
+        "get_schedule_authorization_projection",
+        "claim_schedules",
+        "fire_schedule",
+        "schedule_error",
         "claim",
         "heartbeat",
         "complete",
@@ -247,17 +280,30 @@ class FakeTaskQClient:
         "aclose",
     }
 
-    def __init__(self, *, queues: Sequence[str] = ()) -> None:
+    def __init__(
+        self,
+        *,
+        queues: Sequence[str] = (),
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
         self._known_queues = set(queues)
+        self._clock = clock or (lambda: datetime.now(UTC))
         self._jobs: dict[UUID, _FakeJob] = {}
         self._order: list[UUID] = []
         self._active_keys: dict[tuple[str, str], UUID] = {}
         self._admissions: dict[tuple[str, str], _FakeAdmission] = {}
         self._workflows: dict[UUID, _FakeWorkflow] = {}
         self._workflow_keys: dict[str, UUID] = {}
+        self._schedules: dict[str, _FakeSchedule] = {}
         self._enqueues: list[RecordedEnqueue] = []
         self._settlements: list[RecordedSettlement] = []
         self._closed = False
+
+    def _now(self) -> datetime:
+        value = self._clock()
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise TaskqConfigError("FakeTaskQClient clock must return an aware datetime")
+        return value.astimezone(UTC)
 
     def __repr__(self) -> str:
         return (
@@ -535,6 +581,312 @@ class FakeTaskQClient:
         elif all(status is JobStatus.SUCCEEDED for status in statuses):
             workflow.status = WorkflowStatus.SUCCEEDED
 
+    @staticmethod
+    def _schedule_profile(schedule: _FakeSchedule) -> ScheduleProfile:
+        return ScheduleProfile(
+            schedule_id=schedule.schedule_id,
+            name=schedule.name,
+            target=schedule.definition.target.model_dump(mode="json", exclude_none=True),
+            recurrence=schedule.definition.recurrence.model_dump(mode="json", exclude_none=True),
+            catchup_policy=schedule.definition.catchup_policy,
+            max_catchup=schedule.definition.max_catchup,
+            state=schedule.state,
+            next_fire_at=schedule.next_fire_at,
+            last_fire_at=schedule.last_fire_at,
+            version=schedule.version,
+        )
+
+    async def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        actor: str,
+        *,
+        expected_version: int | None = None,
+    ) -> ScheduleWriteResult:
+        self._ensure_open()
+        del actor
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+        if request.target.queue not in self._known_queues:
+            raise TaskqNotFoundError()
+        existing = self._schedules.get(name)
+        if existing is None:
+            if expected_version is not None:
+                raise TaskqNotFoundError()
+            schedule = _FakeSchedule(
+                schedule_id=uuid4(),
+                name=name,
+                definition=request,
+                state=ScheduleState.PAUSED if request.paused else ScheduleState.ACTIVE,
+                next_fire_at=self._now(),
+            )
+            self._schedules[name] = schedule
+            return ScheduleWriteResult(outcome="created", profile=self._schedule_profile(schedule))
+        if expected_version is None:
+            if existing.definition != request:
+                raise TaskqConflictError(
+                    details={
+                        "reason": "schedule_mismatch",
+                        "current_version": existing.version,
+                    }
+                )
+            return ScheduleWriteResult(
+                outcome="unchanged", profile=self._schedule_profile(existing)
+            )
+        if expected_version != existing.version:
+            raise TaskqConflictError(
+                details={
+                    "reason": "schedule_version_conflict",
+                    "current_version": existing.version,
+                }
+            )
+        if existing.state is ScheduleState.RETIRED:
+            raise TaskqConflictError(
+                details={
+                    "reason": "schedule_retired",
+                    "current_version": existing.version,
+                }
+            )
+        target_state = ScheduleState.PAUSED if request.paused else ScheduleState.ACTIVE
+        if existing.definition == request and existing.state is target_state:
+            return ScheduleWriteResult(
+                outcome="unchanged", profile=self._schedule_profile(existing)
+            )
+        pause_only = (
+            existing.state is ScheduleState.ACTIVE
+            and target_state is ScheduleState.PAUSED
+            and existing.definition.model_copy(update={"paused": True}) == request
+        )
+        existing.definition = request
+        existing.state = target_state
+        existing.version += 1
+        existing.token = None
+        existing.claim_as_of = None
+        existing.claim_expires_at = None
+        existing.last_action_token = None
+        existing.last_action = None
+        if not pause_only:
+            existing.initialized = False
+            existing.next_fire_at = self._now()
+        return ScheduleWriteResult(outcome="updated", profile=self._schedule_profile(existing))
+
+    async def get_schedule(self, name: str) -> ScheduleProfile:
+        self._ensure_open()
+        schedule = self._schedules.get(name)
+        if schedule is None:
+            raise TaskqNotFoundError()
+        return self._schedule_profile(schedule)
+
+    async def retire_schedule(
+        self, name: str, expected_version: int, actor: str
+    ) -> ScheduleWriteResult:
+        self._ensure_open()
+        del actor
+        schedule = self._schedules.get(name)
+        if schedule is None:
+            raise TaskqNotFoundError()
+        if expected_version != schedule.version:
+            raise TaskqConflictError(
+                details={
+                    "reason": "schedule_version_conflict",
+                    "current_version": schedule.version,
+                }
+            )
+        if schedule.state is ScheduleState.RETIRED:
+            outcome: Literal["retired", "already_retired"] = "already_retired"
+        else:
+            schedule.state = ScheduleState.RETIRED
+            schedule.version += 1
+            schedule.token = None
+            schedule.claim_as_of = None
+            schedule.claim_expires_at = None
+            schedule.last_action_token = None
+            schedule.last_action = None
+            outcome = "retired"
+        return ScheduleWriteResult(outcome=outcome, profile=self._schedule_profile(schedule))
+
+    async def get_schedule_authorization_projection(
+        self, name: str
+    ) -> ScheduleAuthorizationProjection:
+        self._ensure_open()
+        schedule = self._schedules.get(name)
+        if schedule is None:
+            return ScheduleAuthorizationProjection(name=name, queue=None)
+        return ScheduleAuthorizationProjection(name=name, queue=schedule.definition.target.queue)
+
+    async def claim_schedules(
+        self, worker_id: str, *, limit: int = 10, lease_seconds: int = 60
+    ) -> ScheduleClaimResult:
+        self._ensure_open()
+        del worker_id
+        if not 1 <= limit <= 100 or not 5 <= lease_seconds <= 300:
+            raise TaskqValidationError()
+        now = self._now()
+        claims: list[ScheduleClaim] = []
+        candidates = sorted(
+            self._schedules.values(), key=lambda value: (value.next_fire_at, value.name)
+        )
+        for schedule in candidates:
+            if (
+                schedule.state is not ScheduleState.ACTIVE
+                or schedule.next_fire_at > now
+                or (schedule.retry_not_before is not None and schedule.retry_not_before > now)
+                or (
+                    schedule.token is not None
+                    and schedule.claim_expires_at is not None
+                    and schedule.claim_expires_at > now
+                )
+            ):
+                continue
+            token = uuid4()
+            schedule.token = token
+            schedule.claim_as_of = now
+            schedule.claim_expires_at = now + timedelta(seconds=lease_seconds)
+            claims.append(
+                ScheduleClaim(
+                    schedule_id=schedule.schedule_id,
+                    name=schedule.name,
+                    definition_version=schedule.version,
+                    as_of=now,
+                    target=schedule.definition.target.model_dump(mode="json", exclude_none=True),
+                    recurrence=schedule.definition.recurrence.model_dump(
+                        mode="json", exclude_none=True
+                    ),
+                    catchup_policy=schedule.definition.catchup_policy,
+                    max_catchup=schedule.definition.max_catchup,
+                    initialized=schedule.initialized,
+                    next_fire_at=schedule.next_fire_at,
+                    token=token,
+                    lease_seconds=lease_seconds,
+                )
+            )
+            if len(claims) == limit:
+                break
+        return ScheduleClaimResult(state="claimed" if claims else "empty", schedules=tuple(claims))
+
+    def _schedule_by_id(self, schedule_id: UUID) -> _FakeSchedule:
+        for schedule in self._schedules.values():
+            if schedule.schedule_id == schedule_id:
+                return schedule
+        raise TaskqNotFoundError()
+
+    async def fire_schedule(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        occurrences: Sequence[datetime],
+        next_fire_at: datetime,
+    ) -> ScheduleActionResult:
+        self._ensure_open()
+        schedule = self._schedule_by_id(schedule_id)
+        if schedule.last_action_token == token and schedule.last_action is not None:
+            return schedule.last_action.model_copy(update={"replayed": True})
+        if (
+            schedule.state is not ScheduleState.ACTIVE
+            or schedule.version != definition_version
+            or schedule.token != token
+            or (schedule.claim_expires_at is not None and schedule.claim_expires_at < self._now())
+        ):
+            return ScheduleActionResult(
+                outcome="stale",
+                replayed=False,
+                schedule_id=schedule.schedule_id,
+                jobs_enqueued=0,
+                next_fire_at=schedule.next_fire_at,
+                state=schedule.state,
+                version=schedule.version,
+            )
+        jobs = 0
+        target = schedule.definition.target
+        for due_at in occurrences:
+            result = await self.enqueue(
+                EnqueueCommand(
+                    queue=target.queue,
+                    job_type=target.job_type,
+                    payload=deepcopy(target.payload),
+                    headers=deepcopy(target.headers),
+                    priority=target.priority,
+                    scheduled_at=due_at,
+                    idempotency_key=(
+                        f"schedule:{schedule.schedule_id}:{int(due_at.timestamp() * 1_000_000)}"
+                    ),
+                    concurrency_key=target.concurrency_key,
+                    affinity_key=target.affinity_key,
+                    max_attempts=target.max_attempts,
+                    lease_seconds=target.lease_seconds,
+                    backoff_mode=target.backoff_mode,
+                    backoff_base=target.backoff_base,
+                    backoff_cap=target.backoff_cap,
+                )
+            )
+            if isinstance(result, EnqueueCreatedResult):
+                jobs += 1
+        if not schedule.initialized:
+            outcome: Literal["initialized", "fired", "skipped"] = "initialized"
+        elif schedule.definition.catchup_policy.value == "skip":
+            outcome = "skipped"
+        else:
+            outcome = "fired"
+        schedule.initialized = True
+        schedule.next_fire_at = next_fire_at
+        if occurrences:
+            schedule.last_fire_at = occurrences[-1]
+        schedule.token = None
+        schedule.claim_as_of = None
+        schedule.claim_expires_at = None
+        schedule.retry_not_before = None
+        result = ScheduleActionResult(
+            outcome=outcome,
+            replayed=False,
+            schedule_id=schedule.schedule_id,
+            jobs_enqueued=jobs,
+            next_fire_at=schedule.next_fire_at,
+            state=schedule.state,
+            version=schedule.version,
+        )
+        schedule.last_action_token = token
+        schedule.last_action = result
+        return result
+
+    async def schedule_error(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        error: str,
+        *,
+        retry_seconds: int = 30,
+    ) -> ScheduleActionResult:
+        self._ensure_open()
+        del error
+        schedule = self._schedule_by_id(schedule_id)
+        if (
+            schedule.version != definition_version
+            or schedule.token != token
+            or schedule.state is not ScheduleState.ACTIVE
+        ):
+            outcome: Literal["error_recorded", "stale"] = "stale"
+        else:
+            outcome = "error_recorded"
+            schedule.token = None
+            schedule.claim_as_of = None
+            schedule.claim_expires_at = None
+            schedule.retry_not_before = self._now() + timedelta(seconds=retry_seconds)
+        return ScheduleActionResult(
+            outcome=outcome,
+            replayed=False,
+            schedule_id=schedule.schedule_id,
+            jobs_enqueued=0,
+            next_fire_at=schedule.next_fire_at,
+            state=schedule.state,
+            version=schedule.version,
+        )
+
     async def enqueue_many(
         self, queue: str, items: Sequence[EnqueueManyItem]
     ) -> list[EnqueueResult]:
@@ -562,7 +914,7 @@ class FakeTaskQClient:
         )
         if queue not in self._known_queues:
             raise TaskqNotFoundError()
-        now = datetime.now(UTC)
+        now = self._now()
         identity = (queue, request.idempotency_key)
         admission = self._admissions.get(identity)
         if (
@@ -655,7 +1007,7 @@ class FakeTaskQClient:
             )
         if admission.state == "cancelled":
             raise TaskqConflictError(details={"reason": "reservation_cancelled"})
-        now = datetime.now(UTC)
+        now = self._now()
         if admission.reservation_expires_at <= now:
             raise TaskqConflictError(details={"reason": "reservation_expired"})
         command = EnqueueCommand(queue=queue, **request.job.model_dump())
@@ -691,7 +1043,7 @@ class FakeTaskQClient:
             )
         if admission.state == "cancelled":
             return AdmissionCancelResult(outcome=AdmissionCancelOutcome.ALREADY_CANCELLED)
-        if admission.reservation_expires_at <= datetime.now(UTC):
+        if admission.reservation_expires_at <= self._now():
             return AdmissionCancelResult(outcome=AdmissionCancelOutcome.EXPIRED)
         admission.state = "cancelled"
         return AdmissionCancelResult(outcome=AdmissionCancelOutcome.CANCELLED)
@@ -710,7 +1062,7 @@ class FakeTaskQClient:
         self._ensure_open()
         if queue not in self._known_queues:
             return ClaimResult(state=ClaimState.UNKNOWN_QUEUE)
-        now = datetime.now(UTC)
+        now = self._now()
         selected: list[ClaimedJob] = []
         for candidate_id in self._order:
             candidate = self._jobs[candidate_id]
@@ -787,7 +1139,7 @@ class FakeTaskQClient:
         return HeartbeatResult(
             ok=self._attempt(job_id, attempt_id, worker_id) is not None,
             cancel_requested=workflow_cancel_requested,
-            lease_expires_at=datetime.now(UTC) + timedelta(seconds=duration),
+            lease_expires_at=self._now() + timedelta(seconds=duration),
         )
 
     def _replay_or_lost(
@@ -978,7 +1330,7 @@ class FakeTaskQClient:
         job.failure_count += 1
         retry = retryable and job.failure_count < (job.command.max_attempts or 10)
         if retry:
-            scheduled = datetime.now(UTC) + timedelta(seconds=retry_after_seconds or 0)
+            scheduled = self._now() + timedelta(seconds=retry_after_seconds or 0)
             intent: HandlerResult = Retry(
                 after_seconds=retry_after_seconds,
                 error=error,
@@ -1018,7 +1370,7 @@ class FakeTaskQClient:
         if replay is not None:
             return replay
         assert job is not None
-        scheduled = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+        scheduled = self._now() + timedelta(seconds=delay_seconds)
         self._finish(
             job,
             command="snooze",
@@ -1048,7 +1400,7 @@ class FakeTaskQClient:
         if replay is not None:
             return replay
         assert job is not None
-        scheduled = datetime.now(UTC) + timedelta(seconds=delay_seconds)
+        scheduled = self._now() + timedelta(seconds=delay_seconds)
         self._finish(
             job,
             command="release",
