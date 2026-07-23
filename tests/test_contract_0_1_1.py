@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate, verify
+from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -56,7 +56,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same full 0.1.5 ledger and activation posture."""
+    """Both supported paths end at the same full 0.2.0 ledger and activation posture."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -75,6 +75,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             "0005_read_model_conformance",
             "0006_activate_ready_read_model",
             "0007_admission_reservations",
+            "0008_followups",
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
@@ -98,7 +99,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
             version = await conn.exec_driver_sql(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            assert version.scalar_one() == "0.1.5"
+            assert version.scalar_one() == "0.2.0"
             ledger = await conn.exec_driver_sql(
                 "SELECT id FROM taskq.schema_migrations ORDER BY id"
             )
@@ -110,12 +111,13 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 "0005_read_model_conformance",
                 "0006_activate_ready_read_model",
                 "0007_admission_reservations",
+                "0008_followups",
             ]
             count = await conn.exec_driver_sql(
                 "SELECT count(*) FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace "
                 "WHERE n.nspname='taskq' AND p.prokind='f'"
             )
-            assert count.scalar_one() == 46
+            assert count.scalar_one() == 47
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
@@ -213,8 +215,11 @@ async def test_admission_capability_transitions_only_at_0007(taskq_dsn: str) -> 
             assert after.scalar_one() == {
                 "active": ["admission_reservations", "read_model_list_ready"]
             }
-            report = await verify(conn)
-            assert report.ok
+            present = await conn.exec_driver_sql(
+                "SELECT to_regprocedure("
+                "'taskq.reserve_admission(text,text,text,uuid,integer,integer)')"
+            )
+            assert present.scalar_one() is not None
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))

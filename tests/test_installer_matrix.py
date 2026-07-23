@@ -45,6 +45,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0005_read_model_conformance",
                 "0006_activate_ready_read_model",
                 "0007_admission_reservations",
+                "0008_followups",
             ],
         ]
         async with engines[0].connect() as conn:
@@ -58,6 +59,8 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
 
 
 def test_cli_migrate_and_verify_success(taskq_dsn: str, capsys: pytest.CaptureFixture[str]) -> None:
+    main(["migrate", taskq_dsn])
+    capsys.readouterr()
     main(["migrate", taskq_dsn])
     assert "schema is up to date" in capsys.readouterr().out
     main(["verify", taskq_dsn])

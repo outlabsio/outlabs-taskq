@@ -4,7 +4,7 @@ Asserts the Tier-0 contracts of the 0.1 Function Manifest + Transport
 Protocol v1: installer idempotency, verify anti-drift, capability-role
 privilege walls (ADR-010/011), typed enqueue results, the H-01 typed
 ``claim_batch`` states, H-03 verb-aware settle replays, budget-free release,
-cancel-wins failure paths (R2-03), and the TQ501 followup capability gate.
+cancel-wins failure paths (R2-03), and the native follow-up capability.
 
 Every test runs as the exact capability role the call is granted to
 (harness §1.1 rule 3). Requires ``TASKQ_TEST_DSN`` (superuser scratch DB —
@@ -461,12 +461,12 @@ class TestCancelWinsFailure:
 
 
 # ---------------------------------------------------------------------------
-# 0.1 capability gate — followups are contract skew (TQ501)
+# 0.2 capability — parent settlement and child admission are atomic
 # ---------------------------------------------------------------------------
 
 
-class TestFollowupCapabilityGate:
-    async def test_non_empty_followups_raise_tq501(
+class TestFollowupCapability:
+    async def test_non_empty_followups_settle_parent_and_create_child(
         self,
         pg: asyncpg.Connection,
         operator: asyncpg.Connection,
@@ -477,16 +477,20 @@ class TestFollowupCapabilityGate:
         await _enqueue_one(producer, "t2_followups")
         job = await _claim_one(runner, "t2_followups")
 
-        with pytest.raises(asyncpg.PostgresError) as excinfo:
-            await runner.fetchrow(
-                "SELECT * FROM taskq.complete_job($1, $2, $3, p_followups => $4::jsonb)",
-                job["job_id"],
-                job["attempt_id"],
-                "w-1",
-                '[{"job_type": "child.step"}]',
-            )
-        assert excinfo.value.sqlstate == "TQ501"
-
-        # The rejected settle rolled back atomically: the job is still running.
-        status = await pg.fetchval("SELECT status FROM taskq.jobs WHERE id = $1", job["job_id"])
-        assert status == "running"
+        result = await runner.fetchrow(
+            "SELECT * FROM taskq.complete_job($1, $2, $3, p_followups => $4::jsonb)",
+            job["job_id"],
+            job["attempt_id"],
+            "w-1",
+            '[{"step":"child","job_type":"child.step","payload":{"value":1}}]',
+        )
+        assert result["result"] == "ok"
+        rows = await pg.fetch(
+            "SELECT id,status,parent_job_id,idempotency_key,payload FROM taskq.jobs ORDER BY created_at"
+        )
+        assert len(rows) == 2
+        assert rows[0]["status"] == "succeeded"
+        assert rows[1]["status"] == "queued"
+        assert rows[1]["parent_job_id"] == job["job_id"]
+        assert rows[1]["idempotency_key"] == f"chain:{job['job_id']}:child"
+        assert rows[1]["payload"] == '{"value": 1}'

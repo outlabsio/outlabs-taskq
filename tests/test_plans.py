@@ -351,7 +351,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
 
     capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
     assert json.loads(capabilities) == {
-        "active": ["admission_reservations", "read_model_list_ready"]
+        "active": ["admission_reservations", "followups", "read_model_list_ready"]
     }
 
 

@@ -231,9 +231,9 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.1.5"
+    assert meta["contract_version"] == "0.2.0"
     assert _json(meta["capabilities"]) == {
-        "active": ["admission_reservations", "read_model_list_ready"]
+        "active": ["admission_reservations", "followups", "read_model_list_ready"]
     }
 
     await runner.fetchrow(

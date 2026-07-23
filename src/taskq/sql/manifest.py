@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.1.5.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.2.0.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.1.5"
+CONTRACT_VERSION = "0.2.0"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -231,6 +231,7 @@ class FunctionSpec:
 
 
 _FUNCTION_ROWS = r"""
+taskq._enqueue_followup(uuid,text,jsonb,integer)|p_parent_job_id uuid, p_parent_queue text, p_spec jsonb, p_spec_index integer|TABLE(job_id uuid, created boolean)|plpgsql|v|u|
 taskq.backoff_seconds(text,integer,integer,integer)|p_mode text, p_base integer, p_cap integer, p_failures integer|integer|sql|v|u|
 taskq.cancel_admission(text,text,uuid)|p_queue text, p_idempotency_key text, p_handle uuid|taskq.admission_cancel_result|plpgsql|v|u|taskq_producer
 taskq.cancel_job(uuid,text,text)|p_job_id uuid, p_actor text, p_reason text DEFAULT NULL::text|TABLE(result text, job_status text)|plpgsql|v|u|taskq_operator
@@ -367,6 +368,8 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.1.5"',
-    "capabilities": '{"active": ["admission_reservations", "read_model_list_ready"]}',
+    "contract_version": '"0.2.0"',
+    "capabilities": (
+        '{"active": ["admission_reservations", "followups", "read_model_list_ready"]}'
+    ),
 }
