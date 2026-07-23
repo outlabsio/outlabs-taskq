@@ -37,6 +37,9 @@ from taskq.transport import (
     OperatorTransport,
     ProducerTransport,
     RunnerTransport,
+    WorkflowAuthorizationLookupTransport,
+    WorkflowOperatorTransport,
+    WorkflowProducerTransport,
     non_owning_transport_view,
 )
 from taskq.http import AsyncTaskqHttpClient, TaskqHttpClient
@@ -79,6 +82,27 @@ EXPECTED_HTTP_IDENTITIES = {
         "/taskq/v1/queues/{queue}/admissions/cancel",
         "enqueue",
         "path",
+        "active",
+    ),
+    "create_workflow": (
+        "POST",
+        "/taskq/v1/workflows",
+        "enqueue",
+        "declared_queues",
+        "active",
+    ),
+    "seal_workflow": (
+        "POST",
+        "/taskq/v1/workflows/{id}/seal",
+        "enqueue",
+        "workflow_lookup",
+        "active",
+    ),
+    "cancel_workflow": (
+        "POST",
+        "/taskq/v1/workflows/{id}/cancel",
+        "control",
+        "workflow_lookup",
         "active",
     ),
     "claim": ("POST", "/taskq/v1/queues/{queue}/claims", "run", "path", "active"),
@@ -237,6 +261,13 @@ EXPECTED_HTTP_OUTCOMES = {
         "expired": 200,
         "already_admitted": 200,
     },
+    "create_workflow": {"created": 201, "existed": 200},
+    "seal_workflow": {"sealed": 200, "already_sealed": 200},
+    "cancel_workflow": {
+        "cancel_requested": 202,
+        "already_requested": 202,
+        "already_terminal": 200,
+    },
     "claim": {"claimed": 200, "empty": 200, "timeout": 200, "paused": 200, "unavailable": 200},
     "heartbeat": {"ok": 200, "lost": 409},
     "complete": {"ok": 200, "already_settled": 200, "settle_conflict": 409, "lost": 409},
@@ -315,6 +346,19 @@ def test_capability_protocol_method_sets_are_exact() -> None:
     }
     assert _method_names(HousekeeperTransport) == {"tick", "janitor", "aclose"}
     assert "redrive_failed" in _method_names(OperatorTransport)
+    assert _method_names(WorkflowProducerTransport) == {
+        "create_workflow",
+        "seal_workflow",
+        "aclose",
+    }
+    assert _method_names(WorkflowAuthorizationLookupTransport) == {
+        "get_workflow_authorization_projection",
+        "aclose",
+    }
+    assert _method_names(WorkflowOperatorTransport) == {
+        "cancel_workflow",
+        "aclose",
+    }
 
 
 def test_cancel_admission_wire_projection_is_exact() -> None:

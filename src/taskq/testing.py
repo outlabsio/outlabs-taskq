@@ -54,6 +54,10 @@ from taskq.protocol import (
     SettleOutcome,
     SettleResult,
     SettleRetryScheduledResult,
+    WorkflowAuthorizationProjection,
+    WorkflowKind,
+    WorkflowResult,
+    WorkflowStatus,
 )
 from taskq.registry import Task, TaskRegistry
 from taskq.sql.transport import SqlTaskqTransport
@@ -159,6 +163,23 @@ class _FakeAdmission:
     receipt_expires_at: datetime | None = None
 
 
+@dataclass(slots=True)
+class _FakeWorkflow:
+    workflow_id: UUID
+    workflow_key: str
+    kind: WorkflowKind
+    params: dict[str, Any]
+    declared_queues: tuple[str, ...]
+    sealed: bool = False
+    cancel_requested: bool = False
+    status: WorkflowStatus = WorkflowStatus.RUNNING
+    steps: dict[str, UUID] | None = None
+
+    def __post_init__(self) -> None:
+        if self.steps is None:
+            self.steps = {}
+
+
 _SAFE_FIELDS = {
     "job_id",
     "queue",
@@ -201,6 +222,10 @@ class FakeTaskQClient:
         "reserve_admission",
         "finish_admission",
         "cancel_admission",
+        "create_workflow",
+        "seal_workflow",
+        "cancel_workflow",
+        "get_workflow_authorization_projection",
         "claim",
         "heartbeat",
         "complete",
@@ -218,6 +243,8 @@ class FakeTaskQClient:
         self._order: list[UUID] = []
         self._active_keys: dict[tuple[str, str], UUID] = {}
         self._admissions: dict[tuple[str, str], _FakeAdmission] = {}
+        self._workflows: dict[UUID, _FakeWorkflow] = {}
+        self._workflow_keys: dict[str, UUID] = {}
         self._enqueues: list[RecordedEnqueue] = []
         self._settlements: list[RecordedSettlement] = []
         self._closed = False
@@ -264,6 +291,8 @@ class FakeTaskQClient:
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         self._ensure_open()
+        if command.workflow_id is not None:
+            return await self._enqueue_workflow_member(command)
         key = (
             (command.queue, command.idempotency_key)
             if command.idempotency_key is not None
@@ -308,6 +337,186 @@ class FakeTaskQClient:
             )
         )
         return result
+
+    async def _enqueue_workflow_member(self, command: EnqueueCommand) -> EnqueueResult:
+        assert command.workflow_id is not None and command.step_key is not None
+        workflow = self._workflows.get(command.workflow_id)
+        if workflow is None:
+            raise TaskqNotFoundError()
+        if command.queue not in workflow.declared_queues:
+            raise TaskqConflictError(details={"reason": "workflow_queue_not_declared"})
+        assert workflow.steps is not None
+        existing_id = workflow.steps.get(command.step_key)
+        if existing_id is not None:
+            existing = self._jobs[existing_id]
+            if existing.command != command:
+                raise TaskqConflictError(details={"reason": "workflow_step_mismatch"})
+            return self._record_enqueue(existing, command, "existed")
+        if workflow.sealed or workflow.cancel_requested:
+            raise TaskqConflictError(details={"reason": "workflow_sealed"})
+        parents: list[_FakeJob] = []
+        for parent_id in command.depends_on or ():
+            parent = self._jobs.get(parent_id)
+            if parent is None or parent.command.workflow_id != command.workflow_id:
+                raise TaskqNotFoundError()
+            if parent.status in {JobStatus.FAILED, JobStatus.CANCELLED}:
+                raise TaskqConflictError(details={"reason": "dependency_terminal"})
+            parents.append(parent)
+        status = (
+            JobStatus.BLOCKED
+            if any(parent.status is not JobStatus.SUCCEEDED for parent in parents)
+            else JobStatus.QUEUED
+        )
+        job = _FakeJob(job_id=uuid4(), command=command, status=status)
+        self._jobs[job.job_id] = job
+        self._order.append(job.job_id)
+        workflow.steps[command.step_key] = job.job_id
+        self._known_queues.add(command.queue)
+        if command.idempotency_key is not None:
+            identity = (command.queue, command.idempotency_key)
+            collision = self._active_keys.get(identity)
+            if collision is not None and collision != job.job_id:
+                del self._jobs[job.job_id]
+                self._order.remove(job.job_id)
+                del workflow.steps[command.step_key]
+                raise TaskqConflictError(details={"reason": "workflow_step_mismatch"})
+            self._active_keys[identity] = job.job_id
+        return self._record_enqueue(job, command, "created")
+
+    def _record_enqueue(
+        self,
+        job: _FakeJob,
+        command: EnqueueCommand,
+        status: Literal["created", "existed"],
+    ) -> EnqueueResult:
+        result_type = EnqueueCreatedResult if status == "created" else EnqueueExistedResult
+        result: EnqueueResult = result_type(
+            job_id=job.job_id,
+            queue=command.queue,
+            job_type=command.job_type,
+            idempotency_key=command.idempotency_key,
+            scheduled_at=job.command.scheduled_at,
+        )
+        self._enqueues.append(
+            RecordedEnqueue(
+                job_id=job.job_id,
+                queue=command.queue,
+                job_type=command.job_type,
+                payload=deepcopy(command.payload),
+                headers=deepcopy(command.headers or {}),
+                idempotency_key=command.idempotency_key,
+                status=status,
+                parent_job_id=job.parent_job_id,
+            )
+        )
+        return result
+
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+    ) -> WorkflowResult:
+        self._ensure_open()
+        del actor
+        queues = tuple(sorted(set(declared_queues)))
+        existing_id = self._workflow_keys.get(workflow_key)
+        if existing_id is not None:
+            workflow = self._workflows[existing_id]
+            if (
+                workflow.kind != WorkflowKind(kind)
+                or workflow.params != dict(params or {})
+                or workflow.declared_queues != queues
+            ):
+                raise TaskqConflictError(details={"reason": "workflow_mismatch"})
+            return WorkflowResult(
+                outcome="existed",
+                workflow_id=workflow.workflow_id,
+                status=workflow.status,
+            )
+        if not queues or any(queue not in self._known_queues for queue in queues):
+            raise TaskqNotFoundError()
+        workflow = _FakeWorkflow(
+            workflow_id=uuid4(),
+            workflow_key=workflow_key,
+            kind=WorkflowKind(kind),
+            params=deepcopy(dict(params or {})),
+            declared_queues=queues,
+        )
+        self._workflows[workflow.workflow_id] = workflow
+        self._workflow_keys[workflow_key] = workflow.workflow_id
+        return WorkflowResult(
+            outcome="created", workflow_id=workflow.workflow_id, status=workflow.status
+        )
+
+    async def seal_workflow(self, workflow_id: UUID, actor: str) -> WorkflowResult:
+        self._ensure_open()
+        del actor
+        workflow = self._workflows.get(workflow_id)
+        if workflow is None:
+            raise TaskqNotFoundError()
+        outcome = "already_sealed" if workflow.sealed else "sealed"
+        workflow.sealed = True
+        self._refresh_workflow(workflow)
+        return WorkflowResult(
+            outcome=outcome, workflow_id=workflow.workflow_id, status=workflow.status
+        )
+
+    async def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult:
+        self._ensure_open()
+        del actor, reason
+        workflow = self._workflows.get(workflow_id)
+        if workflow is None:
+            raise TaskqNotFoundError()
+        if workflow.status is not WorkflowStatus.RUNNING:
+            outcome = "already_terminal"
+        elif workflow.cancel_requested:
+            outcome = "already_requested"
+        else:
+            outcome = "cancel_requested"
+            workflow.cancel_requested = True
+            workflow.sealed = True
+            assert workflow.steps is not None
+            for job_id in workflow.steps.values():
+                job = self._jobs[job_id]
+                if job.status in {JobStatus.BLOCKED, JobStatus.QUEUED}:
+                    job.status = JobStatus.CANCELLED
+            self._refresh_workflow(workflow)
+        return WorkflowResult(
+            outcome=outcome, workflow_id=workflow.workflow_id, status=workflow.status
+        )
+
+    async def get_workflow_authorization_projection(
+        self, workflow_id: UUID
+    ) -> WorkflowAuthorizationProjection:
+        workflow = self._workflows.get(workflow_id)
+        if workflow is None:
+            raise TaskqNotFoundError()
+        return WorkflowAuthorizationProjection(
+            workflow_id=workflow.workflow_id,
+            declared_queues=workflow.declared_queues,
+        )
+
+    def _refresh_workflow(self, workflow: _FakeWorkflow) -> None:
+        if not workflow.sealed:
+            return
+        assert workflow.steps is not None
+        statuses = [self._jobs[job_id].status for job_id in workflow.steps.values()]
+        if workflow.cancel_requested:
+            if all(status is not JobStatus.RUNNING for status in statuses):
+                workflow.status = WorkflowStatus.CANCELLED
+            return
+        if any(status is JobStatus.FAILED for status in statuses):
+            workflow.status = WorkflowStatus.FAILED
+        elif any(status is JobStatus.CANCELLED for status in statuses):
+            workflow.status = WorkflowStatus.CANCELLED
+        elif all(status is JobStatus.SUCCEEDED for status in statuses):
+            workflow.status = WorkflowStatus.SUCCEEDED
 
     async def enqueue_many(
         self, queue: str, items: Sequence[EnqueueManyItem]
@@ -552,9 +761,15 @@ class FakeTaskQClient:
     ) -> HeartbeatResult:
         self._ensure_open()
         duration = lease_seconds or 60
+        job = self._jobs.get(job_id)
+        workflow_cancel_requested = bool(
+            job is not None
+            and job.command.workflow_id is not None
+            and self._workflows[job.command.workflow_id].cancel_requested
+        )
         return HeartbeatResult(
             ok=self._attempt(job_id, attempt_id, worker_id) is not None,
-            cancel_requested=False,
+            cancel_requested=workflow_cancel_requested,
             lease_expires_at=datetime.now(UTC) + timedelta(seconds=duration),
         )
 
@@ -606,6 +821,45 @@ class FakeTaskQClient:
                 cause=cause,
             )
         )
+        if job.command.workflow_id is not None and status in {
+            JobStatus.SUCCEEDED,
+            JobStatus.FAILED,
+            JobStatus.CANCELLED,
+        }:
+            self._advance_fake_workflow(job)
+
+    def _advance_fake_workflow(self, parent: _FakeJob) -> None:
+        workflow_id = parent.command.workflow_id
+        assert workflow_id is not None
+        workflow = self._workflows[workflow_id]
+        if parent.status is JobStatus.SUCCEEDED:
+            for candidate in self._jobs.values():
+                if (
+                    candidate.command.workflow_id != workflow_id
+                    or candidate.status is not JobStatus.BLOCKED
+                    or parent.job_id not in (candidate.command.depends_on or ())
+                ):
+                    continue
+                parents = [self._jobs[item] for item in candidate.command.depends_on or ()]
+                if all(item.status is JobStatus.SUCCEEDED for item in parents):
+                    candidate.status = JobStatus.QUEUED
+        else:
+            frontier = [parent.job_id]
+            seen: set[UUID] = set()
+            while frontier:
+                failed_id = frontier.pop()
+                if failed_id in seen:
+                    continue
+                seen.add(failed_id)
+                for candidate in self._jobs.values():
+                    if (
+                        candidate.command.workflow_id == workflow_id
+                        and candidate.status in {JobStatus.BLOCKED, JobStatus.QUEUED}
+                        and failed_id in (candidate.command.depends_on or ())
+                    ):
+                        candidate.status = JobStatus.CANCELLED
+                        frontier.append(candidate.job_id)
+        self._refresh_workflow(workflow)
 
     async def complete(
         self,

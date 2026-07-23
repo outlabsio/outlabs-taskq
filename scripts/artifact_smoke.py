@@ -157,6 +157,29 @@ def main() -> None:
         replay = await facade.reserve_admission("artifact", "artifact-key", "a" * 64)
         assert replay.outcome is AdmissionReserveOutcome.ADMITTED
         assert replay.job_id == admitted.job_id
+        workflow = await facade.create_workflow(
+            "artifact-workflow",
+            "dag",
+            declared_queues=("artifact",),
+            actor="artifact-smoke",
+        )
+        parent = await facade.enqueue_raw(
+            queue="artifact",
+            job_type="artifact.workflow",
+            payload={"ok": True},
+            workflow_id=workflow.workflow_id,
+            step_key="parent",
+        )
+        replayed_parent = await facade.enqueue_raw(
+            queue="artifact",
+            job_type="artifact.workflow",
+            payload={"ok": True},
+            workflow_id=workflow.workflow_id,
+            step_key="parent",
+        )
+        assert replayed_parent.job_id == parent.job_id
+        sealed = await facade.seal_workflow(workflow.workflow_id, actor="artifact-smoke")
+        assert sealed.outcome == "sealed"
 
     asyncio.run(smoke_testing())
 

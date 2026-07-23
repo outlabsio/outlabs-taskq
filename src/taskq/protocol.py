@@ -13,6 +13,7 @@ from datetime import datetime
 from dataclasses import dataclass
 from enum import StrEnum
 import json
+import re
 from types import MappingProxyType
 from typing import Annotated, Any, Final, Generic, Literal, TypeAlias, TypeVar
 from uuid import UUID
@@ -259,7 +260,18 @@ class EnqueueCommand(BaseModel):
             raise ValueError("depends_on requires workflow_id")
         if self.depends_on is not None and len(set(self.depends_on)) != len(self.depends_on):
             raise ValueError("depends_on must contain distinct job ids")
+        if self.workflow_id is not None and self.workflow_id.int == 0:
+            raise ValueError("workflow_id must be non-nil")
+        if self.depends_on is not None and any(item.int == 0 for item in self.depends_on):
+            raise ValueError("depends_on must contain non-nil job ids")
         return self
+
+    @field_validator("step_key")
+    @classmethod
+    def _step_key_bytes(cls, value: str | None) -> str | None:
+        if value is not None and len(value.encode("utf-8")) > 64:
+            raise ValueError("step_key exceeds 64 UTF-8 bytes")
+        return value
 
 
 class EnqueueManyItem(BaseModel):
@@ -302,6 +314,14 @@ class EnqueueWireRequest(BaseModel):
     backoff_mode: Literal["fixed", "exponential"] | None = None
     backoff_base: int | None = None
     backoff_cap: int | None = None
+    depends_on: tuple[UUID, ...] | None = Field(default=None, max_length=100)
+    step_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    workflow_id: UUID | None = None
     headers: dict[str, Any] | None = None
 
     @field_validator("payload")
@@ -313,6 +333,27 @@ class EnqueueWireRequest(BaseModel):
     @classmethod
     def _headers_bound(cls, value: dict[str, Any] | None) -> dict[str, Any] | None:
         return _bounded_json(value, 8192, "headers")
+
+    @model_validator(mode="after")
+    def _workflow_shape(self) -> EnqueueWireRequest:
+        if (self.workflow_id is None) != (self.step_key is None):
+            raise ValueError("workflow_id and step_key must be supplied together")
+        if self.workflow_id is None and self.depends_on:
+            raise ValueError("depends_on requires workflow_id")
+        if self.depends_on is not None and len(set(self.depends_on)) != len(self.depends_on):
+            raise ValueError("depends_on must contain distinct job ids")
+        if self.workflow_id is not None and self.workflow_id.int == 0:
+            raise ValueError("workflow_id must be non-nil")
+        if self.depends_on is not None and any(item.int == 0 for item in self.depends_on):
+            raise ValueError("depends_on must contain non-nil job ids")
+        return self
+
+    @field_validator("step_key")
+    @classmethod
+    def _step_key_bytes(cls, value: str | None) -> str | None:
+        if value is not None and len(value.encode("utf-8")) > 64:
+            raise ValueError("step_key exceeds 64 UTF-8 bytes")
+        return value
 
 
 class EnqueueWireData(BaseModel):
@@ -978,6 +1019,56 @@ class WorkflowAuthorizationProjection(BaseModel):
     declared_queues: tuple[str, ...]
 
 
+class CreateWorkflowWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    workflow_key: str = Field(min_length=1, max_length=255)
+    kind: WorkflowKind
+    params: dict[str, Any] = Field(default_factory=dict)
+    declared_queues: tuple[str, ...] = Field(min_length=1, max_length=32)
+
+    @field_validator("workflow_key")
+    @classmethod
+    def _workflow_key_bytes(cls, value: str) -> str:
+        if len(value.encode("utf-8")) > 255:
+            raise ValueError("workflow_key exceeds 255 UTF-8 bytes")
+        return value
+
+    @field_validator("params")
+    @classmethod
+    def _params_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 65536, "params")
+
+    @field_validator("declared_queues")
+    @classmethod
+    def _declared_queue_shape(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("declared_queues must contain distinct queue names")
+        if any(re.fullmatch(r"[a-z0-9_]{1,57}", queue) is None for queue in value):
+            raise ValueError("declared_queues contains an invalid queue name")
+        return value
+
+
+class WorkflowWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: UUID
+    status: WorkflowStatus
+
+
+class WorkflowCancelWireRequest(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: str | None = Field(default=None, max_length=2048)
+
+    @field_validator("reason")
+    @classmethod
+    def _reason_bytes(cls, value: str | None) -> str | None:
+        if value is not None and len(value.encode("utf-8")) > 2048:
+            raise ValueError("reason exceeds 2048 UTF-8 bytes")
+        return value
+
+
 class CommandName(StrEnum):
     RESERVE_ADMISSION = "reserve_admission"
     FINISH_ADMISSION = "finish_admission"
@@ -1042,6 +1133,9 @@ class HttpCommandName(StrEnum):
     RESERVE_ADMISSION = "reserve_admission"
     FINISH_ADMISSION = "finish_admission"
     CANCEL_ADMISSION = "cancel_admission"
+    CREATE_WORKFLOW = "create_workflow"
+    SEAL_WORKFLOW = "seal_workflow"
+    CANCEL_WORKFLOW = "cancel_workflow"
     CLAIM = "claim"
     HEARTBEAT = "heartbeat"
     COMPLETE = "complete"
@@ -1081,6 +1175,7 @@ class TaskqAction(StrEnum):
 class QueueSource(StrEnum):
     PATH = "path"
     JOB_LOOKUP = "job_lookup"
+    WORKFLOW_LOOKUP = "workflow_lookup"
     DECLARED_QUEUES = "declared_queues"
     GLOBAL = "global"
     DEPLOYMENT = "deployment_policy"
@@ -1574,6 +1669,39 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             request_model=AdmissionCancelRequest,
             data_model=AdmissionCancelWireData,
         ),
+        HttpCommandName.CREATE_WORKFLOW: _http(
+            "POST",
+            "/taskq/v1/workflows",
+            TaskqAction.ENQUEUE,
+            QueueSource.DECLARED_QUEUES,
+            _status_map(created=201, existed=200),
+            _SAFE,
+            CommandName.CREATE_WORKFLOW,
+            request_model=CreateWorkflowWireRequest,
+            data_model=WorkflowWireData,
+        ),
+        HttpCommandName.SEAL_WORKFLOW: _http(
+            "POST",
+            "/taskq/v1/workflows/{id}/seal",
+            TaskqAction.ENQUEUE,
+            QueueSource.WORKFLOW_LOOKUP,
+            _status_map(sealed=200, already_sealed=200),
+            _SAFE,
+            CommandName.SEAL_WORKFLOW,
+            request_model=EmptyWireRequest,
+            data_model=WorkflowWireData,
+        ),
+        HttpCommandName.CANCEL_WORKFLOW: _http(
+            "POST",
+            "/taskq/v1/workflows/{id}/cancel",
+            _CONTROL,
+            QueueSource.WORKFLOW_LOOKUP,
+            _status_map(cancel_requested=202, already_requested=202, already_terminal=200),
+            _SAFE,
+            CommandName.CANCEL_WORKFLOW,
+            request_model=WorkflowCancelWireRequest,
+            data_model=WorkflowWireData,
+        ),
         HttpCommandName.CLAIM: _http(
             "POST",
             "/taskq/v1/queues/{queue}/claims",
@@ -1887,6 +2015,7 @@ __all__ = [
     "CountWireData",
     "ContractMeta",
     "CompleteWireRequest",
+    "CreateWorkflowWireRequest",
     "ENQUEUE_MANY_ITEMS_ADAPTER",
     "ENQUEUE_RESULT_ADAPTER",
     "EnqueueCommand",
@@ -1952,8 +2081,10 @@ __all__ = [
     "TqErrorSpec",
     "WorkerPresenceWireData",
     "WorkerPresenceWireRequest",
+    "WorkflowCancelWireRequest",
     "WorkflowAuthorizationProjection",
     "WorkflowKind",
     "WorkflowResult",
     "WorkflowStatus",
+    "WorkflowWireData",
 ]

@@ -35,6 +35,7 @@ logger = logging.getLogger("taskq.runtime")
 # later transport/facade surface remains separately gated.
 SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1"})
 ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0", "0.2.1"})
+WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset({"0.2.1"})
 
 
 def _require_supported_sql_contract(
@@ -81,6 +82,7 @@ class TaskqRuntimeOptions(BaseModel):
     long_poll_listener_enabled: bool = True
     embedded_worker: EmbeddedWorkerOptions | None = None
     admission_enabled: bool = False
+    workflow_enabled: bool = False
     request_pool_max: int = Field(default=10, ge=1, le=1000)
     operator_pool_max: int = Field(default=0, ge=0, le=1000)
     housekeeper_pool_max: int = Field(default=1, ge=1, le=1000)
@@ -320,6 +322,9 @@ class TaskqRuntime:
             authorization=ordinary,
             claim_wait_hub=hub,
             admission_enabled=resolved.admission_enabled,
+            workflow_producer=ordinary if resolved.workflow_enabled else None,
+            workflow_authorization=ordinary if resolved.workflow_enabled else None,
+            workflow_enabled=resolved.workflow_enabled,
         )
         housekeeper: SqlTaskqTransport | None = None
         if resolved.housekeeper_enabled:
@@ -434,6 +439,12 @@ class TaskqRuntime:
                 active = meta.capabilities.get("active")
                 if not isinstance(active, list) or "admission_reservations" not in active:
                     raise TaskqCapabilityError(details={"capability": "admission_reservations"})
+            if self.facade_transports.workflow_enabled:
+                if meta.contract_version not in WORKFLOW_SQL_CONTRACT_VERSIONS:
+                    raise TaskqVersionError(details={"contract_version": meta.contract_version})
+                active = meta.capabilities.get("active")
+                if not isinstance(active, list) or "dependencies_workflows" not in active:
+                    raise TaskqCapabilityError(details={"capability": "dependencies_workflows"})
             self._log_budget()
             if self.housekeeper_transport is not None:
                 await self._tick(startup=True)

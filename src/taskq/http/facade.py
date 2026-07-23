@@ -52,6 +52,7 @@ from taskq.protocol import (
     CommandName,
     CompleteWireRequest,
     ConcurrencyLimitWireRequest,
+    CreateWorkflowWireRequest,
     EnqueueCommand,
     EnqueueManyWireRequest,
     EnqueueWireData,
@@ -76,6 +77,7 @@ from taskq.protocol import (
     TaskqAction,
     TqCode,
     WorkerPresenceWireRequest,
+    WorkflowCancelWireRequest,
 )
 from taskq.transport import (
     AuthorizationLookupTransport,
@@ -83,6 +85,9 @@ from taskq.transport import (
     OperatorTransport,
     ProducerTransport,
     RunnerTransport,
+    WorkflowAuthorizationLookupTransport,
+    WorkflowOperatorTransport,
+    WorkflowProducerTransport,
 )
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -98,6 +103,7 @@ _OPERATOR_COMMANDS = frozenset(
         CommandName.PAUSE_QUEUE,
         CommandName.RESUME_QUEUE,
         CommandName.CANCEL,
+        CommandName.CANCEL_WORKFLOW,
         CommandName.REDRIVE,
         CommandName.EXPIRE_JOB,
         CommandName.EXPIRE_WORKER_LEASES,
@@ -115,6 +121,13 @@ _ADMISSION_COMMANDS = frozenset(
         HttpCommandName.CANCEL_ADMISSION,
     }
 )
+_WORKFLOW_COMMANDS = frozenset(
+    {
+        HttpCommandName.CREATE_WORKFLOW,
+        HttpCommandName.SEAL_WORKFLOW,
+        HttpCommandName.CANCEL_WORKFLOW,
+    }
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +138,9 @@ class TaskqFacadeTransports:
     authorization: AuthorizationLookupTransport
     claim_wait_hub: ClaimWaitHub
     admission_enabled: bool = False
+    workflow_producer: WorkflowProducerTransport | None = None
+    workflow_authorization: WorkflowAuthorizationLookupTransport | None = None
+    workflow_enabled: bool = False
 
 
 def _selected_request_id(request: Request) -> tuple[str, bool]:
@@ -373,6 +389,27 @@ class _FacadeDispatcher:
             body = await self._body(request, spec)
             return await self._execute(request, name, spec, body, context, queue)
 
+        if spec.queue_source is QueueSource.WORKFLOW_LOOKUP:
+            self._validate_query(request, name)
+            await self._authorize(request, name, spec, None, context, authorizer, public_meta)
+            self._validate_headers(request)
+            body = await self._body(request, spec)
+            return await self._execute(request, name, spec, body, context, None)
+
+        if name is HttpCommandName.ENQUEUE:
+            self._validate_query(request, name)
+            queue = await self._authorize(
+                request, name, spec, None, context, authorizer, public_meta
+            )
+            self._validate_headers(request)
+            body = await self._body(request, spec)
+            assert isinstance(body, EnqueueWireRequest)
+            if body.workflow_id is not None:
+                await self._authorize_workflow(
+                    request, context, authorizer, body.workflow_id, spec.action
+                )
+            return await self._execute(request, name, spec, body, context, queue)
+
         if spec.queue_source is QueueSource.JOB_LOOKUP:
             self._validate_query(request, name)
             queue = await self._authorize(
@@ -476,9 +513,18 @@ class _FacadeDispatcher:
             await self._check_authorization(authorizer, request, context, spec.action, queue)
             return queue
         if spec.queue_source is QueueSource.DECLARED_QUEUES:
-            assert isinstance(body, WorkerPresenceWireRequest)
-            for queue in body.queues:
+            if isinstance(body, WorkerPresenceWireRequest):
+                queues = body.queues
+            else:
+                assert isinstance(body, CreateWorkflowWireRequest)
+                queues = body.declared_queues
+            for queue in queues:
                 await self._check_authorization(authorizer, request, context, spec.action, queue)
+            return None
+        if spec.queue_source is QueueSource.WORKFLOW_LOOKUP:
+            await self._authorize_workflow(
+                request, context, authorizer, _path_uuid(request, "id"), spec.action
+            )
             return None
         if spec.queue_source is QueueSource.JOB_LOOKUP:
             job_id = _path_uuid(request)
@@ -496,6 +542,28 @@ class _FacadeDispatcher:
             return projection.queue
         await self._check_authorization(authorizer, request, context, spec.action, None)
         return None
+
+    async def _authorize_workflow(
+        self,
+        request: Request,
+        context: AuthContext,
+        authorizer: QueueAuthorizer,
+        workflow_id: UUID,
+        action: TaskqAction | None,
+    ) -> None:
+        lookup = self.resources.workflow_authorization
+        if lookup is None or action is None:
+            raise TaskqCapabilityError(details={"capability": "dependencies_workflows"})
+        projection = await lookup.get_workflow_authorization_projection(workflow_id)
+        for queue in projection.declared_queues:
+            await self._check_authorization(
+                authorizer,
+                request,
+                context,
+                action,
+                queue,
+                hide_forbidden=self.not_found_on_forbidden,
+            )
 
     async def _authorize_followup_queues(
         self,
@@ -647,6 +715,33 @@ class _FacadeDispatcher:
                 spec,
                 result.outcome.value,
                 result.model_dump(exclude={"outcome"}, exclude_none=True),
+            )
+        if name is HttpCommandName.CREATE_WORKFLOW:
+            assert isinstance(body, CreateWorkflowWireRequest)
+            workflow = r.workflow_producer
+            assert workflow is not None
+            result = await workflow.create_workflow(
+                body.workflow_key,
+                body.kind,
+                params=body.params,
+                declared_queues=body.declared_queues,
+                actor=context.actor,
+            )
+            return _command_response(
+                request,
+                spec,
+                result.outcome,
+                result.model_dump(exclude={"outcome"}),
+            )
+        if name is HttpCommandName.SEAL_WORKFLOW:
+            workflow = r.workflow_producer
+            assert workflow is not None
+            result = await workflow.seal_workflow(_path_uuid(request, "id"), context.actor)
+            return _command_response(
+                request,
+                spec,
+                result.outcome,
+                result.model_dump(exclude={"outcome"}),
             )
         if name is HttpCommandName.ENQUEUE:
             assert queue is not None and isinstance(body, EnqueueWireRequest)
@@ -884,6 +979,17 @@ class _FacadeDispatcher:
             return _command_response(
                 request, spec, result.result.value, {"job_status": result.job_status}
             )
+        if name is HttpCommandName.CANCEL_WORKFLOW:
+            assert isinstance(body, WorkflowCancelWireRequest)
+            if not isinstance(operator, WorkflowOperatorTransport):
+                raise TaskqCapabilityError(details={"capability": "dependencies_workflows"})
+            result = await operator.cancel_workflow(_path_uuid(request, "id"), actor, body.reason)
+            return _command_response(
+                request,
+                spec,
+                result.outcome,
+                result.model_dump(exclude={"outcome"}),
+            )
         if name is HttpCommandName.REDRIVE:
             assert isinstance(body, RedriveWireRequest)
             redriven = await operator.redrive(_path_uuid(request), actor, body.reset_progress)
@@ -1050,6 +1156,20 @@ def create_taskq_app(
     resources = getattr(resources, "facade_transports", resources)
     if not isinstance(resources, TaskqFacadeTransports):
         raise TaskqConfigError("facade resources are not configured")
+    if resources.workflow_enabled and (
+        resources.workflow_producer is None or resources.workflow_authorization is None
+    ):
+        raise TaskqConfigError(
+            "workflow_enabled requires workflow producer and authorization transports"
+        )
+    if (
+        resources.workflow_enabled
+        and operator_transport is not None
+        and not isinstance(operator_transport, WorkflowOperatorTransport)
+    ):
+        raise TaskqConfigError(
+            "workflow-enabled operator transport must implement workflow cancellation"
+        )
 
     app = FastAPI(lifespan=None, openapi_url="/openapi.json", docs_url=None, redoc_url=None)
     dispatcher = _FacadeDispatcher(
@@ -1136,6 +1256,8 @@ def create_taskq_app(
 
     for name, spec in HTTP_COMMAND_SPECS.items():
         if name in _ADMISSION_COMMANDS and not resources.admission_enabled:
+            continue
+        if name in _WORKFLOW_COMMANDS and not resources.workflow_enabled:
             continue
         if name in _OPERATOR_COMMANDS and operator_transport is None:
             continue

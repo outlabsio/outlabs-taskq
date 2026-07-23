@@ -388,3 +388,26 @@ async def test_live_asgi_runtime_exits_process_before_abandoned_sync_can_be_rele
     assert exits == [(3, False)]
     assert runtime.state.value == "failed"
     assert finished.wait(timeout=1)
+
+
+async def test_runtime_from_dsn_gates_workflow_routes_on_exact_live_metadata(
+    sqlalchemy_dsn: str,
+) -> None:
+    runtime = TaskqRuntime.from_dsn(
+        sqlalchemy_dsn,
+        options=TaskqRuntimeOptions(
+            housekeeper_enabled=False,
+            long_poll_listener_enabled=False,
+            workflow_enabled=True,
+        ),
+    )
+    try:
+        await runtime.start()
+        assert runtime.facade_transports.workflow_enabled
+        assert runtime.facade_transports.workflow_producer is not None
+        assert runtime.facade_transports.workflow_authorization is not None
+        app = create_taskq_app(runtime, authorizer=no_auth_for_tests())
+        assert "/v1/workflows" in app.openapi()["paths"]
+        assert "/v1/workflows/{id}/cancel" not in app.openapi()["paths"]
+    finally:
+        await runtime.stop()

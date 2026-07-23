@@ -135,6 +135,9 @@ def _runtime(
         authorization=transport,  # type: ignore[arg-type]
         claim_wait_hub=hub,
         admission_enabled=bool(options and options.admission_enabled),
+        workflow_producer=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
+        workflow_authorization=transport if options and options.workflow_enabled else None,  # type: ignore[arg-type]
+        workflow_enabled=bool(options and options.workflow_enabled),
     )
     kwargs: dict[str, Any] = {}
     if process_exit is not None:
@@ -294,6 +297,39 @@ async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capabi
     await workflow_contract.start()
     assert workflow_contract.state is TaskqRuntimeState.RUNNING
     await workflow_contract.stop()
+
+
+async def test_workflow_runtime_requires_exact_contract_and_capability() -> None:
+    options = TaskqRuntimeOptions(
+        housekeeper_enabled=False,
+        long_poll_listener_enabled=False,
+        workflow_enabled=True,
+    )
+    wrong_version = _runtime(_Transport(version="0.2.0"), options=options)
+    with pytest.raises(TaskqVersionError):
+        await wrong_version.start()
+
+    missing = _runtime(_Transport(version="0.2.1"), options=options)
+    with pytest.raises(TaskqCapabilityError):
+        await missing.start()
+
+    active = _runtime(
+        _Transport(
+            version="0.2.1",
+            capabilities={
+                "active": [
+                    "admission_reservations",
+                    "dependencies_workflows",
+                    "followups",
+                    "read_model_list_ready",
+                ]
+            },
+        ),
+        options=options,
+    )
+    await active.start()
+    assert active.state is TaskqRuntimeState.RUNNING
+    await active.stop()
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:

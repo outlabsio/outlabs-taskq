@@ -43,6 +43,7 @@ from taskq.protocol import (
     CommandOkOutcome,
     ConfigChangeOutcome,
     ContractMeta,
+    CreateWorkflowWireRequest,
     EnqueueCommand,
     EnqueueManyItem,
     EnqueueManyWireData,
@@ -69,6 +70,10 @@ from taskq.protocol import (
     TqCode,
     TQ_ERROR_REGISTRY,
     WorkerPresenceWireData,
+    WorkflowCancelWireRequest,
+    WorkflowKind,
+    WorkflowResult,
+    WorkflowWireData,
 )
 
 _REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
@@ -156,7 +161,10 @@ def _can_retry(spec: HttpCommandSpec, body: Mapping[str, Any] | None) -> bool:
     if spec.retry_class is RetryClass.SAFE_IDEMPOTENT:
         return True
     if spec.retry_class is RetryClass.KEYED_ENQUEUE:
-        return bool(body and body.get("idempotency_key"))
+        return bool(
+            body
+            and (body.get("idempotency_key") or (body.get("workflow_id") and body.get("step_key")))
+        )
     if spec.retry_class is RetryClass.KEYED_BATCH:
         items = body.get("items") if body else None
         return bool(
@@ -197,6 +205,13 @@ def _decode_domain(spec: HttpCommandSpec, outcome: str, data: dict[str, Any]) ->
     if command is CommandName.CANCEL_ADMISSION:
         wire = AdmissionCancelWireData.model_validate(data)
         return AdmissionCancelResult(outcome=outcome, **wire.model_dump())
+    if command in {
+        CommandName.CREATE_WORKFLOW,
+        CommandName.SEAL_WORKFLOW,
+        CommandName.CANCEL_WORKFLOW,
+    }:
+        wire = WorkflowWireData.model_validate(data)
+        return WorkflowResult(outcome=outcome, **wire.model_dump())
     if command is CommandName.ENSURE_QUEUE:
         wire = EnsureQueueWireData.model_validate(data)
         return EnsureQueueResult(
@@ -492,6 +507,45 @@ class AsyncTaskqHttpClient:
             body=request,
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_ADMISSION], outcome, data)
+
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+    ) -> WorkflowResult:
+        del actor
+        request = CreateWorkflowWireRequest(
+            workflow_key=workflow_key,
+            kind=kind,
+            params=dict(params or {}),
+            declared_queues=tuple(declared_queues),
+        )
+        outcome, data, _ = await self._request(HttpCommandName.CREATE_WORKFLOW, body=request)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CREATE_WORKFLOW], outcome, data)
+
+    async def seal_workflow(self, workflow_id: UUID, actor: str) -> WorkflowResult:
+        del actor
+        outcome, data, _ = await self._request(
+            HttpCommandName.SEAL_WORKFLOW,
+            path_params={"id": workflow_id},
+            body={},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.SEAL_WORKFLOW], outcome, data)
+
+    async def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult:
+        del actor
+        outcome, data, _ = await self._request(
+            HttpCommandName.CANCEL_WORKFLOW,
+            path_params={"id": workflow_id},
+            body=WorkflowCancelWireRequest(reason=reason),
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)
@@ -993,6 +1047,45 @@ class TaskqHttpClient:
             body=request,
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_ADMISSION], outcome, data)
+
+    def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+    ) -> WorkflowResult:
+        del actor
+        request = CreateWorkflowWireRequest(
+            workflow_key=workflow_key,
+            kind=kind,
+            params=dict(params or {}),
+            declared_queues=tuple(declared_queues),
+        )
+        outcome, data, _ = self._request(HttpCommandName.CREATE_WORKFLOW, body=request)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CREATE_WORKFLOW], outcome, data)
+
+    def seal_workflow(self, workflow_id: UUID, actor: str) -> WorkflowResult:
+        del actor
+        outcome, data, _ = self._request(
+            HttpCommandName.SEAL_WORKFLOW,
+            path_params={"id": workflow_id},
+            body={},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.SEAL_WORKFLOW], outcome, data)
+
+    def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult:
+        del actor
+        outcome, data, _ = self._request(
+            HttpCommandName.CANCEL_WORKFLOW,
+            path_params={"id": workflow_id},
+            body=WorkflowCancelWireRequest(reason=reason),
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.CANCEL_WORKFLOW], outcome, data)
 
     def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
         body = command.model_dump(mode="json", exclude={"queue"}, exclude_none=True)

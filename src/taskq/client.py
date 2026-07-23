@@ -6,7 +6,7 @@ from collections.abc import Iterator
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
@@ -20,10 +20,12 @@ from taskq.protocol import (
     AdmissionReservationResult,
     EnqueueCommand,
     EnqueueResult,
+    WorkflowKind,
+    WorkflowResult,
 )
 from taskq.registry import InT, OutT, RetryStrategy, Task, TaskRegistry
 from taskq.sql.transport import SqlTaskqTransport
-from taskq.transport import ProducerTransport
+from taskq.transport import ProducerTransport, WorkflowProducerTransport
 
 
 class TaskQ:
@@ -102,6 +104,9 @@ class TaskQ:
         backoff_base: int | None,
         backoff_cap: int | None,
         headers: Mapping[str, Any] | None,
+        workflow_id: UUID | None,
+        step_key: str | None,
+        depends_on: Sequence[UUID] | None,
     ) -> EnqueueCommand:
         registered = self.registry.require(task)
         fields = self._retry_fields(registered)
@@ -129,6 +134,9 @@ class TaskQ:
             concurrency_key=concurrency_key,
             affinity_key=affinity_key,
             headers=dict(headers) if headers is not None else None,
+            workflow_id=workflow_id,
+            step_key=step_key,
+            depends_on=tuple(depends_on) if depends_on is not None else None,
             **fields,
         )
 
@@ -165,6 +173,9 @@ class TaskQ:
         backoff_base: int | None = None,
         backoff_cap: int | None = None,
         headers: Mapping[str, Any] | None = None,
+        workflow_id: UUID | None = None,
+        step_key: str | None = None,
+        depends_on: Sequence[UUID] | None = None,
         session: AsyncSession | None = None,
         connection: AsyncConnection | None = None,
     ) -> EnqueueResult:
@@ -182,6 +193,9 @@ class TaskQ:
             backoff_base=backoff_base,
             backoff_cap=backoff_cap,
             headers=headers,
+            workflow_id=workflow_id,
+            step_key=step_key,
+            depends_on=depends_on,
         )
         supplied = self._supplied_sql_object(session, connection)
         if supplied is None:
@@ -269,6 +283,59 @@ class TaskQ:
             queue, idempotency_key, handle, connection=sql_connection
         )
 
+    def _workflow_transport(self) -> WorkflowProducerTransport:
+        if not isinstance(self.transport, WorkflowProducerTransport):
+            raise TaskqConfigError("transport does not support workflows")
+        return self.transport
+
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        declared_queues: Sequence[str],
+        actor: str,
+        params: Mapping[str, Any] | None = None,
+        session: AsyncSession | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        transport = self._workflow_transport()
+        supplied = self._supplied_sql_object(session, connection)
+        if supplied is None:
+            return await transport.create_workflow(
+                workflow_key,
+                kind,
+                params=params,
+                declared_queues=declared_queues,
+                actor=actor,
+            )
+        sql_connection = await self._sql_connection(supplied)
+        assert isinstance(self.transport, SqlTaskqTransport)
+        return await self.transport.create_workflow(
+            workflow_key,
+            kind,
+            params=params,
+            declared_queues=declared_queues,
+            actor=actor,
+            connection=sql_connection,
+        )
+
+    async def seal_workflow(
+        self,
+        workflow_id: UUID,
+        *,
+        actor: str,
+        session: AsyncSession | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        transport = self._workflow_transport()
+        supplied = self._supplied_sql_object(session, connection)
+        if supplied is None:
+            return await transport.seal_workflow(workflow_id, actor)
+        sql_connection = await self._sql_connection(supplied)
+        assert isinstance(self.transport, SqlTaskqTransport)
+        return await self.transport.seal_workflow(workflow_id, actor, connection=sql_connection)
+
     async def enqueue_many(
         self,
         task: Task[InT, OutT],
@@ -316,6 +383,9 @@ class TaskQ:
         job_type: str,
         payload: Mapping[str, Any],
         idempotency_key: str | None = None,
+        workflow_id: UUID | None = None,
+        step_key: str | None = None,
+        depends_on: Sequence[UUID] | None = None,
     ) -> EnqueueResult:
         if self.validate_job_types:
             raise TaskqConfigError("raw enqueue requires validate_job_types=False")
@@ -325,6 +395,9 @@ class TaskQ:
                 job_type=job_type,
                 payload=dict(payload),
                 idempotency_key=idempotency_key,
+                workflow_id=workflow_id,
+                step_key=step_key,
+                depends_on=tuple(depends_on) if depends_on is not None else None,
             )
         )
 
