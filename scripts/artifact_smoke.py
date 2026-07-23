@@ -82,6 +82,9 @@ def main() -> None:
         WorkerOptions,
         WorkerSupervisor,
         WorkflowKind,
+        WorkflowPage,
+        WorkflowReadProfile,
+        WorkflowStateCounts,
         WorkflowResult,
         WorkflowStatus,
     )
@@ -137,6 +140,9 @@ def main() -> None:
     )
     assert workflow.status is WorkflowStatus.RUNNING
     assert WorkflowKind.DAG.value == "dag"
+    assert WorkflowPage is not None
+    assert WorkflowReadProfile is not None
+    assert WorkflowStateCounts is not None
 
     async def smoke_testing() -> None:
         fake = FakeTaskQClient(queues=("artifact",))
@@ -220,8 +226,11 @@ def main() -> None:
         "0008_followups",
         "0009_workflows",
         "0010_schedules",
+        "0011_finite_projections",
+        "0012_activate_finite_projections",
+        "0013_workflow_page_composite_repair",
     ]
-    assert len(FUNCTIONS) == 62
+    assert len(FUNCTIONS) == 65
 
     if args.mode != "core":
         return
