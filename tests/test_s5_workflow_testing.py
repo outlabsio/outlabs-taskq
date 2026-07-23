@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from taskq import TaskQ
-from taskq.errors import TaskqConflictError
+from taskq.errors import TaskqConflictError, TaskqValidationError
 from taskq.http import TaskqHttpClient
 from taskq.protocol import EnqueueCommand, JobStatus, WorkflowStatus
 from taskq.testing import FakeTaskQClient
@@ -45,6 +45,16 @@ async def test_fake_is_a_native_structural_workflow_transport() -> None:
     assert (created.outcome, existed.outcome) == ("created", "existed")
     projection = await fake.get_workflow_authorization_projection(created.workflow_id)
     assert projection.declared_queues == ("fake_a", "fake_b")
+    with pytest.raises(TaskqValidationError):
+        await fake.enqueue(
+            EnqueueCommand(
+                queue="fake_outside",
+                job_type="tests.outside",
+                payload={},
+                workflow_id=created.workflow_id,
+                step_key="outside",
+            )
+        )
 
     parent = await fake.enqueue(
         EnqueueCommand(

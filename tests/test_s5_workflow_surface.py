@@ -201,6 +201,17 @@ async def test_http_workflow_replay_dependency_promotion_and_raw_state(
             ("child", "queued"),
             ("parent", "succeeded"),
         ]
+        cancelled = await client.cancel_workflow(
+            workflow.workflow_id, "must-not-cross-wire", "surface stop"
+        )
+        replayed_cancel = await client.cancel_workflow(
+            workflow.workflow_id, "must-not-cross-wire", "surface stop"
+        )
+        assert (cancelled.outcome, replayed_cancel.outcome) == (
+            "cancel_requested",
+            "already_terminal",
+        )
+        assert cancelled.status.value == replayed_cancel.status.value == "cancelled"
     finally:
         await client.aclose()
         await raw.aclose()
@@ -294,6 +305,24 @@ async def test_workflow_authorization_precedes_graph_access_and_rejection_writes
             unknown_seal = await client.post(f"/taskq/v1/workflows/{uuid4()}/seal", json={})
             assert denied_seal.status_code == unknown_seal.status_code == 404
             assert denied_seal.json()["error"] == unknown_seal.json()["error"]
+
+            calls.clear()
+            denied_cancel = await client.post(
+                f"/taskq/v1/workflows/{workflow.workflow_id}/cancel",
+                json={"reason": "bounded"},
+            )
+            assert denied_cancel.status_code == 404
+            assert calls == [
+                (TaskqAction.CONTROL, "workflow_allowed"),
+                (TaskqAction.CONTROL, "workflow_denied"),
+            ]
+            assert (
+                await pg.fetchval(
+                    "SELECT cancel_requested_at FROM taskq.workflows WHERE id=$1",
+                    workflow.workflow_id,
+                )
+                is None
+            )
     finally:
         await transport.aclose()
 

@@ -22,6 +22,7 @@ from taskq.errors import (
     TaskqConflictError,
     TaskqInternalError,
     TaskqNotFoundError,
+    TaskqValidationError,
 )
 from taskq.execution import Cancel, Complete, HandlerResult, NonRetryable, Retry, Snooze
 from taskq.protocol import (
@@ -57,6 +58,7 @@ from taskq.protocol import (
     SettleRetryScheduledResult,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowCancelWireRequest,
     WorkflowResult,
     WorkflowStatus,
 )
@@ -352,7 +354,7 @@ class FakeTaskQClient:
         if workflow is None:
             raise TaskqNotFoundError()
         if command.queue not in workflow.declared_queues:
-            raise TaskqConflictError(details={"reason": "workflow_queue_not_declared"})
+            raise TaskqValidationError(details={"reason": "workflow_queue_not_declared"})
         assert workflow.steps is not None
         existing_id = workflow.steps.get(command.step_key)
         if existing_id is not None:
@@ -483,7 +485,8 @@ class FakeTaskQClient:
         self, workflow_id: UUID, actor: str, reason: str | None = None
     ) -> WorkflowResult:
         self._ensure_open()
-        del actor, reason
+        del actor
+        WorkflowCancelWireRequest(reason=reason)
         workflow = self._workflows.get(workflow_id)
         if workflow is None:
             raise TaskqNotFoundError()
