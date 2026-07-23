@@ -216,7 +216,7 @@ async def test_taskq_lifespan_removes_new_state_and_startup_failure_unwinds() ->
     assert failing.state is TaskqRuntimeState.FAILED
 
 
-@pytest.mark.parametrize("version", ["0.1.2", "0.1.3", "0.1.4", "0.1.5"])
+@pytest.mark.parametrize("version", ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0"])
 async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_rejection(
     version: str,
 ) -> None:
@@ -256,6 +256,23 @@ async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capabi
     await active.start()
     assert active.state is TaskqRuntimeState.RUNNING
     await active.stop()
+
+    followup_contract = _runtime(
+        _Transport(
+            version="0.2.0",
+            capabilities={
+                "active": [
+                    "admission_reservations",
+                    "followups",
+                    "read_model_list_ready",
+                ]
+            },
+        ),
+        options=options,
+    )
+    await followup_contract.start()
+    assert followup_contract.state is TaskqRuntimeState.RUNNING
+    await followup_contract.stop()
 
 
 async def test_both_lifespan_startup_failure_directions_unwind_exactly_once() -> None:

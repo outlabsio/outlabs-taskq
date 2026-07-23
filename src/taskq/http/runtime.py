@@ -33,7 +33,8 @@ logger = logging.getLogger("taskq.runtime")
 # Set membership alone exposes no newly added capability surface; it only lets
 # an already-deployed runtime survive additive metadata revisions while each
 # later transport/facade surface remains separately gated.
-SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5"})
+SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0"})
+ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0"})
 
 
 def _require_supported_sql_contract(
@@ -428,7 +429,7 @@ class TaskqRuntime:
             meta = await self.facade_transports.observer.get_contract_meta()
             _require_supported_sql_contract(meta.contract_version)
             if self.facade_transports.admission_enabled:
-                if meta.contract_version != "0.1.5":
+                if meta.contract_version not in ADMISSION_SQL_CONTRACT_VERSIONS:
                     raise TaskqVersionError(details={"contract_version": meta.contract_version})
                 active = meta.capabilities.get("active")
                 if not isinstance(active, list) or "admission_reservations" not in active:
