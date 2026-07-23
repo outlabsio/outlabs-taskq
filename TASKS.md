@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches exact-pin a7 in API/workers; canonical models live under `qdarte_runtime.core.tasking`; the native catalog plus first bound pure handler pass 1163/1163 runtime tests with clean Ruff/196-file MyPy and 635/635 worker tests with clean Ruff/55-file MyPy. The closed inventory is 274 files/23 declarations/21 handlers/30 relations/130 routes, including an executable source-backed effect-owner oracle for every native task. The API's unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. No worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | FR-03C's pure cohort is green at runtime `e0acb75` and workers `a032e8d`: cluster research now executes through `taskq.testing` from the canonical strict input to bounded output, shares one I/O-free calculation with the temporary incumbent path, and its native module graph contains no old job/client/lifecycle symbol. Read/effect cohorts remain open |
+| Next review | FR-03C is paused at S5-QD-FR-CQ-09 before the first native follow-up handler: nine legacy payloads obtain scope identity from old job-envelope columns that do not exist in taskq. Scope authority must move into the strict native payload docs-first; headers/settings/adapters are forbidden |
 
 ## Now
 
@@ -332,6 +332,34 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-09 — Native payloads omit legacy envelope scope authority *(open)*
+
+**Blocking evidence:** FR-03C began deriving native `Followup` values for
+`content_enrich_scope`. Its old handler builds child jobs from
+`job.scope_kind` and `job.scope_key`, but those values are not fields of
+`ContentEnrichScopePayload`. Taskq deliberately has no QDarte-specific scope
+columns. The same inherited omission exists in native inputs for content
+synthesis, editorial enrichment, frontend deployment, listing research, photo
+find, photo verification, region rescue and review. Existing source reads the
+old envelope identity directly in handler output, child planning, reporter
+authority or diagnostics. The strict native subclasses therefore do not yet
+contain all authoritative input needed to execute without an old job object.
+
+**Required adjudication:** make `(scope_kind, scope_key)` required canonical
+fields of every native input. Existing narrower task literals remain narrower;
+the nine inherited omissions use the already-closed QDarte `ScopeKind` enum and
+a bounded non-empty key until their producer-specific validators narrow them.
+Native producers and follow-ups put scope only in the typed payload. Headers
+remain bounded diagnostics and runtime settings remain dependencies, never
+domain authority. Reporter plan validation obtains scope from the
+authoritative stored payload. Add a 21-task field-equality oracle plus negative
+vectors proving missing scope and conflicting follow-up scope fail before
+settlement. No taskq SQL, wire, migration or generic job column is proposed.
+
+**Stop:** do not implement `content_enrich_scope` follow-ups, do not place
+scope in headers/settings, and do not construct an old job envelope as a
+bridge.
 
 ### S5-QD-FR-CQ-08 — The 12 old result routes are not the complete native effect surface *(resolved: complete per-task effect inventory)*
 
