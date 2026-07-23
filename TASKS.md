@@ -324,6 +324,35 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-06 — Exact workflow counters cannot foreign-key the workflow row without breaking cancellation concurrency *(open)*
+
+**Blocking evidence:** the first FR-02D full-suite run reached the existing
+choreographed `cancel_workflow` versus held-open `complete_job` history and
+stopped. Migration 0011's owner-private counter row had the Manifest §18
+primary-key/FK shape. The settlement's job-status trigger updated that counter;
+PostgreSQL's referential-integrity machinery retained a key-share lock on the
+parent workflow. The concurrent operator's required `SELECT ... FOR UPDATE`
+then waited on the settlement transaction instead of recording cancellation
+intent while the job row remained SKIP-LOCKED. `pg_blocking_pids` and
+`pg_locks` identified the held settlement transaction and the workflow tuple;
+the pre-0011 race is green. This is a contradiction between new Manifest §18
+and ADR-026's accepted cancellation linearization, not a test timeout to relax.
+
+**Required decision:** preserve the exact materialized counts but remove the
+counter-to-workflow foreign key. The recommended owner-private integrity
+mechanism is a separate workflow lifecycle trigger that creates the zero
+counter row on workflow insert and deletes it on workflow delete. The job-state
+trigger then performs UPDATE-only bucket transitions and raises an internal
+error if the invariant row is missing; it never inserts through referential
+integrity during settlement. Backfill precedes both triggers. Freeze this as
+ADR-030 plus a docs-first Manifest §18 correction; Protocol 1.0.13, SQL 0.2.3,
+the public function identity and migration number 0011 stay unchanged. Then
+re-run the cancellation race before any other SQL work.
+
+**Current state:** stopped with the uncommitted 0011 implementation and tests
+preserved. The scratch database only was recreated during diagnosis; no QDarte
+or production state changed.
+
 ### S5-QD-FR-CQ-05 — The seeded maintenance schedule has no public HTTP authorization or profile shape *(resolved: ADR-028)*
 
 **Blocking evidence:** Protocol §2.9 defines GET/PUT/DELETE schedule routes as
