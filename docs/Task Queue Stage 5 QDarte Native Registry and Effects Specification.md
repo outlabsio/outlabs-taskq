@@ -187,7 +187,7 @@ executable task, including tasks with no authoritative domain write:
 | `listing_research_scope` | `qdarte_content` | provider reads plus `listing_research` domain effect |
 | `open_source_discover_scope` | `qdarte_discovery` | provider/filesystem reads, `open_source_import` domain effect, native follow-up |
 | `photo_find_scope` | `qdarte_media` | provider/filesystem operation plus `photo_application` domain effect |
-| `photo_verify_scope` | `qdarte_media` | provider/filesystem verification; no domain mutation |
+| `photo_verify_scope` | `qdarte_media` | metered provider/filesystem verification plus closed `photo_verification` domain effect and preplanned native follow-up selection |
 | `publish_scope` | `qdarte_publish` | `publish` domain effect; never settlement-triggered |
 | `region_completion_scope` | `qdarte_content` | metered model call plus `region_completion` domain effect |
 | `region_rescue_scope` | `qdarte_discovery` | provider reads plus `media_application` and `region_rescue` domain effects |
@@ -227,6 +227,70 @@ both changes the domain and records/reuses the stable result. The same identity
 plus the same canonical request returns the committed result; the same
 identity plus a different canonical request fails closed. `inspect` performs
 no domain mutation and returns only `pending` or the committed bounded result.
+
+#### Photo verification effects and structural retry ladder
+
+`photo_verify_scope` is not read-only. Its closed `photo_verification` family
+has exactly three mutually exclusive operation keys per planned entity:
+
+- `verified` updates the authoritative photo gate;
+- `retry_selected` records the failed verdict whose already-planned
+  `photo_find_scope` retry branch is selected; and
+- `terminal_blocker` records the launch-pipeline
+  `photo_verify_failed` blocker.
+
+The terminal blocker is an ordinary closed family member with the same stable
+`(taskq job id, family, entity key, operation key)` identity as every other
+effect. It is not an event, settlement hook or side channel. Before applying
+one operation, the handler inspects all three. At most one may be committed;
+the host rejects a second operation for the same job/entity even if its
+operation key differs. A committed operation is therefore also the durable
+branch-selection receipt after response loss.
+
+Each input entity has one strict producer-built branch plan. A pass plan may
+carry one fully planned `review_scope` child. A failure plan either carries
+one fully planned `photo_find_scope` retry child or carries no retry and is
+terminal. The handler may only select a child already present in that entity's
+plan. It never calls a planner, increments or derives a retry counter, asks the
+reporter to enqueue, or synthesizes a child payload after provider work.
+Across the whole parent, planned and selected children are capped at 20,
+steps are unique, child scope equals parent scope, and native follow-ups remain
+atomic with taskq settlement.
+
+This is a structural retry ladder: a producer recursively plans each permitted
+level, and the final level omits the retry branch. First failure selects the
+present retry; terminal failure applies `terminal_blocker`; replay of either
+returns the identical receipt and identical child set. Replay cannot add a
+branch or extend the ladder.
+
+Photo model work uses ADR-031's shared `llm_provider_control` with lane
+`photo_verification` and operation `verify`. The provider call stays in the
+worker. A hard kill after provider egress must converge to exactly one usage
+event or the typed `expired_unsettled` unknown-cost posture, together with one
+mutually exclusive photo effect. This evidence is required at the photo gate
+and does not waive FR-04.
+
+#### Completion-hook sweep for remaining unbound families
+
+The old completion/result paths were re-derived before binding photo. The
+following follow-up decisions are not read-only behavior and must be replaced
+by producer-planned native branches when their family binds:
+
+| Native family | Legacy completion behavior that must not disappear | Native disposition |
+|---|---|---|
+| `buzz_discover_scope` | region-rescue handoff | already-carried closed native follow-up |
+| `region_rescue_scope` | photo-find handoff/autocontinue | preplanned photo-find child |
+| `photo_find_scope` | photo-verify or repair-review handoff | preplanned mutually exclusive child |
+| `editorial_enrich_scope` | repair-review handoff | preplanned review child |
+| `listing_research_scope` | synthesis handoff or pipeline refresh/blocker | closed effect plus preplanned synthesis branch |
+| `content_synthesis_scope` | review/repair-review handoff | preplanned review child |
+| `translation_scope` | review/repair-review handoff | preplanned review child |
+| `review_scope` | publish, repair or translation handoffs and blocker updates | closed review effect plus preplanned branches |
+
+The machine effect inventory records these source-derived dispositions and its
+oracle equality-checks them. A future binding stops if its current source
+contains a completion mutation or child-selection path absent from that
+record. This sweep authorizes no sibling implementation in the photo slice.
 
 Provider calls follow inspect-before-act:
 
@@ -435,6 +499,12 @@ effect, then settle provider. A committed effect skips provider work on
 reclaim. A hard kill after egress must converge to exactly one provider event
 or the typed expired-unsettled posture, with no double-spend and no silent
 loss. This evidence does not waive FR-04's later per-wave hard-kill gates.
+
+Photo verification uses the same control in lane `photo_verification`,
+operation `verify`. Its combined bounded verification request is fingerprinted
+from the authoritative stored entity and provider plan. Extraction parity
+must preserve the old reservation decision, provider failover and usage-event
+guarantees; a photo-specific proxy or use of taskq admission is forbidden.
 
 Extraction parity pins the pre- and post-extraction budget decision,
 reservation, failover and usage-event behavior. No native handler imports the

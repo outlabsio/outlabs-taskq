@@ -468,7 +468,7 @@ waive FR-04; and extraction parity must preserve reservation, failover and
 usage-event guarantees. Protocol v1, the Function Manifest, taskq SQL and
 migrations remain unchanged.
 
-### S5-QD-FR-CQ-11 — Photo verification is not read-only at the old completion boundary *(open)*
+### S5-QD-FR-CQ-11 — Photo verification is not read-only at the old completion boundary *(resolved: closed effect + structural branches)*
 
 **Blocking evidence:** the frozen native effect table currently classifies
 `photo_verify_scope` as provider/filesystem verification with no domain
@@ -500,6 +500,17 @@ implementation.
 old completion hook, do not let the reporter enqueue a child, do not ask the
 handler to call an API planner after provider work, and do not construct an
 old job/client as a bridge.
+
+**Adjudication:** approved as recommended. The owner additionally requires the
+retry ladder to be encoded structurally in producer-planned branches (branch
+presence, never a handler counter or reporter state, determines retry versus
+terminal blocker); `terminal_blocker` is a closed `photo_verification`
+operation with its own stable idempotent identity; and the remaining unbound
+families' old completion hooks must be swept and recorded before
+FR-03C-PHOTO binds. First-failure, terminal-failure and replay vectors must
+prove that replay returns identical receipts and children and can never extend
+the ladder. The photo family uses the shared ADR-031 provider control and does
+not waive FR-04's side-effecting hard-kill gate.
 
 ### S5-QD-FR-CQ-10 — Content-enrich follow-ups lack executable child payloads *(resolved: fully planned native children)*
 

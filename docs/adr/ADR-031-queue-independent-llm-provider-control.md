@@ -1,12 +1,17 @@
 # ADR-031 — Queue-independent LLM provider control
 
 **Status:** Accepted 2026-07-23
-**Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13
+**Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13; amended by the approved
+S5-QD-FR-CQ-11 photo-verification binding
 **Amends:** ADR-022
 
 **Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
 from cross-attempt provider authority and freezes generation rollover after
 unknown-cost expiry.
+
+**Amended 2026-07-23:** CQ-11 adds the closed `photo_verification` lane with
+operation `verify`; it uses the same reserve/settle state machine and does not
+create a lane-specific provider wrapper.
 
 ## Context
 
@@ -84,7 +89,9 @@ without seeing an attempt id or fence.
    the old generation as `expired_unsettled`, then may reserve a new generation.
    Taskq makes no exactly-once claim for external provider reads, but QDarte
    never silently rewrites possibly incurred cost as known or zero usage.
-9. The control family is shared by every native LLM lane. Per-lane provider
+9. The closed lane/operation pairs currently are
+   `tripadvisor_classifier/classify` and `photo_verification/verify`. The
+   control family is shared by every native LLM lane. Per-lane provider
    wrappers, old queue job/attempt/client/lifecycle imports, caller clocks and
    caller idempotency are forbidden.
 

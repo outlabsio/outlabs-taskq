@@ -351,6 +351,11 @@ and atomically records its state plus one provider event using a canonical
 settlement hash. Exact replays return the same receipt and changed replays fail
 closed.
 
+The current closed lane/operation pairs are
+`tripadvisor_classifier/classify` and `photo_verification/verify`. Adding a
+lane requires a docs-first reporter-contract amendment plus an equality oracle;
+it never creates a lane-specific reporter or provider proxy.
+
 An expired unsettled reservation releases its budget hold but remains a typed
 `expired_unsettled` unknown-cost record; it is never represented as zero
 usage. The first observing attempt is recorded so its exact response replay is
