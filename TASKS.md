@@ -102,6 +102,7 @@
     - [x] **FR-03D-TRANSLATION · Native translation family complete** — runtime `0a019fb` replaces the filesystem/read-result shape with a strict source-revision plan, closed prepare/apply response and exact optional review branch while adding the private ADR-031 `translation/translate` member. API `a057ceb` authorizes the current content task and stored revision before egress, records stale source as durable terminal truth, reuses the queue-independent locale mutation kernel at database time and refuses unplanned provider/model pairs. Workers `a962fe9` prepares before provider use, reserves/settles metered usage, commits once, selects only the producer-planned review child after `translated`, and makes replay or `source_stale` perform zero provider calls. Runtime passes 1176, workers 702 and API 1773 pass/10 unchanged unrelated failures with clean Ruff and configured MyPy. No old queue client, attempt model, result route, result file or completion-time planner enters the native path; no service, provider, persistent database or production state changed.
     - [x] **FR-03D-REVIEW-SPEC · Native review packet, effect and branch matrix frozen** — CQ-18 replaces the old review-entity read, result route and completion-time publish/repair/stale-translation planning with one producer-materialized revision-bound packet, the shared ADR-031 `review/review` member, a closed authoritative review effect and exact preplanned publish/copy/photo/translation alternatives. Database-time review/media/pipeline/repair mutation and branch selection share the effect transaction; only its typed outcome may select one matching child. Replay never reruns the provider or changes branch, incomplete matrices fail before egress, and stale input performs no review mutation or follow-up. No Tier-0 contract, SQL, migration, public route, QDarte source, database, provider or production state changed.
     - [x] **FR-03D-REVIEW · Native review family complete** — runtime `b654f86` adds the bounded producer packet, exact validated branch plans, closed inspect/apply response, native output and ADR-031 `review/review` member while moving the machine inventory to the native handler and authoritative domain owner. API `af60d17` authenticates the live task and stored packet, rejects revision drift before egress, reuses the queue-independent review/media mutation, preserves the old repair classification through a shared domain policy, records database-time effect truth, refuses unplanned provider/model pairs and returns only the closed publish/repair/translation/human/block/reject/stale outcome. Workers `19a9dae` enforces exact task-to-provider-lane authority, inspects before provider use, reserves/settles metered usage, commits one effect, selects only its matching preplanned child and makes replay or `input_stale` perform zero provider calls. Runtime passes 1177, workers 706 and API 1776 pass/10 unchanged unrelated failures with clean Ruff and configured MyPy; 75 focused API/domain vectors pass. No old queue client, attempt model, result route, result file or completion-time planner enters the native path; no service, provider, persistent database or production state changed.
+    - [ ] **FR-03D-BUZZ · Native buzz-discovery family** — bind the provider-backed discovery result to one authoritative artifact effect and at most one producer-planned `region_rescue_scope` child. Inspect-before-act, response-loss replay, exact artifact reuse and zero old job/event/completion-hook access are required.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -356,6 +357,29 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-19 — Buzz completion owns a durable discovery artifact as well as the rescue handoff *(resolved: closed artifact effect plus preplanned rescue branch)*
+
+**Blocking evidence:** the completion-hook sweep recorded the
+`buzz_discover_scope` region-rescue handoff but did not record
+`persist_discovery_artifact_for_completed_job()`. The legacy completion
+transaction materializes every successful buzz result as `buzz_report` or
+`region_buzz` domain truth before it invokes the rescue planner. Binding the
+frozen input as provider-read plus child only would silently delete that
+artifact; retaining the old completion path would preserve the queue wrapper
+the replacement forbids.
+
+**Resolution:** the existing closed `buzz_discovery` family owns one bounded,
+idempotent discovery-artifact mutation keyed by the stable taskq
+job/family/entity/operation identity. The strict producer input carries at
+most one fully materialized, scope-equal `NativeRegionRescueInput`; only a
+committed effect outcome may select it. The worker inspects before provider
+work, applies the bounded result, and returns the exact artifact receipt and
+preplanned child. PostgreSQL supplies mutation time. Apply replay reuses the
+same artifact and child; changed intent fails closed. The old result route,
+job/event model, completion-time artifact hook and completion-time planner are
+forbidden. This is a Tier-3 QDarte contract correction only; no taskq
+Protocol, Manifest, SQL, migration or public route changes.
 
 ### S5-QD-FR-CQ-18 — Review needs authoritative input plus conditional publish/repair/translation branches *(resolved: revision-bound packet, closed review effect and complete preplanned branch matrix)*
 

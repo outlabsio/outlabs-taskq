@@ -292,6 +292,43 @@ oracle equality-checks them. A future binding stops if its current source
 contains a completion mutation or child-selection path absent from that
 record. This sweep authorizes no sibling implementation in the photo slice.
 
+#### Buzz discovery artifact and rescue branch
+
+`buzz_discover_scope` is not a read-only provider task. The legacy completion
+path persisted its bounded result as the authoritative `buzz_report` or
+`region_buzz` discovery artifact before it selected the region-rescue
+handoff. The native `buzz_discovery` family replaces both pieces explicitly;
+neither taskq settlement nor an old queue completion hook may create the
+artifact.
+
+The producer supplies the complete strict discovery input and at most one
+fully materialized `region_rescue_scope` branch. The branch payload is a
+`NativeRegionRescueInput`, its scope equals the parent scope, and its step is a
+bounded unique identifier. The handler may return that child only after the
+authoritative buzz effect commits. It never asks the API to plan a rescue,
+constructs a child from provider output, or mutates an active queued job to
+attach a branch.
+
+The worker reports exactly one bounded buzz result. Geo results use the closed
+`BuzzDiscoverGeoResultSummary`; cluster results use a strict native summary
+whose complete scored-lead projection is covered by its digest. The
+authoritative API validates the result against the stored task input, creates
+or reuses exactly one discovery artifact keyed by the stable taskq job/family
+identity, and returns its bounded artifact and effect receipts. PostgreSQL
+supplies all mutation timestamps. The same canonical apply replays the same
+artifact receipt; a changed result fails closed. Missing or mismatched scope,
+region, country, lead count, or branch authority creates neither artifact nor
+child.
+
+Provider work follows inspect-before-act. A committed inspection skips all
+provider work and returns the same artifact receipt and child. A pending
+inspection permits the worker's bounded discovery provider, then applies the
+effect before taskq settlement. Provider diagnostics remain worker-local and
+the native result carries only closed warnings. Response loss after the apply
+replays without another provider call. The old result route, old job/event
+models, completion-time artifact hook and completion-time rescue planner are
+forbidden from the native module graph.
+
 Provider calls follow inspect-before-act:
 
 1. inspect;
@@ -721,8 +758,9 @@ native module graph.
 The CQ-11 source sweep is complete before the remaining FR-03 bindings. The
 old completion hooks establish these required native dispositions:
 
-- `buzz_discover_scope`: bounded result effect plus its already planned rescue
-  branch; no completion-time planner survives;
+- `buzz_discover_scope`: bounded result effect that atomically owns the
+  `buzz_report` or `region_buzz` discovery artifact plus its already planned
+  rescue branch; no completion-time artifact hook or planner survives;
 - `region_rescue_scope`: authoritative rescue/media effects plus a preplanned
   photo-find branch;
 - `photo_find_scope`: authoritative media effect plus mutually exclusive
