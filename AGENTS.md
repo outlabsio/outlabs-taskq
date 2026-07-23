@@ -1,6 +1,6 @@
 # outlabs-taskq — AGENTS.md
 
-Postgres-native task queue library with Stages 1–4 and durable admission accepted; the first production host is live, and QDarte's C7 contact-lane evidence is complete pending a separate direct-retirement design.
+Postgres-native task queue library with Stages 1–4 and durable admission accepted; the first production host is live. The sole active QDarte goal is now complete replacement of its old queue implementation across every lane, followed by executable-code and execution-ledger removal under the Stage-5 full-replacement specification.
 
 **Contributing an increment? Start at [`TASKS.md`](TASKS.md)** — cold-start steps, the live task board, and the definition of done. Then the tier map below for authority.
 

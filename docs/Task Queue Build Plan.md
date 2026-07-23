@@ -1,10 +1,16 @@
 # taskq — Build Plan
 
-> **Status:** Operating plan — 2026-07-18. The single "what happens next, in order" document. Decisions live in `adr/`; contracts in the Protocol v1 + 0.1 Function Manifest; this file only sequences work and names exit gates. Update it as stages complete; never let it restate contract detail.
+> **Status:** Operating plan — 2026-07-22. The single "what happens next, in order" document. Decisions live in `adr/`; contracts in the Protocol v1 + 0.1 Function Manifest; this file only sequences work and names exit gates. Update it as stages complete; never let it restate contract detail.
 
 ## Where the project stands
 
-Design is complete and has passed four review rounds. The wire contract (Protocol v1) and the 0.1.x SQL surface (Function Manifest) are canonical. Stage 1 and Stage 2C have reached their internal exit gates, including every finding from the round-3 and [round-4](./design-review-4/RESPONSE.md) implementation reviews. ADR-012/013 resolve the contract questions through SQL contract 0.1.2; S2-06 is the remaining Stage-2 consumer-testing surface before Stage 3.
+The production-proven 0.1 line stands at Protocol 1.0.8 / SQL contract 0.1.5
+with migrations 0001–0007. The active product goal is now QDarte's complete
+replacement: every active lane moves to the native package and the old QDarte
+queue implementation is removed without importing its execution history. The
+[full replacement specification](./Task%20Queue%20Stage%205%20QDarte%20Full%20Replacement%20Specification.md)
+owns that destination. Earlier QDarte pilot/contact plans remain evidence, not
+the implementation sequence.
 
 ## Stage 1 — secure SQL kernel (COMPLETE)
 
@@ -216,6 +222,20 @@ or producer/consumer behavior changed in this design-only amendment. L1's seven-
 observation and targeted acceptance remain mandatory before L2.
 
 ## Stage 5 — QDarte pilot → Stage 6 — Diverse cutover
+
+**Current owner direction (2026-07-22): full replacement, not strangler
+continuation.** The accepted contact pilot proved the core safety mechanisms,
+but its compatibility modes and second-ledger posture are transitional. The
+[QDarte full replacement specification](./Task%20Queue%20Stage%205%20QDarte%20Full%20Replacement%20Specification.md)
+now sequences the only active goal: derive the complete source/deletion
+manifest; implement the missing native 0.2 capabilities; migrate all active
+handlers to one `WorkerService` registry and one domain-effect protocol;
+replace API/admin/runtime surfaces; delete both old queue implementations and
+all pilot/contact wrappers; create clean fresh-install and existing-install
+contraction paths; then pass a full local production-readiness audit. Existing
+domain content is preserved, while old jobs, attempts, events, dependencies,
+schedules and workflows are deliberately not migrated. Stage 6 remains closed
+until that goal is complete.
 
 QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, shadow reads then canary (full cutover awaits 0.2 chains). Diverse: apply the required corrections (packaged migrations replace the embedded scaffold history; caller-asserted settlement fields demoted; hardened roles), then the existing staged runbook with protocol-adapter routes. Order stands: personal blast radius proves the pattern before the income realm.
 
