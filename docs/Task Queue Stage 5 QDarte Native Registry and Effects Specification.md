@@ -251,9 +251,16 @@ POST /internal/taskq/native-effects/{job_id}
 
 It is not part of taskq Protocol v1 and is never mounted as a public operator
 or producer route. The host uses the same `QueueAuthorizer` supplied to the
-native taskq facade. It authenticates, then authorizes `run` on the
-authoritative queue, before reading or decoding the body. The body is streamed
-under the existing 8KB effect-request ceiling and contains only:
+native taskq facade. It authenticates, resolves the current running job's
+authoritative queue and closed native task type from the path `job_id` without
+fetching its payload, then authorizes `run` on that queue before reading or
+decoding the body. A missing, terminal, or non-effect task fails with the same
+fixed conflict before body decode. The full stored payload and current attempt
+are re-read and revalidated after decode; route authorization is not effect
+authorization. This two-phase lookup is required once the closed union spans
+more than one queue and must never fall back to a body-supplied queue or task
+type. The body is streamed under the existing 8KB effect-request ceiling and
+contains only:
 
 - reporter-owned `attempt_id` and `worker_id`;
 - one discriminated request from the closed native effect union.
@@ -265,11 +272,12 @@ mutation. Invalid JSON/shape returns a fixed non-echoing validation error;
 stale authority or canonical-intent mismatch returns a fixed conflict. No
 request field, credential, domain error text or task fence is echoed.
 
-The active union members are `contact_verification` and
-`website_verification`. Future families extend the same union docs-first; they
-do not add arbitrary paths or a generic method selector. SQL-only tests may
-call the adapter directly, while HTTP parity must prove bad credentials and
-queue denial happen before body decode and produce zero ledger/domain writes.
+The active union members are `contact_verification`,
+`website_verification`, and `tripadvisor_classification`. Future families
+extend the same union docs-first; they do not add arbitrary paths or a generic
+method selector. SQL-only tests may call the adapter directly, while HTTP
+parity must prove bad credentials and authoritative-queue denial happen before
+body decode and produce zero ledger/domain writes.
 
 #### Website-verification member
 
@@ -317,6 +325,53 @@ the byte-identical typed apply and must converge on the same receipt without a
 second provider call. Direct SQL and HTTP vectors prove authoritative entity
 selection, wrong task/queue/entity refusal before ledger access, missing-row
 rollback, canonical metadata, and provider-call conservation.
+
+#### TripAdvisor-classification member
+
+`tripadvisor_classification_scope` uses the private reporter route with
+authoritative `qdarte_discovery` queue authorization. Its stored strict input
+is the complete provider plan: each target contains the authoritative place
+and source-record identities plus the bounded name, location, source labels,
+Google place types/name/address, description, website, detail URL, rating,
+review count, current subtype and force-reclassification posture needed for
+classification. The handler never fetches mutable business rows to assemble a
+provider prompt and never sends database identities to a provider.
+
+For each target the handler first inspects stable operation key `classify`.
+A committed inspection skips both deterministic classification and provider
+work. A pending inspection follows this closed decision:
+
+- supported Google place types produce a bounded deterministic assessment with
+  source `google_place_types` and no provider call;
+- an already classified target under non-force mode produces a typed
+  `skipped_existing` result;
+- disabled or unavailable provider configuration produces
+  `skipped_unavailable`;
+- otherwise the worker calls one configured provider plan under the existing
+  metering/failover policy and reports only classification
+  `attraction | experience`, confidence, a bounded reason, at most twelve
+  bounded signals, provider/model labels and an optional bounded endpoint
+  label; or
+- exhausted provider failures produce a retryable handler failure and no
+  apply request. Provider exception text, headers, bodies and credentials never
+  enter the effect request, receipt or task result.
+
+The apply adapter revalidates the current task, stored target and live
+source-record/place relationship before ledger access. It derives the exact
+domain mutation from the stored plan plus bounded assessment, applies the
+classification/alignment transaction at database time, and records the stable
+effect receipt in that same transaction. Request fields cannot select another
+source record or place, change force posture, set timestamps, supply raw JSON,
+or request an arbitrary alignment. A missing or drifted authoritative target
+rolls the reservation back.
+
+The native output contains only bounded aggregate counters, distinct bounded
+provider labels, stable effect receipts and the input warnings. It carries no
+old attempt/event projection and creates no follow-up. Response-loss replay
+must conserve one provider invocation and one mutation per target. Direct SQL,
+HTTP and fake vectors cover deterministic/provider/skipped outcomes, queue
+denial before malformed-body decode, wrong task/entity refusal, authoritative
+target drift, replay, and raw source-record/alignment conservation.
 
 ### 6.2 Non-domain operations
 
