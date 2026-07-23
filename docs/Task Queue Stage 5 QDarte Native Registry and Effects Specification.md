@@ -20,7 +20,8 @@ The accepted source inventory remains the closed oracle:
 - 21 executable task types;
 - 2 non-executable declarations;
 - 5 resource-isolated queues;
-- 12 domain-effect route families; and
+- 12 old result-route families, which are a lower bound rather than the
+  complete native effect surface; and
 - 266 queue-sensitive files across the four QDarte repositories.
 
 `content_assembly_scope` and `communication.email_delivery` are not registered
@@ -111,22 +112,42 @@ registry before settlement.
 Temporary conversion from a taskq claim into an old worker model is forbidden.
 That would be a compatibility wrapper and fails FR-03 even if its tests pass.
 
-## 6. Closed domain-effect protocol
+## 6. Closed effect and operation protocol
 
-The 12 source-derived effect families are:
+The old result routes are not an effect inventory. Source inspection also
+finds authoritative writes hidden inside settlement, direct discovery/import
+writes, filesystem artifacts, provider operations, proxy/session mutation, and
+deployment subprocesses. The native catalog therefore classifies every
+executable task, including tasks with no authoritative domain write:
 
-1. buzz discovery;
-2. contact verification;
-3. content synthesis;
-4. editorial enrichment;
-5. listing research;
-6. media application;
-7. photo application;
-8. region completion;
-9. region rescue;
-10. review;
-11. translation; and
-12. website verification.
+| Task | Queue | Effect/operation disposition |
+|---|---|---|
+| `buzz_discover_scope` | `qdarte_discovery` | provider reads plus `buzz_discovery` domain effect |
+| `cluster_research_scope` | `qdarte_discovery` | pure CPU; no effect |
+| `contact_verify_scope` | `qdarte_verification` | provider read plus `contact_verification` domain effect |
+| `content_enrich_scope` | `qdarte_content` | native follow-ups only |
+| `content_synthesis_scope` | `qdarte_content` | metered model call plus `content_synthesis` domain effect |
+| `discovery.import_batch` | `qdarte_discovery` | bounded filesystem read plus `discovery_import` domain effect |
+| `editorial_enrich_scope` | `qdarte_content` | metered model call plus `editorial_enrichment` domain effect |
+| `frontend_deploy_scope` | `qdarte_publish` | separately idempotent `frontend_deploy` operation and bounded route verification |
+| `listing_research_scope` | `qdarte_content` | provider reads plus `listing_research` domain effect |
+| `open_source_discover_scope` | `qdarte_discovery` | provider/filesystem reads, `open_source_import` domain effect, native follow-up |
+| `photo_find_scope` | `qdarte_media` | provider/filesystem operation plus `photo_application` domain effect |
+| `photo_verify_scope` | `qdarte_media` | provider/filesystem verification; no domain mutation |
+| `publish_scope` | `qdarte_publish` | `publish` domain effect; never settlement-triggered |
+| `region_completion_scope` | `qdarte_content` | metered model call plus `region_completion` domain effect |
+| `region_rescue_scope` | `qdarte_discovery` | provider reads plus `media_application` and `region_rescue` domain effects |
+| `review_scope` | `qdarte_content` | metered model call plus `review` domain effect |
+| `translation_scope` | `qdarte_content` | metered model call, bounded source-file read, `translation` domain effect |
+| `tripadvisor_classification_scope` | `qdarte_discovery` | metered model call plus `tripadvisor_classification` domain effect |
+| `tripadvisor_region_import` | `qdarte_discovery` | provider/filesystem operation plus `tripadvisor_import` domain effect |
+| `tripadvisor_session_prime` | `qdarte_discovery` | separately idempotent `tripadvisor_session` operation plus native follow-up |
+| `website_verify_scope` | `qdarte_verification` | provider read plus `website_verification` domain effect |
+
+This table, the checked-in machine effect manifest, and the source call graph
+must agree exactly. A newly observed client mutation, subprocess, provider
+request, durable filesystem write, or direct database call is unclassified
+until all three are amended.
 
 Each family defines a discriminated inspect/apply request and a bounded result.
 The handler supplies only:
@@ -164,7 +185,28 @@ Provider calls follow inspect-before-act:
 
 No generic arbitrary-method/path/SQL reporter exists. Adding an effect family
 is docs-first and extends the closed union, registry declaration, authorization
-matrix, idempotency ledger, and vectors together.
+matrix, idempotency ledger, machine effect manifest, and vectors together.
+
+### 6.1 Non-domain operations
+
+Provider/search/model reads may repeat only inside their existing metered
+reservation and retry policy; they never claim exactly-once behavior.
+Filesystem artifacts use a job-scoped immutable content digest and atomic
+publish/rename so reclaim can reuse or replace incomplete attempt-local data.
+
+`frontend_deploy` and `tripadvisor_session` are not disguised as ordinary
+database effects. Each gets its own inspect/execute/record state machine with a
+stable job/operation identity and an independently observable receipt.
+Ambiguous execution is inspected before retry. Neither may execute from
+settlement or from a generic reporter escape hatch.
+
+### 6.2 Settlement separation
+
+The old `publish_scope` mutation inside `complete_job` is a deletion target.
+The native publish handler obtains the stable `publish` receipt before it
+returns completion; taskq settlement then changes only taskq state. The same
+rule applies to every family: no QDarte domain mutation is triggered merely
+because taskq receives complete/fail/release.
 
 ## 7. Evidence increments
 

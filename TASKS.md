@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches now exact-pin a7 in API/workers; canonical models are relocated under `qdarte_runtime.core.tasking`, runtime remains 1151/1151 with clean Ruff/MyPy, workers 629/629 with clean Ruff, and 34 focused API boundary/inventory tests pass with clean Ruff. The closed inventory remains 266 files/23 declarations/21 handlers/30 relations/130 routes. The API's unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. No worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | FR-03A is complete locally: the immutable package floor and canonical contract namespace are proven. FR-03B must add the exact 21 native definitions and strict outputs, followed by handler bindings and the general trusted domain-effect protocol; neither old worker may start |
+| Next review | S5-QD-FR-CQ-08 is resolved docs-first: all 21 executable tasks now have an explicit pure/follow-up/domain/provider/filesystem/deployment disposition, settlement-triggered mutation is forbidden, and the 12 old result routes are only a lower bound. FR-03B may add the matching machine effect manifest and exact native definitions |
 
 ## Now
 
@@ -329,6 +329,46 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-08 — The 12 old result routes are not the complete native effect surface *(resolved: complete per-task effect inventory)*
+
+**Blocking evidence:** FR-03's new Tier-3 specification derived 12 effect
+families from the old API's result-route classifications. Source inspection
+immediately falsified that as a complete handler-effect inventory.
+`publish_scope` performs authoritative QDarte mutations inside the old
+`complete_job` settlement transaction rather than through a result route.
+`frontend_deploy_scope`, discovery/import, classification and session-prime
+handlers also perform external, filesystem, provider or domain operations that
+the 12-route list cannot represent. Encoding the incomplete list into the
+native definitions would leave real side effects outside ADR-022's
+inspect-before-act and stable-idempotency boundary.
+
+**Required adjudication:** derive a checked-in per-task effect manifest from all
+21 executable handler call graphs. Every effect is classified as pure read,
+native follow-up, authoritative QDarte domain mutation, external/provider
+operation, filesystem artifact, or deployment operation. Each non-read effect
+must then either (a) join the closed trusted reporter protocol with a stable
+`(job_id, family, entity_key, operation_key)` identity and same-transaction
+domain receipt, or (b) name a separate idempotent owner and replay oracle that
+is safe under response loss and reclaim. Settlement-triggered domain mutation
+is forbidden in the final system. Amend the FR-03 specification and machine
+inventory docs-first before adding native definitions. No taskq SQL, wire or
+migration change is implied unless the completed inventory proves ADR-022
+insufficient.
+
+**Stop:** do not implement FR-03B definitions or handler adapters from the
+12-route approximation, and do not start either old worker.
+
+**Resolution:** the FR-03 specification now classifies all 21 executable tasks
+individually. It adds the hidden settlement-owned `publish` mutation, direct
+discovery/open-source/import writes, filesystem artifacts, metered provider
+reads, proxy/session mutation and frontend deployment. The 19 authoritative or
+separately idempotent operation families use either ADR-022's stable
+inspect/apply transaction or a named operation-specific receipt state machine;
+pure/read/follow-up-only tasks are explicit too. Native settlement may mutate
+only taskq state. The machine effect manifest and native definitions must match
+this table exactly before handler binding; no taskq SQL, wire or migration
+change is required.
 
 ### S5-QD-FR-CQ-07 — ADR-030's approved invariant failure was omitted from the workflow-page error rows *(resolved: ADR-030 propagation)*
 
