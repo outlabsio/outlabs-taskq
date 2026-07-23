@@ -323,7 +323,7 @@ fixed conflict before body decode. The full stored payload and current attempt
 are re-read and revalidated after decode; route authorization is not effect
 authorization. This two-phase lookup is required once the closed union spans
 more than one queue and must never fall back to a body-supplied queue or task
-type. The body is streamed under the existing 8KB effect-request ceiling and
+type. The body is streamed under the 64KB effect-request ceiling and
 contains only:
 
 - reporter-owned `attempt_id` and `worker_id`;
@@ -337,11 +337,47 @@ stale authority or canonical-intent mismatch returns a fixed conflict. No
 request field, credential, domain error text or task fence is echoed.
 
 The active union members are `contact_verification`,
-`website_verification`, and `tripadvisor_classification`. Future families
+`website_verification`, `tripadvisor_classification`, `photo_verification`,
+`editorial_enrichment`, and the private `llm_provider_control` member. Future families
 extend the same union docs-first; they do not add arbitrary paths or a generic
 method selector. SQL-only tests may call the adapter directly, while HTTP
 parity must prove bad credentials and authoritative-queue denial happen before
 body decode and produce zero ledger/domain writes.
+
+The private reporter's aggregate body and envelope ceiling is 64KB, equal to
+the executable native-model ceiling. Authentication and authoritative
+queue-scoped `run` authorization still complete before reading or decoding the
+body. Every closed member retains its own narrower field and collection
+bounds; the larger aggregate ceiling does not admit arbitrary JSON.
+
+#### Editorial-enrichment member
+
+`editorial_enrich_scope` uses the existing private reporter route and
+`qdarte_content` queue authorization. The stored strict
+`NativeEditorialEnrichInput` is authoritative for the content item, entity,
+current source material and exactly one optional preplanned review branch per
+entity. Plan keys cover the entity keys exactly, every child has the same
+canonical scope as its parent, steps are distinct, and the complete job carries
+at most 20 children.
+
+The handler may report only `inspect` or `apply` for family
+`editorial_enrichment`, operation key `apply`, the planned entity key, a
+strictly bounded editorial draft, and status `enriched | unchanged`. The draft
+allows only the canonical title, excerpt, meta description, body, bounded
+source URLs and notes, and bounded `es | en` locale projections. It contains no
+content-item id, attempt/worker identity, caller timestamp, arbitrary result
+metadata, provider diagnostic, credential, filesystem path, or request echo.
+The API re-derives the content identity from the stored entity, applies locale
+and review-state mutation at database time, and commits the domain mutation
+plus receipt in one transaction.
+
+The handler inspects before model work. A committed inspection skips model
+work. Otherwise a metered model call uses ADR-031
+`llm_provider_control`, then the identical effect intent is applied and
+replayed after an ambiguous response. Only after a committed receipt may the
+handler return the entity's already-materialized `review_scope` child.
+Replayed effects return the same receipt and the same child; settlement never
+plans or extends the graph.
 
 #### Website-verification member
 

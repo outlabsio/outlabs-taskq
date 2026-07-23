@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete and FR-03 is active. CQ-11 and FR-03C-PHOTO are complete: the hidden completion effects are native and the real photo-specific process-kill conservation gate passes. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on local PostgreSQL 18.3 using the CI-shaped Redis; the previously accepted exact-16.14 lane is unchanged and Ruff is clean. Published `v0.1.0a7` remains the exact QDarte pin. Runtime is 1172/1172 with clean Ruff/196-file MyPy; workers are 684/684 with clean Ruff/64-file MyPy; the API is 1764 passed/10 unchanged unrelated baseline failures with clean Ruff/202-file MyPy. The photo process-kill drill killed the first worker after provider return and artifact publication, reclaimed the same job through lease expiry, conserved two external calls as one known provider event plus one `expired_unsettled` generation, applied one `verified` effect, retained one artifact and an exact empty child set, and left both old ledgers empty. The drill also caught and fixed the trusted reporter's missing photo queue/type registration. No persistent QDarte database or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..031). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters; ADR-031 adds only QDarte's private closed provider-control reporter member. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | CQ-11 and FR-03C-PHOTO are complete across taskq `f9846a2`/`137a81b`, runtime `c21960e`/`e53b12b`/`1e817a9`, API `d391e1a`/`7711df5`, and workers `db54852`/`800445c`/`b6a021e`. Continue the source-swept remaining FR-03D effect families before FR-03E all-handler SQL/HTTP completion |
+| Next review | CQ-11 and FR-03C-PHOTO are complete across taskq `f9846a2`/`137a81b`, runtime `c21960e`/`e53b12b`/`1e817a9`, API `d391e1a`/`7711df5`, and workers `db54852`/`800445c`/`b6a021e`. CQ-14 now freezes the bounded editorial-enrichment effect and preplanned review handoff; implement that family next, then continue the source-swept FR-03D families before FR-03E |
 
 ## Now
 
@@ -92,6 +92,7 @@
     - [x] **FR-03D-CLASSIFICATION-SPEC · Native TripAdvisor classification effect frozen** — the Tier-3 reporter union now spans `qdarte_discovery` through a two-phase authenticate → authoritative path-job queue lookup → queue-run authorize sequence before body decode. The stored strict target is the complete bounded provider plan; inspect precedes deterministic or provider work; Google-type, provider, existing and unavailable outcomes are closed; apply revalidates the live source/place relationship and owns classification plus alignment in the effect transaction; provider failures remain retryable without an effect; output is bounded counters/receipts with no follow-up. No Tier-0/1 contract, SQL, migration, package, QDarte source, database, provider or production state changed.
     - [x] **FR-03D-CLASSIFICATION-REPLAY · Reclaim-stable output corrected docs-first** — implementation design proved that a generic replay receipt exposes the committed result digest but not the provider failover winner. The classification output therefore retains exact outcome/replay counters, receipts and warnings but omits provider/model/endpoint labels instead of guessing them after reclaim or widening every family's receipt. Provider identity remains in the hashed effect intent and domain metadata. No source, contract, SQL, migration, database, provider or production state changed.
     - [x] **FR-03D-CLASSIFICATION · Native classification family and hard-kill conservation complete** — API `7dc69fd`/`08aff8b` adds the source-backed classification adapter, durable provider-control transactions and loop-isolated tests; workers `4c1e817`/`5dce354` bind the exact queue/type and compose the classification-only `WorkerService`. CQ-13 remediations `97be822`/`2229cfe` prevent cross-attempt provider authority while a live reservation exists. Workers `8ec7b37` and API `1f6ffbe` add a guarded local process-kill harness and immutable evidence: a real first worker exits `-9` after provider return, the same taskq job reclaims through `lease_expired`, attempt 2 records generation 1 as `expired_unsettled` without egress, attempt 3 spends generation 2 and succeeds, and the raw oracle proves 2 external calls = 1 provider event + 1 unknown-cost generation, one native effect, zero releases and zero old job/event rows. Runtime 1170/1170, workers 676/676, taskq 584/584 plus one opt-in skip, and the API's recorded 1761-pass/10-failure unrelated baseline all reproduce with clean static gates. No persistent database, external provider, old worker or production state changed.
+    - [x] **FR-03D-EDITORIAL-SPEC · Bounded editorial-enrichment effect frozen** — CQ-14 resolves the mismatch between a content-carrying editorial result and the private reporter's former 8KB ceiling without restoring an old result route or adding artifact-location coupling. The existing private endpoint remains authenticate → authoritative queue-run authorize → bounded decode, but its aggregate ceiling becomes the native model ceiling of 64KB. The closed `editorial_enrichment` member carries one strict draft/status result, uses stored input for row identity, applies at database time, and returns only a bounded receipt. Exact per-entity optional review branches are producer-planned, scope-equal, capped at 20 and selected only after the effect commits; response-loss replay returns the identical receipt and child. Metered model calls use ADR-031 provider control. No Tier-0/1, SQL, migration, package, QDarte source, database, provider or production state changed.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -346,6 +347,44 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-14 — Editorial content cannot fit the private reporter's 8KB envelope *(resolved: bounded 64KB content-effect envelope)*
+
+**Blocking evidence:** the source-derived inventory correctly classifies
+`editorial_enrich_scope` as a trusted `editorial_enrichment` domain effect,
+but its authoritative mutation carries a content draft. The canonical native
+task models permit a bounded 64KB aggregate while the private reporter
+transport was frozen at 8KB. A valid title/body/translation draft can
+therefore be accepted by the native task contract and then become
+unreportable. Truncating the draft changes domain truth; restoring the old
+result route preserves the queue wrapper; and passing a worker-local artifact
+path couples the API to worker storage.
+
+**Resolution:** the existing private reporter remains the sole path and keeps
+authenticate plus authoritative queue-scoped `run` authorization before any
+body decode. Its aggregate request/envelope ceiling becomes 64KB, equal to the
+already-executable native input/output ceiling. Closed non-content members keep
+their narrower field bounds; this is not an arbitrary JSON surface. The new
+editorial member accepts only a strict bounded draft and
+`enriched | unchanged` status, derives content/review row identity from the
+stored strict task input, uses the database clock, and records mutation plus
+receipt atomically. It accepts no old attempt model, result metadata, caller
+timestamp, provider diagnostic, credential, arbitrary locale map, or request
+echo.
+
+Each planned entity has at most one optional, fully materialized
+`review_scope` branch. Plan identities cover the entity set exactly, child
+scope equals parent scope, and the job-wide maximum remains 20. The handler
+inspects before provider work, applies one effect, and returns only the
+preplanned child after the receipt commits. Response-loss replay returns the
+same receipt and child; it cannot plan another review. Any metered model call
+uses ADR-031's shared provider control and remains worker-owned.
+
+This is a Tier-3 internal integration correction. It changes no taskq
+Protocol, Function Manifest, SQL contract, migration, public facade route, or
+production state. The owner had already authorized the primary agent to
+self-review and continue while the external reviewer was unavailable; the
+resolution preserves every Tier-0 boundary and is recorded before source.
 
 ### S5-QD-FR-CQ-13 — Cross-attempt reservation takeover can erase unknown provider cost *(approved 2026-07-23)*
 
