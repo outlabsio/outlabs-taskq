@@ -257,6 +257,14 @@ reserves migrations 0008–0010, requires a bridge before every SQL revision,
 and forbids QDarte from emulating a missing primitive. Other 0.2 growth items
 remain separate and do not preempt full replacement.
 
+**FR-02A complete; FR-02B contract frozen:** Protocol 1.0.9 / SQL 0.2.0 /
+immutable migration 0008 ship lossless atomic follow-ups. ADR-026 now resolves
+workflow graph closure through an explicit producer-safe seal, freezing
+Protocol 1.0.10 / target SQL 0.2.1 / immutable migration 0009. The next action
+is the ADR-020 bridge that accepts 0.2.1 without exposing workflows until exact
+`dependencies_workflows` metadata is present; migration, graph evidence and
+typed surfaces follow only after that bridge is green.
+
 ## Standing rules while building
 
 - ADRs and the two canonical contract docs win every conflict; changing them is a new ADR, not an edit.

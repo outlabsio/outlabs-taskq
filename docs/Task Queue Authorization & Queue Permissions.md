@@ -56,6 +56,9 @@ The generated Taskq sub-application declares, per active route: `(action, queue_
 | `POST /taskq/v1/queues/{queue}/admissions/reserve` | `enqueue` | path — authorize before key/intent lookup |
 | `POST /taskq/v1/queues/{queue}/admissions/finish` | `enqueue` | path — body handle/key never choose authority |
 | `POST /taskq/v1/queues/{queue}/admissions/cancel` | `enqueue` | path — cancels only an unadmitted reservation |
+| `POST /taskq/v1/workflows` | `enqueue` | every distinct strictly decoded `declared_queues` entry, all-or-nothing before SQL |
+| `POST /taskq/v1/workflows/{id}/seal` | `enqueue` | every queue from the safe authoritative workflow projection |
+| `POST /taskq/v1/workflows/{id}/cancel` | `control` | every queue from the safe authoritative workflow projection; operator transport only |
 | `POST /taskq/v1/jobs/{id}/heartbeat·complete·fail·release·snooze·cancel-running` | `run` | job lookup |
 | `POST /taskq/v1/workers/heartbeat` | `run` | every distinct declared queue, all-or-nothing preflight |
 | `POST /taskq/v1/jobs/{id}/cancel·redrive·expire` | `control` | job lookup |
@@ -65,6 +68,16 @@ The generated Taskq sub-application declares, per active route: `(action, queue_
 | queue ensure / concurrency-limit commands | `admin` | path / none; operator pool + authorizer only |
 
 **Job-lookup order (normative, ADR-006):** authenticate → **`taskq.get_authorization_projection(job_id)`** (a `SECURITY DEFINER` read granted to the facade's observer role, exposing only id, queue, job_type, status — never payloads or attempt fences) → authorize `(action, projection.queue)` → invoke the fenced mutation (which re-validates ownership atomically). Caller-supplied queue/job_type in payloads are **assertions**: rejected on mismatch (409/422 per the ADR-005 protocol), never an authorization input. On authorization failure the default is **403 naming the queue** (single-tenant blast-radius scoping, not tenant isolation); hosts that want existence-hiding set `not_found_on_forbidden=True` to get 404.
+
+**Workflow order (normative, ADR-026):** create authenticates, strictly
+decodes, authorizes `enqueue` for every supplied declared queue, then calls
+SQL. A workflow-member enqueue first authorizes the path queue, strictly
+decodes, then reads only `(workflow_id, declared_queues)` from
+`get_workflow_authorization_projection`, authorizes `enqueue` for the complete
+authoritative set, and only then permits dependency lookup or graph mutation.
+Seal uses the same authoritative producer checks; cancel uses `control` for
+the complete set through the separate operator transport. A partial queue grant
+never reveals dependency existence/state and never changes graph state.
 
 ### 2.2 `QueueAuthorizer` protocol (supersedes `TaskqAuth` read/write/operator)
 

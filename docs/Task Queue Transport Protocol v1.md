@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, and ADR-024 as additive protocol document revision **1.0.9** / SQL contract 0.2.0. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, and ADR-026 as additive protocol document revision **1.0.10** / SQL contract 0.2.1. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -59,6 +59,10 @@
 16. **ADR-024 native follow-up activation:** protocol document revision 1.0.9 and SQL contract
     0.2.0 activate the existing complete command's closed follow-up field as specified in §2.7.
     No route, settle result, TQ code, IAM action, or wire-major changes.
+17. **ADR-026 sealed workflow lifecycle:** protocol document revision 1.0.10 and SQL contract
+    0.2.1 add the create/seal/cancel workflow commands and activate the existing enqueue
+    command's reserved workflow/dependency fields as specified in §2.8. The existing IAM actions
+    and TQ registry are reused; wire major remains `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -396,6 +400,104 @@ successful. Follow-up admission is exempt only from producer `max_depth`; all
 other limits and validation remain. The worker receives no enqueue command or
 producer permission. Its typed registry must predeclare every possible child
 queue/type target and construction fails on an undeclared target.
+
+### 2.8 Native workflows and dependencies (document revision 1.0.10)
+
+SQL contract 0.2.1 activates capability `dependencies_workflows`. Before that
+capability is present, workflow routes remain absent and non-null workflow or
+dependency fields on ordinary enqueue return `TQ501`.
+
+| Command | HTTP | SQL | Authorization | Outcomes / status |
+|---|---|---|---|---|
+| create workflow | `POST /taskq/v1/workflows` | `taskq.create_workflow` | `enqueue` on every declared queue | `created` 201; `existed` 200 |
+| seal workflow | `POST /taskq/v1/workflows/{id}/seal` | `taskq.seal_workflow` | `enqueue` on every authoritative declared queue | `sealed` or `already_sealed` 200 |
+| cancel workflow | `POST /taskq/v1/workflows/{id}/cancel` | `taskq.cancel_workflow` | `control` on every authoritative declared queue; separate operator transport | `cancel_requested` or `already_requested` 202; `already_terminal` 200 |
+
+There is no workflow list/detail route in this revision. FR-02D owns any
+bounded observer projection.
+
+Create's strict body contains exactly:
+
+| Field | Contract |
+|---|---|
+| `workflow_key` | required 1–255 UTF-8 bytes |
+| `kind` | required `dag` or `batch` |
+| `params` | JSON object, default `{}`, at most 64KB |
+| `declared_queues` | 1–32 distinct canonical queue names; input order is not identity |
+
+The database stores declared queues in sorted order. Key, kind, canonical JSON
+params and that sorted set are immutable creation identity. Exact replay returns
+the original id as `existed`; changed identity returns non-retryable `TQ409`
+with details exactly `{ "reason": "workflow_mismatch" }`. Actor is derived from
+the authenticated context and is not accepted or echoed in the body.
+
+Create returns data exactly:
+
+```json
+{"workflow_id":"uuid","status":"running"}
+```
+
+Seal and cancel bodies are empty except cancel may contain optional `reason`
+bounded to 2,048 UTF-8 bytes. Their data is the same two-field object with the
+authoritative current status. Raw workflow keys, params, queue sets, job ids,
+dependency ids, actors and reasons never appear in response data or error
+details.
+
+Creation leaves membership open. Seal is the graph-closure linearization point:
+it serializes with member admission on the workflow row. Only a sealed workflow
+can finalize. A sealed empty workflow succeeds. Repeated seal is
+`already_sealed`. Cancellation implicitly seals, records database-time intent,
+advances one bounded cancellation batch and lets the housekeeper converge the
+rest; it never forges worker settlement.
+
+Ordinary `POST /taskq/v1/queues/{queue}/jobs` adds three optional strict fields
+without changing its route or success envelope:
+
+| Field | Contract |
+|---|---|
+| `workflow_id` | non-nil UUID; requires `step_key` |
+| `step_key` | 1–64 bytes, `[A-Za-z0-9][A-Za-z0-9._-]*`; requires `workflow_id` |
+| `depends_on` | 1–100 distinct non-nil UUIDs; requires `workflow_id`; omission/empty means no dependencies |
+
+A workflow member's path queue must be declared by the workflow. Every
+dependency must be an existing member of the same workflow. Because a newly
+inserted dependent can reference only existing parents and callers cannot
+supply a job id, cycles and self-dependency are structurally impossible.
+Already-succeeded parents are immediately satisfied and create no live edge.
+Failed or cancelled parents reject the whole enqueue as non-retryable `TQ409`
+with details exactly `{ "reason": "dependency_terminal" }`. Unknown workflow
+or parent is `TQ001`.
+
+The database stores a canonical intent hash for each `(workflow_id, step_key)`
+over the queue/job command plus sorted dependency set. Exact replay returns the
+original job id as `existed`, including after satisfied edges are deleted and
+after sealing. Changed intent is non-retryable `TQ409` with details exactly
+`{ "reason": "workflow_step_mismatch" }`. A new step after seal or cancellation
+is `TQ409` with details exactly `{ "reason": "workflow_sealed" }`. No partial
+job, edge, event or notification survives any rejection.
+
+Processing order is normative:
+
+1. authenticate;
+2. for create, strictly decode, authorize `enqueue` on every supplied distinct
+   queue, then call SQL;
+3. for member enqueue, authorize `enqueue` on the path queue, strictly decode,
+   obtain the safe authoritative workflow projection, authorize `enqueue` on
+   every declared queue, and only then inspect dependencies or call enqueue;
+4. for seal, project first and authorize `enqueue` on every declared queue; and
+5. for cancel, project first and authorize `control` on every declared queue
+   through the operator transport.
+
+The safe workflow authorization projection contains only workflow id and
+declared queue names. Authentication failure, authorization denial, malformed
+body, unknown dependency and conflict all leave graph state unchanged.
+
+Terminal workflow status is monotonic after sealing: requested whole-workflow
+cancellation yields `cancelled`; otherwise any failed member yields `failed`,
+else any cancelled member yields `cancelled`, else all-success or empty yields
+`succeeded`. Individual workflow-member redrive is `TQ409` with details exactly
+`{ "reason": "workflow_member_redrive_forbidden" }`; a corrected execution uses
+a new workflow key. A future workflow-level redrive requires a new contract.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

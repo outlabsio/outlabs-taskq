@@ -1,6 +1,7 @@
 # Task Queue 0.2 — native orchestration specification
 
-> **Status:** frozen by S5-QD-FR-02-SPEC on 2026-07-22.
+> **Status:** frozen by S5-QD-FR-02-SPEC on 2026-07-22; FR-02A is
+> complete and ADR-026 freezes FR-02B at Protocol 1.0.10 / SQL 0.2.1.
 >
 > **Authority:** Tier 3. This narrows ADR-007/009/011 and the Unified Design
 > Spec to the minimum reusable surface demonstrated by QDarte FR-01. Tier-0
@@ -108,14 +109,26 @@ tables and may use workflow id as correlation but never writes taskq graph rows.
 ### 5.1 Producer-safe workflow identity
 
 A workflow stores UUID id, bounded idempotent key, finite kind, bounded params,
-declared queue set, creator and timestamps. Status is derived as
-`running | succeeded | failed | cancelled` from member jobs.
+sorted declared queue set, creator, open/sealed state, optional cancellation
+intent and timestamps. Status is a monotonic materialization as
+`running | succeeded | failed | cancelled` from member jobs only after seal.
 
-`create_workflow(workflow_key, kind, params, declared_queues)` is replay-safe
-and producer-granted. HTTP authorizes **every distinct declared queue** before
-execution. Enqueue with a workflow id must target one of those queues.
-Cancellation is operator-only and only requests cancellation of non-terminal
-members; it never forges worker settlement.
+`create_workflow(workflow_key, kind, params, declared_queues, actor)` is
+replay-safe and producer-granted. HTTP authorizes **every distinct declared
+queue** before execution. Exact creation replay returns the original id;
+different kind/params/queues under one key is a typed conflict.
+
+Creation leaves membership open. Producer-granted
+`seal_workflow(workflow_id, actor)` is the graph-closure linearization point:
+the workflow row serializes member admission against sealing, and only sealed
+workflows finalize. A sealed empty workflow succeeds. Exact replay of an
+existing step remains valid after seal; new membership conflicts.
+
+Enqueue with a workflow id must target one declared queue. Cancellation is
+operator-only, implicitly seals, records durable intent, and advances members
+through bounded passes; it never forges worker settlement. Individual member
+redrive is rejected in 0.2.1 so terminal workflow state cannot reopen; corrected
+execution uses a new workflow key.
 
 This split is binding: creating an application graph cannot require a
 long-lived operator credential, while cancelling a whole graph remains an
@@ -124,9 +137,14 @@ administrative action.
 ### 5.2 Edge admission and propagation
 
 The existing enqueue identity activates its reserved `workflow_id`, `step_key`
-and `depends_on` inputs. A dependent references 1–100 distinct parents, has a
-workflow-unique step, cannot self-depend or form a cycle, and is inserted
-atomically with its live edges. Parent rows lock in ascending UUID order.
+and `depends_on` inputs. Every workflow member has a workflow-unique step and a
+database-stored canonical intent hash. A dependent references 1–100 distinct
+existing parents in the same workflow and is inserted atomically with its live
+edges. Same-step/same-intent replay returns the original job even after edge
+deletion; changed intent conflicts. Because a new dependent can reference only
+existing parents and callers cannot supply its id, self-dependency and cycles
+are structurally impossible. The workflow row locks first, then parent rows in
+ascending UUID order.
 
 Already-succeeded parents contribute no live edge. Failed/cancelled parents
 produce a typed rejection and no job. Live edges create `blocked` with exact
@@ -134,18 +152,22 @@ produce a typed rejection and no job. Live edges create `blocked` with exact
 and promotes zero-pending children in the same transaction with at most one
 wake per queue.
 
-Terminal failure/cancellation transitively marks blocked descendants
-`dep_failed` without consuming their budget. Work is bounded per call and an
-idempotent housekeeper straggler pass completes the frontier using deterministic
-lock order. No descendant may claim after a required ancestor fails.
+Terminal failure/cancellation advances a bounded direct-descendant frontier,
+marking blocked descendants `dep_failed` without consuming their budget.
+Skipped and deeper descendants remain gated; an idempotent housekeeper
+straggler pass completes the frontier using deterministic lock order. No
+descendant may claim after a required ancestor fails.
 
-Workflow finalization is derived/idempotent and runs no domain hook. Domains
-learn terminal failure through bounded projections and scheduled reconcilers.
+Workflow finalization is sealed-only, derived/idempotent and runs no domain
+hook. Whole-workflow cancellation wins; otherwise failed dominates cancelled,
+then all-success. Domains learn terminal failure through bounded projections
+and scheduled reconcilers.
 
 Evidence covers enqueue-versus-terminal races, fan-out/fan-in/diamond and
 multi-queue graphs, all zero-partial validation failures, sibling completes,
-promotion/cascade exactly once, cancel-versus-promote/claim, response loss and
-bounded direct-edge plans without graph-wide scans.
+promotion/cascade exactly once, create/seal/enqueue races, exact step replay,
+cancel-versus-promote/claim, response loss and bounded direct-edge/finalizer
+plans without graph-wide scans.
 
 ## 6. FR-02C — schedules
 

@@ -27,8 +27,8 @@
 |---|---|
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 and FR-02A are complete; FR-02B now owns native dependencies/workflows before any all-lane replacement may begin. Production remains untouched |
 | Suite | taskq 521/521 regular with 1 opt-in skip on PostgreSQL 18.3 and exact 16.14 at CI run `29982347978`; Python 3.12/3.13 wheel/sdist × core/HTTP/OutLabs artifacts, Ruff/format, races, import isolation and Stage-3 audit are green. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers through 0007; QDarte remains pinned to immutable a6 until the native-orchestration release is deliberately cut |
-| Contracts | Protocol v1 document revision 1.0.9 + Function Manifest/installed SQL contract 0.2.0 (+ ADR-012..025); immutable migrations are 0001–0008 and `followups` is active. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | FR-02B is paused at S5-QD-FR-CQ-03: the frozen multi-call workflow design has no graph-closure linearization point, so a bounded finalizer cannot distinguish a complete graph from a temporarily empty/all-terminal graph. Resolve the workflow-seal contract docs-first before migration 0009 or implementation. No production deployment, QDarte migration, old-ledger import or C8 observation work is part of the active goal |
+| Contracts | Protocol v1 document revision 1.0.10 + Function Manifest target 0.2.1 (+ ADR-012..026); installed SQL remains 0.2.0 through immutable migrations 0001–0008 until the bridge and `0009_workflows.sql` land. `followups` is active; `dependencies_workflows` is frozen but inactive. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
+| Next review | FR-02B bridge support must accept 0.2.1 metadata without exposing workflow commands unless `dependencies_workflows` is present, preserve the pre-bridge 0.2.1 rejection proof, and ship before immutable migration 0009. Then SQL/race/plan evidence may begin. No production deployment, QDarte migration, old-ledger import or C8 observation work is part of the active goal |
 
 ## Now
 
@@ -47,6 +47,7 @@
     - [x] **FR-02A-CI · Installed-artifact ledger corrected** — the Python 3.12/3.13 artifact jobs exposed stale packaging oracles: the installed migration ledger stopped at `0007` and the function catalog at 46 even though the built distribution correctly shipped `0008_followups` and the 47-function 0.2.0 manifest. The permanent smoke now asserts the complete 0001→0008 chain, exact 47-function catalog and public closed `Followup` construction from each installed wheel and sdist; no SQL, migration, contract, runtime or QDarte source changed.
     - [x] **FR-02A-AUDIT · Lossless follow-ups complete** — exact-tip CI run `29982347978` reproduces 521 passed with one opt-in skip on PostgreSQL 18 and 521/1 on PostgreSQL 16, both Python unit/import lanes, choreographed races, Stage-3 security/resource parity and both installed-artifact matrices. Local evidence additionally repeats 521/1 with authenticated Redis, Ruff/format and wheel/sdist × core/HTTP/OutLabs isolation. The 0001→0008 chain, exact 47-function catalog and public `Followup` type are permanent artifact oracles. No QDarte package pin, database, queue, worker, provider or production state changed; FR-02B is next.
   - [ ] **FR-02B · Dependencies and workflows** — freeze and ship immutable migration 0009 plus producer-safe workflow identity, atomic edge admission, promotion/cascade/finalization, bounded reads and concurrency evidence.
+    - [x] **FR-02B-SPEC · Sealed workflow contract frozen docs-first** — owner-approved ADR-026 resolves S5-QD-FR-CQ-03 through a producer-safe seal linearization point. Protocol 1.0.10 and Manifest target 0.2.1 freeze create/seal/cancel identities, immutable declared queues, same-step canonical-intent replay, same-workflow existing-parent edges, sealed-only monotonic finalization, bounded cancellation/cascade/straggler passes, member-redrive refusal, all-declared-queue authorization, exact metadata and migration `0009_workflows.sql`. No SQL, migration, Python source, package, QDarte database, queue, worker or production state changed; bridge support is next.
   - [ ] **FR-02C · Schedules** — freeze and ship immutable migration 0010 plus operator definitions, housekeeper claims/fires/errors, database-clock catch-up, seeded janitor takeover and race/plan evidence.
   - [ ] **FR-02D · Finite operator projections** — independently contract, plan-test and activate only running/finished/workflow/timeline projections that meet their exact B9 and redaction gates.
   - [ ] **FR-02-AUDIT · Native orchestration completion** — dual-PG full-chain, graph/schedule/recovery/resource, parity, packaging and independent-oracle acceptance before FR-03 consumes 0.2.
@@ -306,7 +307,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-03 — Multi-call workflow construction has no graph-closure linearization point
+### S5-QD-FR-CQ-03 — Multi-call workflow construction has no graph-closure linearization point *(resolved: ADR-026)*
 
 **Blocking evidence:** the frozen FR-02B design creates a replay-safe workflow,
 then admits member jobs through separate calls, while a bounded housekeeper
@@ -319,7 +320,7 @@ terminal state, or reject a legitimate planner retry. QDarte's current
 single-database transaction does not solve the general HTTP/client contract and
 cannot survive as a wrapper.
 
-**Recommended resolution:** add a producer-granted, replay-safe
+**Resolution (owner-approved 2026-07-23):** ADR-026 adds a producer-granted, replay-safe
 `seal_workflow` command in the docs-first 0.2.1 package. Creation leaves the
 workflow open. Workflow-row locking serializes member enqueue against sealing;
 only sealed workflows may finalize. After sealing, an exact replay of an

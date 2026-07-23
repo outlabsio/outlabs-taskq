@@ -1,6 +1,6 @@
 # taskq — 0.1.x / 0.2.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.2.0 — 2026-07-22. Closes R2-08 and incorporates ADR-012/013/019/021/023/024: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0008 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.0 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.2.1 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0009 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.1 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -626,10 +626,12 @@ END $$;
 ## 7. Explicitly absent from the 0.1 migration
 
 Before 0008, `_enqueue_followup` is absent. In 0.2.0 it is activated exactly as §15 defines.
-`cancel_dependents`, `finalize_dep_stragglers`, `finalize_workflows`,
-`create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list
+Before 0009, `cancel_dependents`, workflow cancellation/finalizer helpers,
+`create_workflow`/`seal_workflow`/`cancel_workflow`, and the workflow authorization projection are
+absent. In 0.2.1 they activate exactly as §16 defines. The schedule trio, all archive
+objects/functions, every list
 form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every later 0.2/0.3
-composite field remain absent. SQL contract 0.2.0's read-model surface still contains only the
+composite field remain absent. SQL contract 0.2.1's read-model surface still contains only the
 three finite H-08 views; general/all-queue, arbitrary-filter, payload, workflow and timeline lists
 remain absent. ADR-023's admission functions are the separate producer surface defined in §14.
 T2 asserts each installed contract's catalog contains exactly its manifest function set.
@@ -885,3 +887,146 @@ metadata exactly `0.1.5` and the exact 0007 capability set before changing anyth
    cover every validation branch, 0/1/20/21 children, same/cross-queue authorization, response loss,
    stale/cross-verb replay, child collision, concurrent completion, Nth-child rollback, depth
    exemption, fake/SQL/HTTP graph parity, resources and artifact isolation.
+
+## 16. Contract 0.2.1 — ADR-026 sealed workflows and dependencies (2026-07-23)
+
+Immutable migration `0009_workflows.sql` is the sole activation vehicle. It
+requires contract metadata exactly `0.2.0`, the exact 0008 capability set, and
+empty inactive workflow/dependency relations before changing anything.
+
+1. **Composite types.** Migration 0009 adds exactly:
+
+   ```text
+   taskq.workflow_result AS (
+     outcome text,
+     workflow_id uuid,
+     status text
+   )
+
+   taskq.workflow_auth_projection AS (
+     workflow_id uuid,
+     declared_queues text[]
+   )
+   ```
+
+   H-02 additive-only evolution applies. No key, params, actor, cancellation
+   reason, member id, dependency id, fence or diagnostic appears in either
+   projection.
+
+2. **Application-callable identities.** The new exact functions are:
+
+   ```text
+   taskq.create_workflow(text,text,jsonb,text[],text)
+     arguments: p_workflow_key, p_kind, p_params, p_declared_queues, p_actor
+     RETURNS taskq.workflow_result
+     EXEC taskq_producer; raises TQ001, TQ409, TQ422
+
+   taskq.seal_workflow(uuid,text)
+     arguments: p_workflow_id, p_actor
+     RETURNS taskq.workflow_result
+     EXEC taskq_producer; raises TQ001
+
+   taskq.cancel_workflow(uuid,text,text)
+     arguments: p_workflow_id, p_actor, p_reason
+     RETURNS taskq.workflow_result
+     EXEC taskq_operator; raises TQ001, TQ422
+
+   taskq.get_workflow_authorization_projection(uuid)
+     arguments: p_workflow_id
+     RETURNS taskq.workflow_auth_projection
+     EXEC taskq_observer; raises TQ001
+   ```
+
+   Every identity is volatile except the stable authorization projection; all
+   are `SECURITY DEFINER`, owned by `taskq_owner`, path-pinned and
+   PUBLIC-revoked. There is no workflow list/detail function in 0.2.1.
+
+3. **Owner-private identities.** Migration 0009 also adds:
+
+   ```text
+   taskq.cancel_dependents(uuid,text,integer) RETURNS integer
+   taskq.advance_workflow_cancellations(integer) RETURNS integer
+   taskq.finalize_dep_stragglers(integer) RETURNS integer
+   taskq.finalize_workflows(integer) RETURNS integer
+   ```
+
+   Arguments are respectively `(p_job_id, p_reason, p_limit DEFAULT 100)` and
+   `(p_limit DEFAULT 100)` for each bounded pass. They are volatile
+   `plpgsql SECURITY DEFINER`, owner-only, path-pinned, PUBLIC-revoked, have no
+   application-role EXECUTE and are not Protocol commands.
+
+4. **Stored shape and indexes.** `taskq.workflows` appends non-null sorted
+   `declared_queues text[]`, plus nullable `sealed_at`, `sealed_by`,
+   `cancel_requested_at`, `cancel_requested_by`, and byte-safe
+   `cancel_reason`. `taskq.jobs` appends nullable
+   `workflow_intent_hash text`, constrained to lowercase SHA-256 hex and to be
+   present exactly when workflow id and step key are present. Migration 0009
+   adds a permanent unique `(workflow_id, step_key)` index and replaces the
+   inactive workflow indexes with exact bounded-finalizer/member-state indexes.
+   Raw DML remains owner-only.
+
+5. **Creation and sealing.** Protocol §2.8's bounds, replay identity and
+   outcomes are exact. Creation validates every queue before insertion and
+   stores a canonical sorted set. A key conflict compares kind, canonical params
+   and queues under the authoritative row; exact replay returns `existed`,
+   mismatch raises `TQ409`. Seal locks the workflow row, stamps database time
+   once, and immediately finalizes an empty/all-terminal graph. Repeated seal
+   returns `already_sealed`.
+
+6. **Existing enqueue activation.** The public identity remains:
+
+   ```text
+   taskq.enqueue(
+     text,text,jsonb,smallint,timestamptz,text,text,text,smallint,integer,
+     text,integer,integer,uuid[],uuid,text,uuid,jsonb
+   ) RETURNS TABLE(job_id uuid, created boolean)
+   ```
+
+   Migration 0009 replaces only its body. Non-null workflow fields require
+   capability `dependencies_workflows`; pre-0009 behavior remains `TQ501`.
+   Under 0.2.1 it enforces Protocol §2.8, locks workflow then distinct parent
+   rows in ascending id order, validates all state before insert, stores the
+   canonical intent hash, inserts only live edges, and returns truthful
+   `created | existed`. Same-step replay is resolved before the sealed check.
+   Mismatch/sealed/terminal-dependency conflicts are registered `TQ409`;
+   unknown workflow/parent is `TQ001`; malformed graph input is `TQ422`;
+   ordinary depth/convergence outcomes remain `TQ429`/`TQ500`.
+
+7. **Settlement and convergence body replacements.** Migration 0009 replaces
+   `complete_job` to delete direct satisfied edges, decrement exact
+   `pending_deps`, promote zero-pending members once and notify each affected
+   queue at most once. Every terminal-failure/cancellation path in
+   `fail_job`, `snooze_job`, `release_job`, `cancel_running_job`,
+   `cancel_job`, and `reap_job` advances the bounded dependent-cancellation
+   frontier. `tick` runs bounded cancellation, dependency-straggler and sealed
+   workflow-finalizer passes under its existing savepoint isolation.
+   Workflow cancellation is a durable intent and one bounded first pass, never
+   forged settlement.
+
+8. **Terminality and redrive.** Only sealed workflows finalize. Cancellation
+   intent wins; otherwise failed dominates cancelled, which dominates
+   all-success. Empty sealed succeeds. Final status never reopens.
+   `redrive_job` raises registered non-retryable `TQ409` for any workflow
+   member and `redrive_failed` excludes workflow members; corrected graphs use
+   a new workflow key.
+
+9. **Metadata and compatibility.** Migration 0009 replaces metadata by exact
+   equality:
+
+   ```json
+   {"active":["admission_reservations","dependencies_workflows","followups","read_model_list_ready"]}
+   ```
+
+   and sets contract version `0.2.1`. The bridge set is exactly
+   `{0.1.2, 0.1.3, 0.1.4, 0.1.5, 0.2.0, 0.2.1}` and exposes no workflow
+   surface without exact capability metadata. Applying 0009 raises the database
+   rollback floor to that bridge. Deactivation requires an immutable migration.
+
+10. **Authorization and evidence.** Direct SQL retains the trusted capability
+    boundary. HTTP follows Protocol §2.8's all-declared-queue ordering with zero
+    lookup/mutation before complete authorization. `verify()`, independent
+    catalog parity, fresh/full 0001→0009 chains, bridge negatives, exact
+    metadata equality, every create/seal/cancel/enqueue outcome, fan-out,
+    fan-in, diamond, sibling and settle/enqueue/seal/cancel races, bounded
+    cascade/finalization plans, SQL/HTTP/fake parity, resource cleanup and
+    installed artifacts run on PostgreSQL 16 and 18.
