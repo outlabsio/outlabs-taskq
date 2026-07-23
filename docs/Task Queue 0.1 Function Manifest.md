@@ -1,6 +1,6 @@
 # taskq — 0.1.x / 0.2.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.2.2 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026/027: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0010 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.2 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.2.3 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026/027/029: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0012 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.3 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -1232,3 +1232,111 @@ no schedule relations before changing anything.
     DST edges, all catch-up policies, response loss, skewed clocks, concurrent
     claims/fires/updates, one-only janitor takeover, bounded plans, SQL/HTTP/fake
     parity, resource cleanup and installed artifacts run on PostgreSQL 16/18.
+
+## 18. Contract 0.2.3 — ADR-029 finite projections (2026-07-23)
+
+Migration `0011_finite_projections.sql` requires exact contract 0.2.2 and its
+exact capability set. It adds bounded backing while leaving every new FR-02D
+capability inactive. Metadata-only migration
+`0012_activate_finite_projections.sql` requires exact 0.2.3 plus the 0011
+catalog and activates only independently proven views.
+
+1. **Composite types.** Migration 0011 adds exactly:
+
+   ```text
+   taskq.workflow_read_profile AS (
+     workflow_id uuid, kind text, status text, sealed boolean,
+     cancel_requested boolean, declared_queues text[],
+     created_at timestamptz, updated_at timestamptz, finished_at timestamptz
+   )
+
+   taskq.workflow_state_counts AS (
+     blocked bigint, queued bigint, running bigint,
+     succeeded bigint, failed bigint, cancelled bigint
+   )
+
+   taskq.workflow_member_projection AS (
+     job_id uuid, queue text, job_type text, step_key text, status text,
+     outcome text, pending_deps integer, attempt_count integer,
+     failure_count integer, created_at timestamptz, scheduled_at timestamptz,
+     started_at timestamptz, finished_at timestamptz, updated_at timestamptz
+   )
+
+   taskq.workflow_page AS (
+     as_of timestamptz, profile taskq.workflow_read_profile,
+     counts taskq.workflow_state_counts,
+     items taskq.workflow_member_projection[], next_after uuid
+   )
+   ```
+
+   H-02 applies. No composite contains workflow key/params/creator, payload,
+   headers, result, progress, error, attempt/event data, fence, token, worker,
+   diagnostic or provider metadata.
+
+2. **Public identity.**
+
+   ```text
+   taskq.get_workflow_page(uuid,integer,uuid)
+     arguments: p_workflow_id, p_limit DEFAULT 50, p_after DEFAULT NULL
+     RETURNS taskq.workflow_page
+     EXEC taskq_observer; raises TQ001, TQ422, TQ501
+   ```
+
+   The function is `STABLE SECURITY DEFINER`, owner-owned, path-pinned and
+   PUBLIC-revoked. It validates limit `1..100`, checks capability
+   `read_model_workflow`, reads one exact workflow and at most `limit + 1`
+   members ordered by UUID ascending, and stamps database `as_of`. An unknown
+   workflow is TQ001 regardless of capability state. A direct SQL client must
+   not get a wider projection merely because it bypasses HTTP.
+
+3. **Private exact counts.** Owner-private relation
+   `taskq.workflow_member_counts` has primary key/FK `workflow_id` with cascade
+   and six non-negative bigint columns for
+   `blocked|queued|running|succeeded|failed|cancelled`. Owner-private
+   `taskq.update_workflow_member_counts()` returns trigger, is volatile,
+   `SECURITY DEFINER`, path-pinned and PUBLIC-revoked. It adjusts exactly the
+   old/new workflow-status buckets on job insert, delete, workflow change or
+   status change. Migration 0011 backfills before creating the trigger.
+   No application role receives relation or function privilege.
+
+4. **Indexes.** Migration 0011 adds exactly:
+
+   ```text
+   taskq_jobs_running_page_idx
+     ON taskq.jobs(queue, started_at DESC, id DESC)
+     WHERE status = 'running'
+   taskq_jobs_finished_page_idx
+     ON taskq.jobs(queue, finished_at DESC, id DESC)
+     WHERE status IN ('succeeded','failed','cancelled')
+   taskq_jobs_workflow_page_idx
+     ON taskq.jobs(workflow_id, id)
+     WHERE workflow_id IS NOT NULL
+   ```
+
+5. **Queue views.** Existing `taskq.list_jobs` identity, fields, cursor and
+   outcomes remain byte-for-byte. Migration 0011 adds indexes only. Migration
+   0012 may add existing capabilities `read_model_list_running` and
+   `read_model_list_finished` only when each has a PostgreSQL 16/18 million-row
+   B9 proof. A rejected view stays independently TQ501.
+
+6. **Metadata and compatibility.** The ADR-020 supported set becomes exactly
+   `{0.1.2,0.1.3,0.1.4,0.1.5,0.2.0,0.2.1,0.2.2,0.2.3}` before migration 0011.
+   Migration 0011 sets version 0.2.3 while retaining exactly:
+
+   ```json
+   {"active":["admission_reservations","dependencies_workflows","followups","read_model_list_ready","schedules"]}
+   ```
+
+   After proof, migration 0012 replaces metadata by exact equality with the
+   preceding set plus only the proven subset of
+   `read_model_list_running`, `read_model_list_finished`, and
+   `read_model_workflow`. Activation and deactivation are immutable metadata
+   migrations, never manual DML.
+
+7. **Evidence.** `verify()` and an independent oracle assert exact
+   types/functions/tables/triggers/indexes/grants/metadata. Fresh/full chains
+   on PostgreSQL 16/18 prove counter backfill and every status transition,
+   concurrent member changes, empty and paginated workflows, cursor binding,
+   unknown/inactive outcomes, redaction, SQL/HTTP/raw-state parity,
+   authorization-before-decode, bounded plans and artifacts. No timeline,
+   arbitrary filter, raw relation grant or all-queue projection exists.

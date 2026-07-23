@@ -34,5 +34,6 @@
 | [026](./ADR-026-sealed-workflow-lifecycle.md) | Sealed workflow lifecycle and native dependency activation | S5-QD-FR-CQ-03, S5-QD-FR-02B |
 | [027](./ADR-027-native-schedule-lifecycle.md) | Native recurring schedules and finite maintenance takeover | S5-QD-FR-02C |
 | [028](./ADR-028-maintenance-schedule-http-boundary.md) | Package maintenance schedules are not HTTP resources | S5-QD-FR-CQ-05 |
+| [029](./ADR-029-finite-operator-and-workflow-projections.md) | Finite operator and workflow projections | S5-QD-FR-02D |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

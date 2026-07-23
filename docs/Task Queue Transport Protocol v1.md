@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, ADR-026 as additive protocol document revision 1.0.10 / SQL contract 0.2.1, ADR-027 as additive protocol document revision 1.0.11 / SQL contract 0.2.2, and ADR-028 as additive protocol document revision **1.0.12**. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, ADR-026 as additive protocol document revision 1.0.10 / SQL contract 0.2.1, ADR-027 as additive protocol document revision 1.0.11 / SQL contract 0.2.2, ADR-028 as additive protocol document revision 1.0.12, and ADR-029 as additive protocol document revision **1.0.13** / SQL contract **0.2.3**. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -73,6 +73,10 @@
     `TQ422` with details exactly `{"field":"name"}` after authentication and
     request-id validation but before lookup, header/body decoding or SQL.
     Ordinary schedules and SQL contract 0.2.2 are unchanged.
+20. **ADR-029 finite operator/workflow projections:** protocol document
+    revision 1.0.13 retains ADR-019's exact queue pages and activates only
+    independently proven views. It adds the exact workflow page in §2.10.
+    SQL contract 0.2.3 owns its bounded backing; wire major remains `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -621,6 +625,63 @@ failure telemetry; privileged definition inspection is the direct-SQL operator
 schedule list/search/export surface excludes all package-owned maintenance
 definitions by contract and requires an explicit negative vector before
 activation.
+
+### 2.10 Finite operator and workflow projections (document revision 1.0.13)
+
+ADR-019's `GET /taskq/v1/jobs?queue=...&view=...` command and exact 13-field
+item remain unchanged. SQL contract 0.2.3 may activate
+`read_model_list_running` and `read_model_list_finished` independently only
+after their own B9 proof. An inactive view retains:
+
+```json
+{"code":"TQ501","message":"Capability unavailable","retryable":false,"details":{"reason":"read_model_view_inactive","view":"running|finished"}}
+```
+
+The new exact command is:
+
+| Command | HTTP | SQL | Authorization | Outcomes |
+|---|---|---|---|---|
+| workflow page | `GET /taskq/v1/workflows/{workflow_id}?limit=...&cursor=...` | `taskq.get_workflow_page(uuid,integer,uuid)` | `read` on every authoritative declared queue | 200; hidden `TQ001`; inactive `TQ501`; malformed `TQ422` |
+
+It exists only with capability `read_model_workflow`. `limit` defaults to 50
+and is bounded `1..100`. Items are ordered by job UUID ascending. The opaque
+cursor binds the workflow id and last job id; the facade decodes it only after
+authentication and authorization.
+
+Response data is exactly:
+
+```text
+as_of
+profile:
+  workflow_id, kind, status, sealed, cancel_requested, declared_queues,
+  created_at, updated_at, finished_at
+counts:
+  blocked, queued, running, succeeded, failed, cancelled
+items[]:
+  job_id, queue, job_type, step_key, status, outcome, pending_deps,
+  attempt_count, failure_count, created_at, scheduled_at, started_at,
+  finished_at, updated_at
+next_cursor
+```
+
+All timestamps are database values; counts are non-negative integers.
+`declared_queues` is sorted. The projection never includes workflow key,
+params, creator, payload, headers, result, progress, error, attempt/event
+records, fence, token, worker identity, provider evidence, or raw metadata.
+Direct SQL returns the same projection and gains no raw relation grant.
+
+Processing order is normative:
+
+1. authenticate and validate/replace the request id;
+2. project the workflow id plus authoritative declared queues without exposing
+   workflow content;
+3. authorize `read` on every declared queue;
+4. decode and bind the cursor; and
+5. invoke SQL exactly once.
+
+Denial and absence follow the same hiding posture and execute no page SQL.
+There is no workflow list route, all-queue form, arbitrary filter, offset page,
+timeline, attempt/event route, stream, or reporting escape hatch in 1.0.13.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

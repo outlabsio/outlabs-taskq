@@ -1,7 +1,8 @@
 # Task Queue 0.2 — native orchestration specification
 
 > **Status:** frozen by S5-QD-FR-02-SPEC on 2026-07-22; FR-02A/B are
-> complete and ADR-027 freezes FR-02C at Protocol 1.0.11 / SQL 0.2.2.
+> complete; ADR-027/028 complete FR-02C and ADR-029 freezes FR-02D at
+> Protocol 1.0.13 / SQL 0.2.3.
 >
 > **Authority:** Tier 3. This narrows ADR-007/009/011 and the Unified Design
 > Spec to the minimum reusable surface demonstrated by QDarte FR-01. Tier-0
@@ -18,7 +19,7 @@ SQL 0.2 supplies four independently activated capability families:
 1. lossless settlement-transaction follow-ups;
 2. dependency graphs and workflow identity;
 3. delayed and recurring schedules; and
-4. finite running, finished, workflow and exact-job timeline projections.
+4. finite running, finished and workflow projections.
 
 These are general taskq primitives. QDarte is the evidence source and first
 consumer, but no function, route, type, outcome or column carries a QDarte name
@@ -54,7 +55,7 @@ namespaces and rate/resource admission remain separate growth decisions.
 | FR-02A | `0.2.0` | `0008_followups.sql` | `followups` |
 | FR-02B | `0.2.1` | `0009_workflows.sql` | `dependencies_workflows` |
 | FR-02C | `0.2.2` | `0010_schedules.sql` | `schedules` |
-| FR-02D | `0.2.3` or later | proof-backed index/metadata migration | only projections whose own B9 evidence passes |
+| FR-02D | `0.2.3` | `0011_finite_projections.sql` then metadata-only `0012_activate_finite_projections.sql` | only projections whose own B9 evidence passes |
 
 Protocol major remains v1; each visible slice increments its document revision
 and amendment log. Package and SQL versions remain distinct.
@@ -243,15 +244,14 @@ proof second, activation last. FR-01 justifies at most:
 
 1. existing queue-scoped `read_model_list_running`;
 2. existing queue-scoped `read_model_list_finished`;
-3. `read_model_workflow`: exact workflow, bounded state counts and keyset member
-   page without payload/result/error; and
-4. `read_model_job_timeline`: exact queue plus job id returning public detail
-   and bounded attempt/event metadata.
+3. `read_model_workflow`: exact workflow, materialized bounded state counts and
+   keyset member page without payload/result/error.
 
-Timeline attempts contain id, ordinal, status, outcome, advisory worker label
-and timestamps. Events contain type and timestamp only. Payload, headers,
-result, progress, raw error/message, stats and event data are absent. Provider
-trace and effect evidence remain in application domain ledgers.
+The source inventory proves the final QDarte operator surface does not need an
+attempt/event timeline. Its former attempt shape, status vocabulary, event
+parser and stream are deletion targets. `read_model_job_timeline` is therefore
+rejected from FR-02D rather than preserved speculatively. Canonical job detail
+plus the finite views above are the complete replacement surface.
 
 No all-queue list, arbitrary predicate/status, offset pagination, payload search,
 raw table/view grant or event-data projection exists. A view that fails B9 stays
