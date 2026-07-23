@@ -132,6 +132,17 @@ _READ_MODEL_PLAN_QUERIES = {
          ORDER BY j.finished_at DESC, j.id DESC
          LIMIT 101
     """,
+    "workflow_members": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.workflow_id = md5('workflow-plan:0')::uuid
+         ORDER BY j.id
+         LIMIT 101
+    """,
+    "workflow_counts": """
+        SELECT blocked, queued, running, succeeded, failed, cancelled
+          FROM taskq.workflow_member_counts
+         WHERE workflow_id = md5('workflow-plan:0')::uuid
+    """,
 }
 
 _PLAN_BINDINGS = {
@@ -247,10 +258,6 @@ def _assert_index_family(plan: dict[str, Any], expected: str) -> None:
         node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "jobs"
         for node in nodes
     ), f"unbounded jobs Seq Scan in plan: {plan!r}"
-
-
-def _plan_nodes(plan: dict[str, Any], node_type: str) -> list[dict[str, Any]]:
-    return [node for node in _walk_plan(plan) if node.get("Node Type") == node_type]
 
 
 def _sort_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -458,7 +465,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
         pg,
         _PLAN_QUERIES["running_stats"],
     )
-    _assert_index_family(running_stats, "jobs_running_idx")
+    _assert_index_family(running_stats, "taskq_jobs_running_page_idx")
 
     finished_stats = await _explain(
         pg,
@@ -496,28 +503,33 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     # PL/pgSQL, so the representative subqueries above provide plan evidence.
     await pg.fetchval("SELECT taskq.refresh_stats_snapshot()")
 
-    # B9 / ADR-019: ready is the sole view the currently shipped index set
-    # can prove bounded.  Running and finished deliberately remain inactive:
-    # their legacy indexes are not queue-leading and the planner must sort or
-    # examine more than limit + 1 candidate rows.  These negative assertions
-    # force any later activation/index proposal to replace the evidence rather
-    # than quietly inheriting a happy-path test.
+    # B9 / ADR-019/029: each finite view has its own queue/order or workflow
+    # keyset index. Exact workflow counts are a single primary-key lookup, not
+    # a request-time member scan. Capability metadata remains unchanged until
+    # the separate immutable activation migration.
     ready = await _explain(pg, _READ_MODEL_PLAN_QUERIES["ready"])
     _assert_index_family(ready, "jobs_claim_idx")
     assert not _sort_nodes(ready)
     assert ready["Actual Rows"] <= 101
 
     running = await _explain(pg, _READ_MODEL_PLAN_QUERIES["running"])
-    running_scans = _plan_nodes(running, "Bitmap Heap Scan")
-    assert _sort_nodes(running)
-    assert running_scans and running_scans[0]["Actual Rows"] > 101
+    _assert_index_family(running, "taskq_jobs_running_page_idx")
+    assert not _sort_nodes(running)
+    assert running["Actual Rows"] <= 101
 
     finished = await _explain(pg, _READ_MODEL_PLAN_QUERIES["finished"])
-    finished_scans = [
-        node for node in _walk_plan(finished) if node.get("Index Name") == "jobs_finished_idx"
-    ]
-    assert _sort_nodes(finished)
-    assert finished_scans and finished_scans[0]["Actual Rows"] > 101
+    _assert_index_family(finished, "taskq_jobs_finished_page_idx")
+    assert not _sort_nodes(finished)
+    assert finished["Actual Rows"] <= 101
+
+    workflow_members = await _explain(pg, _READ_MODEL_PLAN_QUERIES["workflow_members"])
+    _assert_index_family(workflow_members, "taskq_jobs_workflow_page_idx")
+    assert not _sort_nodes(workflow_members)
+    assert workflow_members["Actual Rows"] <= 101
+
+    workflow_counts = await _explain(pg, _READ_MODEL_PLAN_QUERIES["workflow_counts"])
+    _assert_index_family(workflow_counts, "workflow_member_counts_pkey")
+    assert workflow_counts["Actual Rows"] <= 1
 
     capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
     assert json.loads(capabilities) == {
