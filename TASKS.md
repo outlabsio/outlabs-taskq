@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches exact-pin a7 in API/workers; canonical models and the two-family reporter envelope pass 1168/1168 runtime tests with clean Ruff/196-file MyPy. Pure, content-follow-up and both native verification bindings pass 661/661 with clean Ruff/58-file MyPy. Seventeen focused API facade/auth/authority/domain vectors pass with clean Ruff/MyPy. The closed inventory is 295 files/23 declarations/21 handlers/30 relations/130 routes. A self-cleaning PostGIS rehearsal proves separate least-privilege taskq/business identities, real SQL/HTTP execution, one lost committed response and one provider call/receipt/mutation per verification family, two successful attempts, and zero old job/event/contact-effect rows. The API's unrelated whole-repository baseline is 1749 passed/11 failed and remains required cleanup before FR-AUDIT. No old worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | Extend the closed adapter/reporter union through the unaffected domain-effect cohorts, one family at a time with authoritative-plan, replay and disposable SQL/HTTP conservation proofs; complete FR-03E across all 21 handlers. CQ-11 remains isolated |
+| Next review | Adjudicate CQ-12's queue-independent provider-control boundary, then complete the classification family without an old client. Continue the remaining unaffected effect cohorts and all-handler disposable SQL/HTTP evidence; CQ-11 remains isolated |
 
 ## Now
 
@@ -79,6 +79,7 @@
     - [x] **FR-03C-PURE · Pure cluster-research binding** — runtime `e0acb75` owns the single deterministic full projection and bounded native digest projection. Workers `a032e8d` binds `native_cluster_research(JobContext, NativeClusterResearchInput) -> NativeClusterResearchOutput`; it constructs no old job, attempt or client and invokes no lifecycle method. Production `taskq.testing.work()` proves claim, handler normalization and terminal completion with no follow-up/effect; the result digest covers the complete inherited projection and its ordered candidate/proposal identities are pinned. The temporary incumbent handler calls the same pure function while it awaits deletion. The replacement oracle is 274 files/23 declarations/21 handlers/30 relations/130 routes. Runtime passes 1162/1162 with clean Ruff and 196-file MyPy; workers pass 635/635 with clean Ruff and 55-file MyPy. No worker process, database, queue, provider, service or production state changed.
     - [x] **FR-03C-FOLLOWUPS · Queue-native content coordinator** — CQ-09/10 were resolved docs-first before implementation. Runtime `55668a4` makes canonical QDarte scope explicit on all 21 native inputs and replaces the insufficient content selector payload with at most 20 discriminated, fully planned, scope-equal photo/editorial children. Workers `29cb1e9` binds the coordinator without an old job/client/planner and returns one taskq `Complete` carrying exact child policies; the real testing fake proves parent settlement and all child inserts are atomic, while an invalid second child produces zero enqueues and an empty plan is typed `no_change`. The replacement oracle is 275 files/23 declarations/21 handlers/30 relations/130 routes. Runtime passes 1165/1165 with clean Ruff and 196-file MyPy; workers pass 639/639 with clean Ruff and 55-file MyPy. No worker process, database, queue, provider, service or production state changed.
     - [x] **FR-03C-CONTACT · Native trusted-effect handler** — workers `7261873` binds strict `contact_verify_scope` directly to `JobContext.report_effect()`: inspect precedes each provider call, committed inspection skips the provider, apply accepts only the canonical contact result and output contains bounded effect receipts. A production `WorkerSupervisor` vector proves the trusted reporter alone receives active attempt identity while the handler sees none; exact queue/type alias refusal and no old job/client/contact-package imports are pinned. Workers pass 644/644 with clean Ruff and 55-file MyPy. Runtime `fbc4458` records the 281-file exact inventory. No HTTP reporter transport, old worker, provider, database or production state changed.
+    - [ ] **FR-03C-PROVIDER-CONTROL · Queue-independent metered provider boundary** — blocked on CQ-12. Freeze and implement one private authenticated reserve/settle control surface over QDarte's existing durable provider-budget service. It must authorize the authoritative task queue before body decode, expose no old queue job/attempt/client model, keep provider calls in the worker, preserve stable reservation/fingerprint/metering semantics, and serve every native LLM family without becoming a generic HTTP proxy.
     - [ ] **FR-03C-PHOTO · Native photo-verification binding** — blocked on CQ-11. The native handler must preserve provider verification, immutable artifacts, launch-pipeline truth and conditional retry/review behavior without importing an old job/client or performing domain mutation from settlement.
   - [ ] **FR-03D · General idempotent domain effects** — replace the 12 old result-route families with one closed inspect/apply reporter union, authoritative plan validation and stable job/family/entity/operation idempotency.
     - [x] **FR-03D-KERNEL · Closed transaction and replay kernel** — API `ffb9b57` adds existing-install migration 0077 plus a route-free internal kernel for the exact 17 source-derived domain-effect families. Stable `(taskq job id, family, entity, operation)` identity, canonical request hashing, mismatch refusal, and domain callback plus bounded receipt share one transaction; a failed mutation rolls the reservation back. Fresh-session response-loss replay and a real two-session concurrent same-intent race prove the callback executes once. Runtime `a87804f` extends the closed scanner/oracle to all 278 queue-sensitive files; `88b3fd6` independently derives the domain families from the effect manifest and equality-checks both the API service set and migration constraint. Ten focused API migration/kernel/inventory tests and the runtime inventory/effect set pass with clean Ruff/format and focused MyPy. No generic effect route, family adapter, old worker, provider, production database or production state changed.
@@ -344,6 +345,46 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-12 — Native LLM handlers need the durable provider-budget control plane *(open)*
+
+**Blocking evidence:** `tripadvisor_classification_scope` is the first FR-03
+effect family whose external model call is protected by QDarte's durable
+provider reservation, failover and usage-event service. The old worker reaches
+that service through its retiring queue API client. A native handler cannot
+call that client without preserving the old queue boundary, cannot move the
+provider call into taskq settlement, and cannot substitute taskq admission
+reservations because those bind job creation rather than provider/token
+budgets. Calling the provider directly without the reservation would silently
+remove an existing resource and cost-control guarantee.
+
+**Recommended adjudication:** extract the existing provider guardrail into one
+queue-independent private control family used by every native LLM handler.
+Before a provider call the worker submits only the authoritative task job id,
+closed lane, provider/model option, request fingerprint and bounded token
+estimate. The host authenticates, resolves and authorizes the current task's
+authoritative queue before body decode, validates lane/provider membership
+against stored strict input, and returns a stable reservation decision. The
+worker performs the provider call itself, then settles that reservation with a
+closed success/transport/capacity classification and bounded usage. Response
+loss replays the same reservation/settlement. Credentials, prompts, provider
+bodies and exception text never cross or persist. The surface is not taskq
+Protocol v1, not a provider proxy, and imports no old queue job, attempt,
+client, lifecycle service or table.
+
+**Required evidence:** bad credentials and queue denial precede body decode;
+wrong task/lane/provider/fingerprint and stale/cancelled attempts fail before
+reservation mutation; reserve and settle replay are byte-stable; provider
+failure leaves no domain effect; committed provider success plus lost effect
+response does not cause a second provider call; usage and effect receipts each
+conserve one logical operation; worker secrets and error text remain absent;
+all native LLM families consume this one closed control rather than inventing
+per-lane wrappers.
+
+**Stop:** do not call the old worker API client, do not bypass durable
+metering, do not proxy arbitrary provider requests, do not use taskq admission
+as a token-budget substitute, and do not commit the partial classification
+source until this boundary is adjudicated docs-first.
 
 ### S5-QD-FR-CQ-11 — Photo verification is not read-only at the old completion boundary *(open)*
 
