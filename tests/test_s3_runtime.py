@@ -241,7 +241,7 @@ async def test_taskq_lifespan_removes_new_state_and_startup_failure_unwinds() ->
 
 @pytest.mark.parametrize(
     "version",
-    ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2"],
+    ["0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2", "0.2.3"],
 )
 async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_rejection(
     version: str,
@@ -265,6 +265,14 @@ async def test_runtime_bridge_accepts_closed_contract_set_and_keeps_prebridge_re
             supported_versions=frozenset({"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1"}),
         )
     assert exc_info.value.details == {"contract_version": "0.2.2"}
+    with pytest.raises(TaskqVersionError) as exc_info:
+        _require_supported_sql_contract(
+            "0.2.3",
+            supported_versions=frozenset(
+                {"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2"}
+            ),
+        )
+    assert exc_info.value.details == {"contract_version": "0.2.3"}
 
 
 async def test_admission_runtime_refuses_wrong_metadata_and_accepts_exact_capability() -> None:

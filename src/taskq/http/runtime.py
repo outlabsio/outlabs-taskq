@@ -35,11 +35,11 @@ logger = logging.getLogger("taskq.runtime")
 # an already-deployed runtime survive additive metadata revisions while each
 # later transport/facade surface remains separately gated.
 SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
-    {"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2"}
+    {"0.1.2", "0.1.3", "0.1.4", "0.1.5", "0.2.0", "0.2.1", "0.2.2", "0.2.3"}
 )
-ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0", "0.2.1", "0.2.2"})
-WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset({"0.2.1", "0.2.2"})
-SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.2"})
+ADMISSION_SQL_CONTRACT_VERSIONS = frozenset({"0.1.5", "0.2.0", "0.2.1", "0.2.2", "0.2.3"})
+WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset({"0.2.1", "0.2.2", "0.2.3"})
+SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.2", "0.2.3"})
 
 
 def _require_supported_sql_contract(
