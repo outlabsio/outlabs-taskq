@@ -534,6 +534,7 @@ The matrix is:
 | existing | malformed | `TQ422` before SQL |
 | existing | stale | non-retryable `TQ409`, details exactly `{"reason":"schedule_version_conflict","current_version":N}` |
 | existing | exact | conditional update |
+| retired | exact | mutation is non-retryable `TQ409`, details exactly `{"reason":"schedule_retired","current_version":N}`; exact DELETE replay remains `already_retired` |
 
 PUT's strict body contains exactly:
 

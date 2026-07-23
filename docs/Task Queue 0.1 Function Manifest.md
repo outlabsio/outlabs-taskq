@@ -1172,7 +1172,9 @@ no schedule relations before changing anything.
    matrix and authorization ordering are exact. Create stamps database
    `next_fire_at`, version 1 and uninitialized state. Exact replay returns
    `unchanged`; mismatch and stale update use only their registered reason plus
-   current version. A real update increments once, invalidates any claim, and
+   current version. Mutation of a retired definition uses only
+   `schedule_retired` plus current version; exact DELETE replay is
+   `already_retired`. A real update increments once, invalidates any claim, and
    resets compile-first state. Pausing preserves recurrence position; resuming
    increments version, invalidates any claim and resets compile-first at
    database time. Retire is permanent, idempotent and never deletes identity.
