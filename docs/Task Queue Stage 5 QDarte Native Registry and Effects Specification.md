@@ -391,6 +391,49 @@ stable job/operation identity and an independently observable receipt.
 Ambiguous execution is inspected before retry. Neither may execute from
 settlement or from a generic reporter escape hatch.
 
+#### Queue-independent LLM provider control
+
+ADR-031 adds exactly one closed reporter member,
+`llm_provider_control`, used by every native LLM family. It has no arbitrary
+method selector. A reserve request contains only:
+
+- `operation:"reserve"`;
+- the closed lane plus stable entity and operation identity;
+- one provider/model option from the stored strict task input;
+- a lowercase SHA-256 request fingerprint; and
+- a positive estimated token count bounded by the provider-control model.
+
+A settle request contains only `operation:"settle"`, the opaque reservation
+receipt, one closed `success | transport | capacity` outcome, and bounded
+request/response token counts. Neither request accepts a timestamp,
+idempotency key, queue, job, attempt, worker, prompt, provider payload,
+credential, header, exception text, or arbitrary metadata.
+
+The existing reporter-owned attempt envelope supplies attempt authority. The
+host authenticates, resolves the current task's authoritative queue, and
+authorizes `run` before body decode. It then validates the request against the
+stored strict task target and provider plan. PostgreSQL derives reservation
+identity from job, attempt and canonical request and stamps all times.
+
+Reserve replay is byte-stable. Settlement row-locks the reservation and stores
+a canonical settlement hash in its bounded metadata while recording the
+provider event and reservation transition in the same transaction. Exact
+settlement replay returns the same receipt; mismatch fails closed. Database
+expiry releases the budget hold but leaves a retained
+`expired_unsettled` unknown-cost posture. It never implies zero usage.
+
+The TripAdvisor classification order is inspect classification effect,
+reserve provider, invoke the provider in the worker, apply the classification
+effect, then settle provider. A committed effect skips provider work on
+reclaim. A hard kill after egress must converge to exactly one provider event
+or the typed expired-unsettled posture, with no double-spend and no silent
+loss. This evidence does not waive FR-04's later per-wave hard-kill gates.
+
+Extraction parity pins the pre- and post-extraction budget decision,
+reservation, failover and usage-event behavior. No native handler imports the
+old job, attempt, client, lifecycle service, reservation route or execution
+table.
+
 ### 6.3 Settlement separation
 
 The old `publish_scope` mutation inside `complete_job` is a deletion target.

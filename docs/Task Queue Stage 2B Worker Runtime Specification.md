@@ -329,3 +329,26 @@ attempt able to observe the earlier committed effect rather than repeat the
 external action. Any host adoption requires its own real SQL/HTTP race,
 response-loss, hard-kill, and resource evidence; the generic worker extension
 alone authorizes no external-effect lane.
+
+### 13.1 Closed provider-control member (ADR-031)
+
+A host may extend its reporter union with the closed
+`llm_provider_control` member when a handler must preserve a durable
+provider-budget reservation without receiving attempt identity. This is not a
+generic reporter method, provider proxy, taskq Protocol command, or queue
+admission reservation. The reporter binds the current job, attempt and worker;
+the handler supplies only one strictly bounded reserve or settle request.
+
+Reserve accepts a closed lane, entity and operation, provider and model,
+canonical request fingerprint, and token estimate. The host authenticates and
+authorizes the authoritative task queue before body decode, validates those
+fields against stored strict input, derives idempotency from the
+reporter-owned attempt, and stamps time in PostgreSQL. Settle row-locks the
+reservation and atomically records its state plus one provider event using a
+canonical settlement hash. Exact replays return the same receipt and changed
+replays fail closed.
+
+An expired unsettled reservation releases its budget hold but remains a typed
+`expired_unsettled` unknown-cost record; it is never represented as zero
+usage. Every adopting side-effecting lane must prove hard-kill reclaim through
+that state machine and does not inherit evidence from a pure-lane drill.
