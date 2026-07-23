@@ -302,7 +302,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-02 — Inconsistent follow-up holder has no declared internal-error raise *(open)*
+### S5-QD-FR-CQ-02 — Inconsistent follow-up holder has no declared internal-error raise *(resolved)*
 
 **Blocking evidence:** the migration-0008 collision vector can encounter an
 active job that already owns the derived `chain:<parent_job_id>:<step>` key but
@@ -314,7 +314,7 @@ the wrong child; treating it as deterministic `TQ422` would misclassify database
 state as caller input. Implementation stopped with migration 0008 and its tests
 uncommitted.
 
-**Recommendation:** use the existing registered non-retryable `TQ500` internal
+**Resolution (owner-approved 2026-07-23):** use the existing registered non-retryable `TQ500` internal
 error for this residual invariant breach. Amend Manifest §15.2 and the
 `complete_job` raises row docs-first to include `TQ500` only for inconsistent
 derived-key holders; keep the helper private, migration identity/signature and

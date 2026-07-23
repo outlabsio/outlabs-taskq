@@ -259,7 +259,7 @@ END $$;
 |---|---|---|---|
 | `taskq.claim_jobs(...) RETURNS taskq.claim_batch` | spec §5.3 wrapped per H-01: resolve queue first (`unknown_queue`/`paused` states), targeted claim miss → `unavailable`, else SKIP-LOCKED batch → `claimed`/`empty`; input bounds validated (batch 1–50, lease 15–86400) | TQ422 | T2-CLAIM, T3-RACE, B3 |
 | `taskq.heartbeat(...)` | spec §5.4 + lease-override bounds (TQ422) | TQ422 | T2-HB |
-| `taskq.complete_job(...)` | spec §5.5 (v1.6), ADR-007/024 lossless follow-ups, verb-aware replay (H-03) | TQ422; TQ501 only when connected to a supported pre-0008 database | T2-COMPLETE, T3-SETTLE, T3-FOLLOWUP |
+| `taskq.complete_job(...)` | spec §5.5 (v1.6), ADR-007/024 lossless follow-ups, verb-aware replay (H-03) | TQ422; TQ500 only for an inconsistent derived-key holder; TQ501 only when connected to a supported pre-0008 database | T2-COMPLETE, T3-SETTLE, T3-FOLLOWUP |
 | `taskq.fail_job(...)` | spec §5.6 (v1.6) + verb-aware replay | TQ422 | T2-FAIL |
 | `taskq.snooze_job(...)` | spec §5.7 + reject negative delay (TQ422, replacing silent clamp) | TQ422 | T2-SNOOZE |
 | `taskq.release_job(...)` | below | TQ422 | T2-RELEASE |
@@ -648,6 +648,10 @@ Resolved when migration 0001 + the harness first met live PostgreSQL (42/42 cont
 8. **Historical 0.1.2 posture:** no operator-minimal `list_jobs` existed. ADR-017 corrected the adopted Protocol
    drafting error: SQL contract 0.1.2 contains neither a `list_jobs` function nor a safe general-list
    projection. ADR-019 / contract 0.1.3 supersedes that posture with only §4.1's exact finite page.
+9. **Follow-up collision classification:** §15.5's inconsistent derived-key holder is the existing
+   registered, non-retryable `TQ500` internal error, not deterministic `TQ422`. It indicates that
+   database state already violates the derived-child invariant. The error unwinds the complete
+   transaction and exposes no partial parent or child mutation; it adds no SQL identity or wire shape.
 
 ## 9. Contract patch 0.1.1 — ADR-012 (2026-07-18)
 
@@ -823,7 +827,7 @@ metadata exactly `0.1.5` and the exact 0007 capability set before changing anyth
 
    ```text
    taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb) -> taskq.settle_result
-   EXEC taskq_runner; raises TQ422
+   EXEC taskq_runner; raises TQ422; TQ500 only for an inconsistent derived-key holder
    ```
 
    On a pre-0008 supported database, non-empty follow-ups retain the existing `TQ501` inactive
@@ -836,7 +840,7 @@ metadata exactly `0.1.5` and the exact 0007 capability set before changing anyth
      -> TABLE(job_id uuid, created boolean)
    arguments: parent_job_id, parent_queue, closed child spec, one-based spec index
    owner taskq_owner; SECURITY DEFINER; pinned search_path; VOLATILE; PUBLIC revoked;
-   no application-role EXECUTE; raises TQ422
+   no application-role EXECUTE; raises TQ422; TQ500 only for an inconsistent derived-key holder
    ```
 
    It is not a protocol command. It validates the closed Protocol §2.7 child object, resolves the
