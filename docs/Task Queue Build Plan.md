@@ -249,6 +249,14 @@ QDarte: sync HTTP client, queue-scoped service token, one non-chaining lane, sha
 
 0.2: lossless-atomic followups (`_enqueue_followup`), dependencies/workflows, schedules (+ seeded janitor row replacing the tick trigger), replace/by-args uniqueness one at a time, completion handles, SSE bridge (per amended Growth §5) — each behind a capability flag and `TQ501` until active. 0.3: partitioned archive (R2-13 ordering), redirect DLQs if ever needed, dedicated-DB topology docs+guard (accepted shape in Growth §3/R2-15), maintenance CLI with version-aware credentials.
 
+**QDarte full-replacement 0.2 program frozen:** FR-01's closed executable
+inventory narrows immediate delivery to lossless follow-ups,
+dependencies/workflows, schedules, and only finite operator projections that
+pass their own B9 gate. The [native orchestration specification](./Task%20Queue%200.2%20Native%20Orchestration%20Specification.md)
+reserves migrations 0008–0010, requires a bridge before every SQL revision,
+and forbids QDarte from emulating a missing primitive. Other 0.2 growth items
+remain separate and do not preempt full replacement.
+
 ## Standing rules while building
 
 - ADRs and the two canonical contract docs win every conflict; changing them is a new ADR, not an edit.
