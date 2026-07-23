@@ -1,6 +1,6 @@
-# taskq — 0.1.x Function Manifest
+# taskq — 0.1.x / 0.2.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.1.5 — 2026-07-22. Closes R2-08 and incorporates ADR-012/013/019/021/023: every function the 0.1.x contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11 or the Durable Admission Reservation Specification as amended here). Migrations 0001 + 0002 + 0003 + 0004 + 0005 + 0006 + 0007 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.1.5 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.2.0 — 2026-07-22. Closes R2-08 and incorporates ADR-012/013/019/021/023/024: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0008 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.0 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -72,6 +72,7 @@ CREATE TYPE taskq.admission_cancel_result AS (
 | `taskq.claim_janitor_due()` | below |
 | `taskq.refresh_stats_snapshot()` | below |
 | `taskq.has_capability(name)` | below |
+| `taskq._enqueue_followup(parent_job_id,parent_queue,spec,spec_index)` | owner-only 0.2 body specified by §15; absent before migration 0008 |
 
 ```sql
 -- Longest valid UTF-8 prefix within a byte budget. Owner-only: no application
@@ -258,7 +259,7 @@ END $$;
 |---|---|---|---|
 | `taskq.claim_jobs(...) RETURNS taskq.claim_batch` | spec §5.3 wrapped per H-01: resolve queue first (`unknown_queue`/`paused` states), targeted claim miss → `unavailable`, else SKIP-LOCKED batch → `claimed`/`empty`; input bounds validated (batch 1–50, lease 15–86400) | TQ422 | T2-CLAIM, T3-RACE, B3 |
 | `taskq.heartbeat(...)` | spec §5.4 + lease-override bounds (TQ422) | TQ422 | T2-HB |
-| `taskq.complete_job(...)` | spec §5.5 (v1.6) + verb-aware replay (H-03) | TQ422, TQ501 | T2-COMPLETE, T3-SETTLE |
+| `taskq.complete_job(...)` | spec §5.5 (v1.6), ADR-007/024 lossless follow-ups, verb-aware replay (H-03) | TQ422; TQ501 only when connected to a supported pre-0008 database | T2-COMPLETE, T3-SETTLE, T3-FOLLOWUP |
 | `taskq.fail_job(...)` | spec §5.6 (v1.6) + verb-aware replay | TQ422 | T2-FAIL |
 | `taskq.snooze_job(...)` | spec §5.7 + reject negative delay (TQ422, replacing silent clamp) | TQ422 | T2-SNOOZE |
 | `taskq.release_job(...)` | below | TQ422 | T2-RELEASE |
@@ -624,7 +625,14 @@ END $$;
 
 ## 7. Explicitly absent from the 0.1 migration
 
-`_enqueue_followup`, `cancel_dependents` (the 0.1 bodies above call it guarded — the migration ships a no-op-absent-deps stub is **not** allowed; instead the 0.1 bodies omit the call lines entirely), `finalize_dep_stragglers`, `finalize_workflows`, `create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every 0.2/0.3 composite field. SQL contract 0.1.5's read-model surface still contains only the three finite H-08 views; general/all-queue, arbitrary-filter, payload, and timeline lists remain absent. ADR-023's admission functions are the separate producer surface defined in §14. The migration generator strips the lines marked `[0.2]`/`[0.3]` from the reference bodies; T2 asserts the 0.1 catalog contains exactly this manifest's function set.
+Before 0008, `_enqueue_followup` is absent. In 0.2.0 it is activated exactly as §15 defines.
+`cancel_dependents`, `finalize_dep_stragglers`, `finalize_workflows`,
+`create_workflow`/`cancel_workflow`, the schedule trio, all archive objects/functions, every list
+form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every later 0.2/0.3
+composite field remain absent. SQL contract 0.2.0's read-model surface still contains only the
+three finite H-08 views; general/all-queue, arbitrary-filter, payload, workflow and timeline lists
+remain absent. ADR-023's admission functions are the separate producer surface defined in §14.
+T2 asserts each installed contract's catalog contains exactly its manifest function set.
 
 ## 8. Errata — Stage-1 integration reconciliations (2026-07-18)
 
@@ -805,3 +813,70 @@ durable two-phase admission primitive.
    T2/T3/T6 cover every outcome plus reserve/finish/cancel races, response loss, expiry takeover,
    backpressure rollback, retention, authorization order, strict wire models, SQL/HTTP parity,
    and bounded cleanup.
+
+## 15. Contract 0.2.0 — ADR-024 native follow-ups (2026-07-22)
+
+Immutable migration `0008_followups.sql` is the sole activation vehicle. It requires contract
+metadata exactly `0.1.5` and the exact 0007 capability set before changing anything.
+
+1. **Public identity.** No public SQL function is added or removed. The existing identity remains:
+
+   ```text
+   taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb) -> taskq.settle_result
+   EXEC taskq_runner; raises TQ422
+   ```
+
+   On a pre-0008 supported database, non-empty follow-ups retain the existing `TQ501` inactive
+   behavior. On 0.2.0, capability `followups` selects the ADR-007/024 body.
+
+2. **Private helper.** Migration 0008 adds exactly:
+
+   ```text
+   taskq._enqueue_followup(uuid,text,jsonb,integer) -> taskq.enqueue_result
+   arguments: parent_job_id, parent_queue, closed child spec, one-based spec index
+   owner taskq_owner; SECURITY DEFINER; pinned search_path; VOLATILE; PUBLIC revoked;
+   no application-role EXECUTE; raises TQ422
+   ```
+
+   It is not a protocol command. It validates the closed Protocol §2.7 child object, resolves the
+   inherited queue, derives `chain:<parent_job_id>:<step>`, performs ordinary enqueue validation
+   and insertion while omitting only producer `max_depth`, emits the ordinary enqueue event/notify,
+   and returns truthful `created | existed`. It accepts no caller-supplied key, parent, workflow,
+   dependency, status, actor, fence, concurrency/affinity key or backoff override from `p_spec`.
+
+3. **Validate before mutation.** `complete_job` lock-and-read/replay handling remains first. For a
+   live matching attempt it validates: JSON array, count at most 20, object items, exact allowed
+   key set, required/unique step grammar, required job type, JSON object payload/headers, all
+   ordinary bounds, and every resolved queue's existence. Any deterministic error is `TQ422`
+   before parent, attempt, event or child mutation.
+
+4. **One transaction.** Parent and attempt success, succeeded event, every helper call and every
+   child event/notify commit together. No savepoint catches a child failure. A residual failure
+   unwinds all effects. Same-verb replay returns `already_settled` before validation/helper calls;
+   stale and cross-verb outcomes retain H-03 behavior.
+
+5. **Depth and key rules.** Follow-ups are continuations of accepted work, so the private helper
+   does not run producer `max_depth`. All other profile and field limits apply. A duplicate derived
+   active key resolves through the ordinary authoritative convergence path and returns `existed`;
+   any inconsistent holder is a registered internal failure, never a second child.
+
+6. **Metadata and compatibility.** Migration 0008 replaces metadata by exact equality:
+
+   ```json
+   {"active":["admission_reservations","followups","read_model_list_ready"]}
+   ```
+
+   and sets contract version `0.2.0`. The bridge set is exactly
+   `{0.1.2, 0.1.3, 0.1.4, 0.1.5, 0.2.0}`. It exposes typed follow-ups only when capability metadata
+   contains `followups`; applying 0008 raises the database rollback floor to that bridge.
+   Deactivation requires a later immutable metadata migration.
+
+7. **Authorization parity.** Direct SQL uses the trusted runner-role boundary. HTTP authenticates,
+   projects and authorizes the parent queue before body decode, then authorizes `run` for every
+   distinct resolved child queue before calling SQL. Any denial makes zero settlement/child change.
+
+8. **Evidence.** `verify()` and independent catalog parity assert the exact helper identity,
+   hardening, grants and metadata. Fresh and 0001→0008 chains run on PostgreSQL 16 and 18. T2/T3/T6
+   cover every validation branch, 0/1/20/21 children, same/cross-queue authorization, response loss,
+   stale/cross-verb replay, child collision, concurrent completion, Nth-child rollback, depth
+   exemption, fake/SQL/HTTP graph parity, resources and artifact isolation.

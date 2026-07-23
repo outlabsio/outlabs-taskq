@@ -15,11 +15,11 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 | Doc | Contract |
 |---|---|
 | [Transport Protocol v1](./Task%20Queue%20Transport%20Protocol%20v1.md) | The wire contract: commands, outcomes, HTTP mapping, TQ registry, retry matrix, version negotiation |
-| [0.1 Function Manifest](./Task%20Queue%200.1%20Function%20Manifest.md) | The 0.1 SQL surface: every function's identity, grants, SQLSTATEs, executable body. **Migration 0001 derives from this**; where it differs from Tier-3 spec text, the manifest wins for 0.1 |
+| [0.1/0.2 Function Manifest](./Task%20Queue%200.1%20Function%20Manifest.md) | The versioned SQL surface: every function's identity, grants, SQLSTATEs and executable body. Migrations derive from this; where it differs from Tier-3 text, the manifest wins for its contract revision |
 
 ## Tier 1 — decisions
 
-[ADR-001..023](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), and ADR-023 (durable two-phase admission) are accepted. Reopening one requires new evidence and a new ADR.
+[ADR-001..024](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), ADR-023 (durable two-phase admission), and ADR-024 (native follow-up activation) are accepted. Reopening one requires new evidence and a new ADR.
 
 ## Tier 2 — operating plan
 

@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, and ADR-023 as additive protocol document revision **1.0.8** / SQL contract 0.1.5. The wire-major remains `1`. This document + its adopted base define protocol v1 for the 0.1.x contract; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, and ADR-024 as additive protocol document revision **1.0.9** / SQL contract 0.2.0. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -56,6 +56,9 @@
     0.1.5 add the reserve/finish/cancel command family defined in §2.6. It is a queue-scoped
     producer capability whose durable receipt survives planning changes and job settlement. It
     does not change ordinary enqueue identity, active-key reuse, IAM grammar, or wire major.
+16. **ADR-024 native follow-up activation:** protocol document revision 1.0.9 and SQL contract
+    0.2.0 activate the existing complete command's closed follow-up field as specified in §2.7.
+    No route, settle result, TQ code, IAM action, or wire-major changes.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -342,6 +345,57 @@ retry loop. A competing `pending` caller does not plan or finish; it waits using
 database-derived delay with jitter. SQL contract 0.1.5 advertises capability
 `admission_reservations`. A route-free bridge may support 0.1.5 metadata without exposing these
 commands; a feature runtime mounts them only after startup proves both 0.1.5 and that capability.
+
+### 2.7 Native follow-ups (document revision 1.0.9)
+
+`POST /taskq/v1/jobs/{id}/complete` retains its existing command identity,
+attempt/fence fields, results, status mapping and replay rules. SQL contract
+0.2.0 activates its optional `followups` member when metadata contains
+`followups`; older supported databases still return `TQ501` for a non-empty
+list.
+
+The request's strict `followups` value is `null`, omitted, or an array of at
+most 20 objects. Each object has exactly:
+
+| Field | Contract |
+|---|---|
+| `step` | required unique ASCII label, 1–64 bytes, `[A-Za-z0-9][A-Za-z0-9._-]*` |
+| `job_type` | required ordinary bounded job type |
+| `queue` | optional canonical queue; omission resolves to the parent queue |
+| `payload` | optional JSON object, default `{}`, H-09 payload bound |
+| `headers` | optional JSON object, default `{}`, H-09 headers bound |
+| `priority` | optional ordinary enqueue bound/default |
+| `max_attempts` | optional ordinary enqueue bound/default |
+| `lease_seconds` | optional ordinary enqueue bound/default |
+| `scheduled_at` | optional ordinary enqueue timestamp |
+
+Unknown members, duplicate steps, malformed values and unknown queues are
+`TQ422`. Callers cannot supply idempotency key, job id, parent id, workflow,
+dependency, actor, fence, concurrency key, affinity key, backoff fields, status
+or result. The engine derives each child idempotency key from the stable parent
+job id and `step`; neither key nor resolved child ids are added to the complete
+response.
+
+Processing order is normative:
+
+1. authenticate and project the parent job without exposing its fence;
+2. authorize `run` on the authoritative parent queue;
+3. strictly decode the complete request;
+4. resolve inherited child queues and authorize `run` on every distinct child
+   queue, with zero SQL settlement on any denial; and
+5. call the existing `taskq.complete_job` once.
+
+The SQL transaction validates every child before changing the parent, then
+settles parent/attempt and inserts all children atomically. Any child failure
+rolls the transaction back. Same-command response-loss replay returns
+`already_settled` before follow-up validation and creates nothing new. A stale
+fence remains `lost`; cross-verb replay remains `settle_conflict`.
+
+`created` and derived-key `existed` children both make the parent completion
+successful. Follow-up admission is exempt only from producer `max_depth`; all
+other limits and validation remain. The worker receives no enqueue command or
+producer permission. Its typed registry must predeclare every possible child
+queue/type target and construction fails on an undeclared target.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 

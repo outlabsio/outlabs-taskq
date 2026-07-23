@@ -29,5 +29,6 @@
 | [021](./ADR-021-read-model-conformance-repairs.md) | Read-model conformance repairs and release compatibility | S5-CQ-02, S5-CQ-03, S5-CQ-04 |
 | [022](./ADR-022-trusted-worker-side-effect-reporter.md) | Trusted worker side-effect reporter | S5-QD-CV-CQ-01 |
 | [023](./ADR-023-durable-two-phase-admission.md) | Durable two-phase admission | S5-QD-C6-CQ-03 |
+| [024](./ADR-024-native-followup-activation.md) | Native lossless follow-up activation | S5-QD-FR-02A |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.
