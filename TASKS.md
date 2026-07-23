@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches exact-pin a7 in API/workers; canonical models live under `qdarte_runtime.core.tasking`; the native catalog plus first bound pure handler pass 1163/1163 runtime tests with clean Ruff/196-file MyPy and 635/635 worker tests with clean Ruff/55-file MyPy. The closed inventory is 274 files/23 declarations/21 handlers/30 relations/130 routes, including an executable source-backed effect-owner oracle for every native task. The API's unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. No worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | FR-03C is paused at S5-QD-FR-CQ-09 before the first native follow-up handler: nine legacy payloads obtain scope identity from old job-envelope columns that do not exist in taskq. Scope authority must move into the strict native payload docs-first; headers/settings/adapters are forbidden |
+| Next review | S5-QD-FR-CQ-09 is resolved docs-first: every native payload owns required QDarte scope identity, headers/settings cannot carry authority, and current follow-ups preserve parent scope. Implement the 21-task equality/negative vectors before resuming `content_enrich_scope` |
 
 ## Now
 
@@ -333,7 +333,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-09 — Native payloads omit legacy envelope scope authority *(open)*
+### S5-QD-FR-CQ-09 — Native payloads omit legacy envelope scope authority *(resolved: scope belongs to the typed payload)*
 
 **Blocking evidence:** FR-03C began deriving native `Followup` values for
 `content_enrich_scope`. Its old handler builds child jobs from
@@ -360,6 +360,15 @@ settlement. No taskq SQL, wire, migration or generic job column is proposed.
 **Stop:** do not implement `content_enrich_scope` follow-ups, do not place
 scope in headers/settings, and do not construct an old job envelope as a
 bridge.
+
+**Resolution:** the FR-03 specification now requires every native input to
+carry canonical `scope_kind` and `scope_key`. Existing narrow literals remain
+unchanged; the nine omissions inherit the finite QDarte `ScopeKind` union and
+bounded key. Headers are diagnostics, settings are dependencies, and neither
+may carry scope authority. Current follow-ups preserve the parent identity;
+reporters validate the stored payload. The implementation must make all 21
+fields required and prove missing/conflicting scope fails before settlement.
+No taskq SQL, wire, migration or generic job-column change is needed.
 
 ### S5-QD-FR-CQ-08 — The 12 old result routes are not the complete native effect surface *(resolved: complete per-task effect inventory)*
 

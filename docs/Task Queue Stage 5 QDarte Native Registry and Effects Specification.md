@@ -57,6 +57,30 @@ Unbounded arbitrary result dictionaries are forbidden from the native
 registry. A task that intentionally has no domain result uses an explicit
 empty result model rather than `None`.
 
+Every native input also owns its complete authoritative QDarte scope identity:
+
+```text
+scope_kind: ScopeKind
+scope_key: bounded non-empty string
+```
+
+Existing task contracts whose `scope_kind` is already narrower retain that
+narrow literal. The nine former payloads that relied on the old job envelope
+(`content_enrich_scope`, `content_synthesis_scope`,
+`editorial_enrich_scope`, `frontend_deploy_scope`,
+`listing_research_scope`, `photo_find_scope`, `photo_verify_scope`,
+`region_rescue_scope`, and `review_scope`) use the closed `ScopeKind` union and
+the same bounded key in their native models. A producer may narrow a task
+further, but may not omit either field.
+
+Taskq headers contain diagnostics only. They never carry QDarte scope
+authority. Runtime settings provide process dependencies only. A native
+follow-up copies its parent's scope identity unless the target's typed input
+defines and validates an explicit derived identity; no current FR-03 graph
+uses such a derivation. Missing or conflicting scope therefore fails typed
+payload/follow-up validation before settlement. Reporters obtain scope from
+the authoritative stored native payload, never a handler echo.
+
 ## 4. One task definition
 
 QDarte runtime owns one queue-neutral `NativeTaskDefinition` for each of the 21
@@ -224,7 +248,8 @@ because taskq receives complete/fail/release.
 - give every task a strict output model;
 - encode retry, lease, resource, follow-up, and effect metadata;
 - reject both non-executable declarations; and
-- prove four-way set equality and serialization stability.
+- prove four-way set equality, required scope identity on all 21 inputs, and
+  serialization stability.
 
 ### FR-03C — native handler bindings
 
