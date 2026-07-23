@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 and FR-02A are complete; FR-02B now owns native dependencies/workflows before any all-lane replacement may begin. Production remains untouched |
 | Suite | taskq 560/560 regular with 1 opt-in skip on local PostgreSQL 18.3 and a disposable exact 16.14 container after immutable migration 0010; the expanded million-row claim/dependency/finalizer/schedule plan gate is 2/2 on both majors, and Ruff/format are clean. The prior 0.2.1 DB-free and complete Python 3.12/3.13 × core/HTTP/OutLabs artifact matrix remains the accepted surface baseline; FR-02C-AUDIT owns its exact-0.2.2 repeat. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers through 0007; QDarte remains pinned to immutable a6 until the native-orchestration release is deliberately cut |
 | Contracts | Protocol v1 document revision 1.0.11 + Function Manifest/installed SQL 0.2.2 through immutable migrations 0001–0010 (+ ADR-012..027). `followups`, `dependencies_workflows`, `read_model_list_ready`, `admission_reservations`, and `schedules` are active by exact metadata; schedule HTTP/runtime surfaces remain absent until FR-02C-SURFACE. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | FR-02C-SQL is complete. FR-02C-SURFACE is next: deterministic calendar evaluation, operator facade/clients, capability-gated schedule housekeeper runtime and fake/SQL/HTTP parity. No production deployment, QDarte migration, old-ledger import or C8 observation has occurred |
+| Next review | FR-02C-SQL is complete. FR-02C-SURFACE stopped at S5-QD-FR-CQ-05 before route implementation: the seeded maintenance schedule has no queue authorization source and cannot satisfy the public job-schedule profile. Owner adjudication and a docs-first amendment are required; no facade behavior has been improvised. No production deployment, QDarte migration, old-ledger import or C8 observation has occurred |
 
 ## Now
 
@@ -315,6 +315,30 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-05 — The seeded maintenance schedule has no public HTTP authorization or profile shape *(open)*
+
+**Blocking evidence:** Protocol §2.9 defines GET/PUT/DELETE schedule routes as
+`control`-authorized on an authoritative queue and freezes an exact public
+profile whose target is a queue-bound job. Migration 0010 also creates the
+caller-immutable `taskq-janitor-daily` definition with target
+`{"kind":"maintenance","maintenance":"janitor"}`. Its authorization projection
+necessarily has no queue, while direct `get_schedule` returns that maintenance
+target. The Protocol says the reserved definition has no HTTP mutation route,
+but does not say whether GET is hidden, globally authorized, or allowed to
+return a second wire shape. The facade therefore cannot mount the frozen routes
+without either inventing authority, leaking an uncontracted profile, or
+silently creating a special case.
+
+**Recommendation awaiting owner decision:** keep package-owned maintenance
+definitions on the manifest-backed direct-SQL operator/housekeeper surface
+only. Every HTTP schedule route treats a maintenance projection as absent using
+the same hiding response as an unknown name; no maintenance target crosses the
+wire. Ordinary queue-bound job schedules retain the exact §2.9 behavior.
+Record this as an ADR-028-class Protocol 1.0.12 amendment, clarify that the
+direct-SQL operator profile is the finite privileged introspection surface, and
+add GET/PUT/DELETE hiding-equality plus zero-mutation vectors. No SQL or
+migration change is required.
 
 ### S5-QD-FR-CQ-04 — PostgreSQL owns due truth but cannot natively compile cron, and janitor takeover cannot use runner authority *(resolved: ADR-027)*
 
