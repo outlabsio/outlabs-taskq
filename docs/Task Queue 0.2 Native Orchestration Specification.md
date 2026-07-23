@@ -1,7 +1,7 @@
 # Task Queue 0.2 — native orchestration specification
 
-> **Status:** frozen by S5-QD-FR-02-SPEC on 2026-07-22; FR-02A is
-> complete and ADR-026 freezes FR-02B at Protocol 1.0.10 / SQL 0.2.1.
+> **Status:** frozen by S5-QD-FR-02-SPEC on 2026-07-22; FR-02A/B are
+> complete and ADR-027 freezes FR-02C at Protocol 1.0.11 / SQL 0.2.2.
 >
 > **Authority:** Tier 3. This narrows ADR-007/009/011 and the Unified Design
 > Spec to the minimum reusable surface demonstrated by QDarte FR-01. Tier-0
@@ -183,8 +183,21 @@ database-stamped `next_fire_at`, `catchup_policy = skip | fire_once | fire_all`,
 and monotonic definition version. Updates are conditional; stale versions use
 the established non-retryable conflict posture.
 
-Definition/update/delete are operator-only through the separate operator pool,
-with target-queue authorization.
+ADR-027 narrows this to the exact Protocol §2.9 definition. Ordinary one-time
+delay and retry remain job `scheduled_at`; they are not schedule rows. Interval
+recurrence is fixed elapsed time anchored on the prior due instant. Cron uses
+the package's closed five-field grammar and explicit gap/fold semantics. A
+new or resumed definition is compile-first: SQL stamps an immediately due
+uninitialized row, then the first claimed evaluation emits no occurrence and
+advances from database `as_of`. Creation can never accidentally fire.
+
+Definition read/put/retire are operator-only through the separate operator
+pool, with target-queue authorization. Existing mutations authorize the
+authoritative old queue before body decode and a changed new queue before SQL.
+Retirement is permanent and retains occurrence identity; no physical delete
+exists. The only non-job target is the migration-seeded, caller-immutable
+`maintenance:janitor` row. There is no dynamic function, callback or payload
+factory target.
 
 ### 6.2 Claim and fire
 
@@ -198,8 +211,18 @@ row. Occurrence keys derive from schedule id plus due instant. Response-loss
 replay cannot duplicate. `schedule_error` records bounded diagnostics and
 releases/backs off without advancing.
 
-Migration 0010 seeds the daily janitor schedule. Exact capability state disables
-the 0.1 hardwired daily branch, so the two triggers cannot coexist.
+`skip` drops all currently missed occurrences and moves after database `as_of`.
+`fire_once` emits the latest missed occurrence and moves after `as_of`.
+`fire_all` emits oldest-first up to the per-definition bound and retains a due
+next instant if backlog remains. SQL can validate the policy-shaped finite
+list, lock/token/version and atomic job/advance relationship; the package
+calendar evaluator alone computes recurrence from the claim's database
+instants. Exact last-action token/input replay returns the stored outcome.
+
+Migration 0010 seeds the daily UTC janitor schedule and changes `tick` in the
+same transaction so the 0.1 hardwired branch is inert. The seeded action invokes
+only the existing bounded janitor function; no ordinary runner receives
+housekeeper authority and the two triggers cannot coexist.
 
 Evidence covers timezone/DST edges, interval/cron, all catch-up policies after
 long downtime, racing housekeepers, response/token loss, definition races,

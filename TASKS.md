@@ -27,8 +27,8 @@
 |---|---|
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 and FR-02A are complete; FR-02B now owns native dependencies/workflows before any all-lane replacement may begin. Production remains untouched |
 | Suite | taskq 548/548 regular with 1 opt-in skip on local PostgreSQL 18.3 and a disposable exact 16.14 container after immutable migration 0009; the expanded million-row claim/dependency/finalizer plan gate is 2/2 on both majors, DB-free is 323/323, Ruff/format are clean, and the current wheel/sdist passes the complete Python 3.12/3.13 × core/HTTP/OutLabs isolation matrix. Exact-tip CI and a final dual-major repeat remain under FR-02B-AUDIT. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers through 0007; QDarte remains pinned to immutable a6 until the native-orchestration release is deliberately cut |
-| Contracts | Protocol v1 document revision 1.0.10 + Function Manifest/installed SQL 0.2.1 (+ ADR-012..026) through immutable migrations 0001–0009. `followups` and `dependencies_workflows` are active; schedules and finite orchestration projections remain absent. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
-| Next review | FR-02B dependencies/workflows is complete through immutable SQL, all public surfaces and independent self-audit. FR-02C-SPEC is now the sole next item: freeze schedules, database-clock firing/catch-up, housekeeper ownership and exact evidence before any SQL 0010; no production deployment, QDarte migration, old-ledger import or C8 observation is part of the active goal |
+| Contracts | Protocol v1 document revision 1.0.11 + Function Manifest target SQL 0.2.2 (+ ADR-012..027); installed SQL remains 0.2.1 through immutable migrations 0001–0009 until the bridge and 0010 land. `followups` and `dependencies_workflows` are active; `schedules` is frozen but inactive and finite orchestration projections remain absent. ADR-018 locks operator UI stack (React/Vite/TanStack/Base UI) |
+| Next review | Owner-approved ADR-027 freezes FR-02C schedules docs-first: compile-first database-time recurrence, finite operator definitions, direct-SQL housekeeper fencing and one reserved janitor takeover. FR-02C-BRIDGE is next; no SQL 0010, production deployment, QDarte migration, old-ledger import or C8 observation has occurred |
 
 ## Now
 
@@ -53,6 +53,11 @@
     - [x] **FR-02B-SURFACE · Generated workflow surface and parity complete** — Protocol 1.0.10's three workflow routes now come solely from the hand-audited HTTP catalog and remain absent unless a runtime explicitly enables exact 0.2.1 plus `dependencies_workflows`; cancellation additionally requires the separate operator transport. Create/member/seal/cancel derive actors from authentication, expose only the strict two-field workflow projection, and authorize the path then every authoritative declared queue before dependency access. Both HTTP clients, the high-level `TaskQ` facade and the native testing fake implement the same workflow producer contracts; workflow step keys safely drive response-loss retry without requiring a competing idempotency domain. Live vectors prove byte-identical create/member/seal replay, raw SQL/HTTP/fake state parity, dependency promotion, exact OpenAPI shapes, all-queue denial with zero writes, authenticate/path-authorize-before-decode, sync/async actor non-serialization, runtime/route absence below the capability gate and fake cancellation convergence. Local evidence is 548/548 plus one opt-in skip on PG18.3 and exact PG16.14, 323 DB-free, 2/2 plan gates on both majors, Ruff/format clean and a full Python 3.12/3.13 wheel/sdist × core/HTTP/OutLabs smoke. FR-02B-AUDIT owns publication and the final exact-tip repeat; no QDarte or production state changed.
     - [x] **FR-02B-AUDIT · Workflow completion evidence** — the independent source/Tier-0 pass confirms route identities, 202/200 cancellation outcomes, strict request/projection shapes, capability/contract gates, authentication and queue-authorization ordering, actor non-serialization, separate operator authority and no generic client escape around disabled routes. It found and closed two fake-only parity defects before acceptance: dependency sets are now order-canonical and an outside-declaration queue uses the contracted validation class; reversed fan-in, outside-queue, cancellation denial and cancel-bound vectors pin the corrections. Exact-tip CI run `29988702521` is green across SQL contract PostgreSQL 16/18, races/resources, Stage-3 security parity, Python 3.12/3.13 unit/import isolation and both complete installed-artifact matrices. Local evidence independently records 548/548 plus one opt-in skip on PG18.3 and exact PG16.14, 2/2 million-row plans on both, 323 DB-free, Ruff/format and all 12 Python 3.12/3.13 wheel/sdist × core/HTTP/OutLabs combinations. No Contract questions, QDarte state or production state changed; FR-02C-SPEC alone may open.
   - [ ] **FR-02C · Schedules** — freeze and ship immutable migration 0010 plus operator definitions, housekeeper claims/fires/errors, database-clock catch-up, seeded janitor takeover and race/plan evidence.
+    - [x] **FR-02C-SPEC · Native schedule contract frozen docs-first** — owner-approved ADR-027, Protocol 1.0.11 and Function Manifest target 0.2.2 freeze compile-first definitions, a closed five-field cron/interval evaluator fed only database instants, explicit DST and catch-up semantics, operator GET/PUT/retire with authoritative queue authorization, fenced direct-SQL housekeeper claim/fire/error, response-loss replay, permanent occurrence identity and the sole caller-immutable `maintenance:janitor` exception. Migration 0010 must seed the daily UTC janitor and disable the hardwired tick branch atomically. No SQL, migration, Python source, package, QDarte database, queue, worker or production state changed; bridge support is next.
+    - [ ] **FR-02C-BRIDGE · 0.2.2 runtime floor** — extend ADR-020's closed set before migration while exposing no schedule surface or loop without exact metadata.
+    - [ ] **FR-02C-SQL · Immutable schedule kernel** — implement 0010, exact catalog/privilege/metadata verification, definition/action outcomes, race and dual-major full-chain proofs.
+    - [ ] **FR-02C-SURFACE · Calendar/runtime/operator parity** — ship the deterministic evaluator, operator facade/clients, schedule housekeeper loop and native fake with SQL/HTTP/fake parity.
+    - [ ] **FR-02C-AUDIT · Schedule completion evidence** — repeat dual-major, DST/catch-up/race/plan/resource and complete installed-artifact matrices before FR-02D.
   - [ ] **FR-02D · Finite operator projections** — independently contract, plan-test and activate only running/finished/workflow/timeline projections that meet their exact B9 and redaction gates.
   - [ ] **FR-02-AUDIT · Native orchestration completion** — dual-PG full-chain, graph/schedule/recovery/resource, parity, packaging and independent-oracle acceptance before FR-03 consumes 0.2.
 
@@ -310,6 +315,31 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-04 — PostgreSQL owns due truth but cannot natively compile cron, and janitor takeover cannot use runner authority *(resolved: ADR-027)*
+
+**Blocking evidence:** FR-02C requires PostgreSQL's clock to be the only due
+clock and requires migration 0010 to replace ADR-009's hardwired janitor
+trigger. Core PostgreSQL has no cron evaluator. Accepting a caller-computed
+initial `next_fire_at` would reintroduce client wall-clock truth; keeping host
+cron would retain a second scheduler; sending janitor through an ordinary job
+would grant maintenance power to a runner; and accepting a function name in a
+schedule would create an arbitrary privileged execution surface. The existing
+Tier-3 sketch did not freeze an honest boundary or public identities.
+
+**Resolution:** the owner approved ADR-027. SQL stamps a compile-first due row
+and projects only database `as_of`/due instants to one package-owned closed
+interval/five-field-cron evaluator with explicit DST semantics. The first
+evaluation emits nothing, so create/resume cannot accidentally fire.
+Subsequent finite `skip|fire_once|fire_all` lists are token/version validated
+and atomically become permanently keyed jobs plus strict advancement.
+Housekeeper actions are direct SQL only. Operator schedule GET/PUT/retire is
+queue-authorized. The sole non-job target is migration-seeded,
+caller-immutable `maintenance:janitor`, which directly invokes only the
+existing bounded janitor pass while 0010 disables the old tick branch in the
+same transaction. Protocol 1.0.11, Manifest target 0.2.2 and migration 0010 are
+the exact identities; no arbitrary callback/function target or host scheduler
+is permitted.
 
 ### S5-QD-FR-CQ-03 — Multi-call workflow construction has no graph-closure linearization point *(resolved: ADR-026)*
 

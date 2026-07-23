@@ -1,6 +1,6 @@
 # taskq — 0.1.x / 0.2.x Function Manifest
 
-> **Status:** CANONICAL for SQL contract 0.2.1 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0009 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.1 — no success-returning stubs.
+> **Status:** CANONICAL for SQL contract 0.2.2 — 2026-07-23. Closes R2-08 and incorporates ADR-012/013/019/021/023/024/026/027: every function the contract ships is listed here with identity, grants, raises, and an executable body (or a pointer to its normative body in the Unified Spec §5/§11, Durable Admission Reservation Specification, or Native Orchestration Specification as amended here). Migrations 0001 through 0010 derive from THIS document; `verify()` compares the live catalog against this manifest (ADR-011 §4). A function not listed here does not exist in 0.2.2 — no success-returning stubs.
 > **Two deltas vs spec §5 (protocol v1 hole closures — where this manifest and older spec text differ, the manifest wins for 0.1):**
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
@@ -628,10 +628,11 @@ END $$;
 Before 0008, `_enqueue_followup` is absent. In 0.2.0 it is activated exactly as §15 defines.
 Before 0009, `cancel_dependents`, workflow cancellation/finalizer helpers,
 `create_workflow`/`seal_workflow`/`cancel_workflow`, and the workflow authorization projection are
-absent. In 0.2.1 they activate exactly as §16 defines. The schedule trio, all archive
-objects/functions, every list
+absent. In 0.2.1 they activate exactly as §16 defines. Before 0010, schedule
+relations/composites/functions are absent; in 0.2.2 they activate exactly as §17 defines. All
+archive objects/functions, every list
 form **other than ADR-019's exact queue-scoped `list_jobs` page**, and every later 0.2/0.3
-composite field remain absent. SQL contract 0.2.1's read-model surface still contains only the
+composite field remain absent. SQL contract 0.2.2's read-model surface still contains only the
 three finite H-08 views; general/all-queue, arbitrary-filter, payload, workflow and timeline lists
 remain absent. ADR-023's admission functions are the separate producer surface defined in §14.
 T2 asserts each installed contract's catalog contains exactly its manifest function set.
@@ -1030,3 +1031,202 @@ empty inactive workflow/dependency relations before changing anything.
     fan-in, diamond, sibling and settle/enqueue/seal/cancel races, bounded
     cascade/finalization plans, SQL/HTTP/fake parity, resource cleanup and
     installed artifacts run on PostgreSQL 16 and 18.
+
+## 17. Contract 0.2.2 — ADR-027 native schedules (2026-07-23)
+
+Immutable migration `0010_schedules.sql` is the sole activation vehicle. It
+requires contract metadata exactly `0.2.1`, the exact 0009 capability set and
+no schedule relations before changing anything.
+
+1. **Composite types.** Migration 0010 adds exactly:
+
+   ```text
+   taskq.schedule_profile AS (
+     schedule_id uuid,
+     name text,
+     target jsonb,
+     recurrence jsonb,
+     catchup_policy text,
+     max_catchup integer,
+     state text,
+     next_fire_at timestamptz,
+     last_fire_at timestamptz,
+     version bigint
+   )
+
+   taskq.schedule_auth_projection AS (
+     name text,
+     queue text
+   )
+
+   taskq.schedule_write_result AS (
+     outcome text,
+     profile taskq.schedule_profile
+   )
+
+   taskq.schedule_claim AS (
+     schedule_id uuid,
+     name text,
+     definition_version bigint,
+     as_of timestamptz,
+     target jsonb,
+     recurrence jsonb,
+     catchup_policy text,
+     max_catchup integer,
+     initialized boolean,
+     next_fire_at timestamptz,
+     token uuid,
+     lease_seconds integer
+   )
+
+   taskq.schedule_claim_batch AS (
+     state text,
+     schedules taskq.schedule_claim[]
+   )
+
+   taskq.schedule_action_result AS (
+     outcome text,
+     replayed boolean,
+     schedule_id uuid,
+     jobs_enqueued integer,
+     next_fire_at timestamptz,
+     state text,
+     version bigint
+   )
+   ```
+
+   H-02 additive-only evolution applies. Profile/auth composites expose no
+   claim token, actor, diagnostic, definition hash, lease/retry metadata or
+   maintenance internals.
+
+2. **Operator identities.** The new exact functions are:
+
+   ```text
+   taskq.put_schedule(text,jsonb,text,bigint)
+     arguments: p_name, p_definition, p_actor, p_expected_version DEFAULT NULL
+     RETURNS taskq.schedule_write_result
+     EXEC taskq_operator; raises TQ001, TQ409, TQ422
+
+   taskq.get_schedule(text)
+     arguments: p_name
+     RETURNS taskq.schedule_profile
+     EXEC taskq_operator; raises TQ001
+
+   taskq.retire_schedule(text,bigint,text)
+     arguments: p_name, p_expected_version, p_actor
+     RETURNS taskq.schedule_write_result
+     EXEC taskq_operator; raises TQ001, TQ409, TQ422
+
+   taskq.get_schedule_authorization_projection(text)
+     arguments: p_name
+     RETURNS taskq.schedule_auth_projection
+     EXEC taskq_operator; raises TQ001
+   ```
+
+   `p_definition` is the exact Protocol §2.9 PUT object. It never accepts the
+   reserved maintenance target. Expected version omission has create/exact
+   replay semantics; a positive value has compare-and-set update semantics.
+   Every identity is volatile except the stable authorization projection and
+   profile read; all are `SECURITY DEFINER`, owner-owned, path-pinned and
+   PUBLIC-revoked.
+
+3. **Housekeeper identities.** The new exact direct-SQL-only functions are:
+
+   ```text
+   taskq.claim_schedules(text,integer,integer)
+     arguments: p_worker_id, p_limit DEFAULT 10, p_lease_seconds DEFAULT 60
+     RETURNS taskq.schedule_claim_batch
+     EXEC taskq_housekeeper; raises TQ422
+
+   taskq.fire_schedule(uuid,uuid,bigint,timestamptz[],timestamptz)
+     arguments: p_schedule_id, p_token, p_definition_version,
+                p_occurrences, p_next_fire_at
+     RETURNS taskq.schedule_action_result
+     EXEC taskq_housekeeper; raises TQ001, TQ422, TQ500
+
+   taskq.schedule_error(uuid,uuid,bigint,text,integer)
+     arguments: p_schedule_id, p_token, p_definition_version, p_error,
+                p_retry_seconds DEFAULT 30
+     RETURNS taskq.schedule_action_result
+     EXEC taskq_housekeeper; raises TQ001, TQ422
+   ```
+
+   Claim limits are `1..100`, leases `5..300`, retry seconds `1..3600`, tokens
+   are non-nil and diagnostics are byte-truncated to 2,048. Action outcome is
+   one of `initialized|fired|skipped|error_recorded|stale`; exact response
+   replay returns the original outcome with `replayed=true`. A stale
+   lease/token/version is data outcome `stale`, not success and not an
+   unregistered error.
+
+4. **Stored shape and raw privilege wall.** `taskq.schedules` stores id/name,
+   target and recurrence as canonical bounded JSONB, catch-up settings,
+   `active|paused|retired` state, initialization/due/fire/version fields,
+   database claim/retry fields, byte-bounded diagnostics, actors/timestamps,
+   and one previous action token/hash/result for response replay. It has unique
+   name and bounded due-claim indexes. `taskq.schedule_occurrences` stores
+   schedule id, due instant and optional job id with permanent unique
+   `(schedule_id, due_at)` identity. Both relations are owner-only; no
+   application role or PUBLIC receives raw relation privileges.
+
+5. **Definition lifecycle.** Protocol §2.9's grammar, bounds, profile, ETag
+   matrix and authorization ordering are exact. Create stamps database
+   `next_fire_at`, version 1 and uninitialized state. Exact replay returns
+   `unchanged`; mismatch and stale update use only their registered reason plus
+   current version. A real update increments once, invalidates any claim, and
+   resets compile-first state. Pausing preserves recurrence position; resuming
+   increments version, invalidates any claim and resets compile-first at
+   database time. Retire is permanent, idempotent and never deletes identity.
+
+6. **Deterministic recurrence boundary.** SQL owns due truth, claims and
+   atomicity; the package evaluator owns only the closed interval/cron
+   calculation from `schedule_claim.as_of` and `next_fire_at`. Protocol §2.9's
+   grammar and DST rules are normative. Initial/resume compilation produces no
+   occurrence. Client wall time is never an evaluator input.
+
+7. **Fire validation and atomicity.** `fire_schedule` locks the schedule and
+   first resolves exact previous-action replay. A live action requires matching
+   token/version and unexpired database lease. It validates policy-shaped
+   cardinality/order, all occurrence instants no later than claim `as_of`, and
+   strict recurrence advancement. `fire_all` starts at authoritative
+   `next_fire_at`; `skip` is empty; `fire_once` contains exactly one due
+   instant; initialization is empty. Every job occurrence uses the permanent
+   occurrence identity and idempotency key derived from schedule id + UTC due
+   instant. All jobs, events, occurrences and schedule advancement commit
+   together. Any failure leaves all unchanged.
+
+8. **Finite janitor exception.** Migration 0010 alone seeds
+   `taskq-janitor-daily` as reserved `maintenance:janitor`, cron
+   `0 3 * * *` UTC, `fire_once`, `max_catchup=1`. Operator functions reject
+   maintenance targets and the reserved name. A successful due fire calls only
+   the existing bounded owner function `taskq.janitor()` in the same action;
+   no dynamic function selection exists. Migration 0010 replaces `taskq.tick`
+   so it no longer calls `claim_janitor_due`; the owner-only compatibility
+   helper remains inert. Seed and trigger replacement are one transaction.
+
+9. **Error and response-loss behavior.** `schedule_error` never advances
+   recurrence truth. It records a bounded error, clears the claim and stamps
+   `retry_not_before = now() + retry_seconds`. Both action functions store a
+   canonical action-input hash and bounded result; replay of the exact last
+   token/input returns the original result with `replayed=true`, while changed
+   input returns `stale`. No duplicate
+   occurrence or janitor pass can result from response loss.
+
+10. **Metadata and compatibility.** Migration 0010 replaces metadata by exact
+    equality:
+
+    ```json
+    {"active":["admission_reservations","dependencies_workflows","followups","read_model_list_ready","schedules"]}
+    ```
+
+    and sets contract version `0.2.2`. The bridge set is exactly
+    `{0.1.2, 0.1.3, 0.1.4, 0.1.5, 0.2.0, 0.2.1, 0.2.2}` and exposes no schedule
+    surface/loop without exact capability metadata. Applying 0010 raises the
+    database rollback floor to that bridge. Deactivation requires a later
+    immutable metadata migration, never manual DML.
+
+11. **Evidence.** `verify()` and an independent catalog/privilege oracle assert
+    the exact function/type/relation/index/metadata set. Fresh/full 0001→0010
+    chains, bridge negatives, all definition/action outcomes, interval/cron and
+    DST edges, all catch-up policies, response loss, skewed clocks, concurrent
+    claims/fires/updates, one-only janitor takeover, bounded plans, SQL/HTTP/fake
+    parity, resource cleanup and installed artifacts run on PostgreSQL 16/18.

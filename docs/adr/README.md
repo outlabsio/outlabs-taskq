@@ -32,5 +32,6 @@
 | [024](./ADR-024-native-followup-activation.md) | Native lossless follow-up activation | S5-QD-FR-02A |
 | [025](./ADR-025-followup-helper-return-shape.md) | Follow-up helper return shape uses existing enqueue projection | S5-QD-FR-CQ-01 |
 | [026](./ADR-026-sealed-workflow-lifecycle.md) | Sealed workflow lifecycle and native dependency activation | S5-QD-FR-CQ-03, S5-QD-FR-02B |
+| [027](./ADR-027-native-schedule-lifecycle.md) | Native recurring schedules and finite maintenance takeover | S5-QD-FR-02C |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

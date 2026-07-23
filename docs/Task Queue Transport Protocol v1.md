@@ -1,6 +1,6 @@
 # taskq — Transport Protocol v1 (canonical)
 
-> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, and ADR-026 as additive protocol document revision **1.0.10** / SQL contract 0.2.1. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
+> **Status:** CANONICAL — accepted 2026-07-18, satisfying ADR-005's Stage-0 exit requirement; amended by ADR-012 for SQL contract 0.1.1, ADR-013 for SQL contract 0.1.2, ADR-014 as additive protocol document revision 1.0.1, ADR-015 as additive protocol document revision 1.0.2, ADR-016 as additive protocol document revision 1.0.3, ADR-017 as additive protocol document revision 1.0.4, ADR-019 as additive protocol document revision 1.0.5 / SQL contract 0.1.3, ADR-020 as compatibility-only document revision 1.0.6, ADR-021 as additive protocol document revision 1.0.7 / SQL contract 0.1.4, ADR-023 as additive protocol document revision 1.0.8 / SQL contract 0.1.5, ADR-024 as additive protocol document revision 1.0.9 / SQL contract 0.2.0, ADR-026 as additive protocol document revision 1.0.10 / SQL contract 0.2.1, and ADR-027 as additive protocol document revision **1.0.11** / SQL contract 0.2.2. The wire-major remains `1`. This document + its adopted base define protocol v1; every route sketch elsewhere in the doc family is illustrative and yields to this.
 > **Adopted base:** [`design-review-2/03-protocol-draft.md`](./design-review-2/03-protocol-draft.md) §2–§6 (wire shapes, command × outcome × HTTP tables, TQ registry, retry/idempotency matrix, version negotiation) are adopted **verbatim** as protocol v1 content, as amended by §2 below. The draft's §1 decisions 1–10 are all **accepted**.
 > **Companions:** the exact SQL signatures/composites live in [`Task Queue 0.1 Function Manifest.md`](./Task%20Queue%200.1%20Function%20Manifest.md); authorization semantics in the Authorization doc (ADR-006/011).
 
@@ -63,6 +63,10 @@
     0.2.1 add the create/seal/cancel workflow commands and activate the existing enqueue
     command's reserved workflow/dependency fields as specified in §2.8. The existing IAM actions
     and TQ registry are reused; wire major remains `1`.
+18. **ADR-027 native schedules:** protocol document revision 1.0.11 and SQL contract 0.2.2
+    add the finite operator schedule definition routes and direct-SQL housekeeper
+    claim/fire/error family specified in §2.9. Database time remains authoritative and the
+    existing IAM actions and TQ registry are reused; wire major remains `1`.
 
 ### 2.1 Worker presence (document revision 1.0.1)
 
@@ -498,6 +502,107 @@ else any cancelled member yields `cancelled`, else all-success or empty yields
 `succeeded`. Individual workflow-member redrive is `TQ409` with details exactly
 `{ "reason": "workflow_member_redrive_forbidden" }`; a corrected execution uses
 a new workflow key. A future workflow-level redrive requires a new contract.
+
+### 2.9 Native recurring schedules (document revision 1.0.11)
+
+SQL contract 0.2.2 activates capability `schedules`. Before exact 0.2.2 plus
+that capability, schedule routes are absent and the runtime starts no schedule
+loop.
+
+| Command | HTTP | SQL | Authorization | Outcomes / status |
+|---|---|---|---|---|
+| get schedule | `GET /taskq/v1/schedules/{name}` | `taskq.get_schedule` | `control` on authoritative queue; separate operator transport | `ok` 200; unknown `TQ001` |
+| put schedule | `PUT /taskq/v1/schedules/{name}` | `taskq.put_schedule` | create: `control` on supplied queue; update: both authoritative old and supplied new queue | `created` 201; `unchanged` or `updated` 200 |
+| retire schedule | `DELETE /taskq/v1/schedules/{name}` | `taskq.retire_schedule` | `control` on authoritative queue; separate operator transport | `retired` or `already_retired` 200 |
+
+Housekeeper `claim_schedules`, `fire_schedule`, and `schedule_error` are
+manifest-backed direct-SQL commands only. They have no HTTP identity and are
+never generated on producer, runner, observer, or operator HTTP clients.
+The reserved seeded janitor definition has no HTTP mutation route.
+
+Schedule names are 1–120 UTF-8 bytes and match
+`[a-z0-9][a-z0-9_.-]*`. `If-Match` uses the exact strong ETag grammar
+`"taskq-schedule-<positive decimal version>"`; weak tags and `*` are invalid.
+The matrix is:
+
+| State | `If-Match` | Result |
+|---|---|---|
+| absent | absent | create |
+| existing, exact same definition | absent | `unchanged` |
+| existing, different definition | absent | non-retryable `TQ409`, details exactly `{"reason":"schedule_mismatch","current_version":N}` |
+| absent | exact | `TQ001` |
+| existing | malformed | `TQ422` before SQL |
+| existing | stale | non-retryable `TQ409`, details exactly `{"reason":"schedule_version_conflict","current_version":N}` |
+| existing | exact | conditional update |
+
+PUT's strict body contains exactly:
+
+| Field | Contract |
+|---|---|
+| `target` | job object described below; public callers cannot name maintenance |
+| `recurrence` | exactly one interval or cron object described below |
+| `catchup_policy` | `skip`, `fire_once`, or `fire_all` |
+| `max_catchup` | integer `1..100` |
+| `paused` | boolean, default `false` |
+
+A job target contains exactly `kind:"job"`, canonical `queue`, bounded
+`job_type`, `payload` object (default `{}`, at most 64KB), `headers` object
+(default `{}`, at most 8KB), and optional ordinary enqueue profile fields
+`priority` (`0..1000`), `max_attempts` (`1..100`), `lease_seconds`
+(`15..86400`), `backoff_mode` (`fixed|exponential`), `backoff_base`
+(`0..86400`), `backoff_cap` (`0..604800`), `concurrency_key` (1–255 bytes), and
+`affinity_key` (1–255 bytes). It cannot contain `scheduled_at`,
+`idempotency_key`, workflow/dependency fields, actors, fences, callbacks, SQL
+names, or dynamic factories. The database derives occurrence idempotency from
+schedule id plus the UTC due instant.
+
+An interval recurrence contains exactly `kind:"interval"` and
+`interval_seconds` in `60..31_536_000`. It is elapsed-time recurrence anchored
+to the prior due instant. A cron recurrence contains exactly `kind:"cron"`,
+five-field `expression` (minute, hour, day-of-month, month, day-of-week) at
+most 255 bytes, and canonical IANA `timezone` at most 255 bytes. The package
+grammar accepts only numeric values, `*`, lists, inclusive ranges and positive
+steps within each field's bounds; names, seconds/year fields and extension
+tokens are rejected. Day-of-month and day-of-week use traditional OR when both
+are restricted. Sunday is `0` or `7`. Nonexistent local wall times do not occur;
+ambiguous times occur once at the earlier instant.
+
+The returned schedule object contains exactly:
+
+```json
+{"name":"text","target":{"kind":"job","queue":"text","job_type":"text","payload":{},"headers":{},"priority":null,"max_attempts":null,"lease_seconds":null,"backoff_mode":null,"backoff_base":null,"backoff_cap":null,"concurrency_key":null,"affinity_key":null},"recurrence":{"kind":"interval","interval_seconds":3600},"catchup_policy":"skip","max_catchup":1,"state":"active","next_fire_at":"database timestamp","last_fire_at":null,"version":1}
+```
+
+The shape is identical on GET, PUT and DELETE; cron uses its cron recurrence
+object. `state` is `active|paused|retired`. Nullable profile fields are emitted
+explicitly. Claim tokens, actors, diagnostics, internal retry/lease state,
+definition hashes and janitor internals are absent. The response ETag always
+matches `version`.
+
+Creation is compile-first: SQL stamps an initially due uninitialized row. Its
+first successful housekeeper fire contains zero occurrences and advances to
+the first recurrence strictly after the claim's database `as_of`; no business
+or maintenance action runs. Resume follows the same rule. Later `skip`
+enqueues none, `fire_once` enqueues the latest due occurrence, and `fire_all`
+enqueues the oldest due occurrences in order up to `max_catchup`, retaining a
+due next instant when backlog remains. Definition change invalidates a live
+claim. Fire/error response replay with the exact last token and canonical input
+returns its prior outcome; changed replay input is fenced.
+
+Processing order is normative:
+
+1. authenticate;
+2. reject an invalid request id without echo only after authentication;
+3. existing GET/PUT/DELETE: obtain the safe name+queue projection, authorize
+   `control` on the authoritative queue, and only then decode mutation input;
+4. create: strictly decode, authorize `control` on the supplied queue, then
+   write; and
+5. queue-changing update: after old-queue authorization and strict decode,
+   authorize the new queue before SQL.
+
+Unknown and denied existing names follow the facade's hiding posture and leave
+schedule/job/event state unchanged. No profile or recurrence data is disclosed
+before authorization.
 
 ## 3. Stage-0 exit status (ADR-005 checklist)
 
