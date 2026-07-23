@@ -360,26 +360,42 @@ remove an existing resource and cost-control guarantee.
 
 **Recommended adjudication:** extract the existing provider guardrail into one
 queue-independent private control family used by every native LLM handler.
-Before a provider call the worker submits only the authoritative task job id,
-closed lane, provider/model option, request fingerprint and bounded token
-estimate. The host authenticates, resolves and authorizes the current task's
-authoritative queue before body decode, validates lane/provider membership
-against stored strict input, and returns a stable reservation decision. The
-worker performs the provider call itself, then settles that reservation with a
-closed success/transport/capacity classification and bounded usage. Response
-loss replays the same reservation/settlement. Credentials, prompts, provider
-bodies and exception text never cross or persist. The surface is not taskq
-Protocol v1, not a provider proxy, and imports no old queue job, attempt,
-client, lifecycle service or table.
+The control travels through the existing reporter-owned attempt boundary as a
+new closed `llm_provider_control` member; handler code still never receives an
+attempt id. Before a provider call it submits only the closed lane,
+entity/operation identity, provider/model option, request fingerprint and
+bounded token estimate. The host authenticates, resolves and authorizes the
+current task's authoritative queue before body decode, validates
+lane/entity/provider membership against stored strict input, and derives the
+reservation idempotency key from current job plus reporter-owned attempt and
+the canonical request. No caller idempotency key or timestamp is accepted;
+PostgreSQL time owns reservation and settlement instants.
+
+The worker performs the provider call itself. It then reports one closed
+success/transport/capacity settlement carrying only bounded token counts and
+safe classification. The host row-locks the reservation, validates ownership,
+stores a canonical settlement hash in the existing bounded metadata, records
+the provider event/state transition, and settles in one transaction. Exact
+settlement replay returns the same typed receipt; mismatch fails closed. The
+handler orders inspect-domain-effect → reserve-provider → call-provider →
+apply-domain-effect → settle-provider. An ambiguous domain-apply response
+therefore replays without another provider call; a process crash before apply
+may repeat provider work only under the same already-counted attempt
+reservation, matching the standing non-exact provider-read rule. Credentials,
+prompts, provider bodies and exception text never cross or persist. The
+surface is not taskq Protocol v1, not a provider proxy, and imports no old
+queue job, attempt, client, lifecycle service or table.
 
 **Required evidence:** bad credentials and queue denial precede body decode;
-wrong task/lane/provider/fingerprint and stale/cancelled attempts fail before
-reservation mutation; reserve and settle replay are byte-stable; provider
-failure leaves no domain effect; committed provider success plus lost effect
-response does not cause a second provider call; usage and effect receipts each
-conserve one logical operation; worker secrets and error text remain absent;
-all native LLM families consume this one closed control rather than inventing
-per-lane wrappers.
+wrong task/lane/entity/provider/fingerprint and stale/cancelled attempts fail
+before reservation mutation; client time and caller idempotency are impossible
+by model shape; reserve and settle replay are byte-stable; a settlement race
+records one event and one state transition; provider failure leaves no domain
+effect; committed provider success plus lost effect response does not cause a
+second provider call; task-attempt retry consumes no duplicate reservation
+unit; usage and effect receipts each conserve one logical operation; worker
+secrets and error text remain absent; all native LLM families consume this one
+closed control rather than inventing per-lane wrappers.
 
 **Stop:** do not call the old worker API client, do not bypass durable
 metering, do not proxy arbitrary provider requests, do not use taskq admission
