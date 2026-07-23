@@ -353,6 +353,14 @@ re-run the cancellation race before any other SQL work.
 preserved. The scratch database only was recreated during diagnosis; no QDarte
 or production state changed.
 
+**Scratch-only adjudication proof:** removing only the counter FK, creating the
+counter row from an owner-private workflow lifecycle trigger, and making the
+job trigger UPDATE-only restored the exact held-open settlement versus
+cancellation history to 1/1 in 0.20s. The queued→running→succeeded counter
+vector remained 1/1. No committed source or contract was changed by this
+prototype. This confirms the recommended repair addresses the measured lock
+cause without weakening count exactness or ADR-026 concurrency.
+
 ### S5-QD-FR-CQ-05 — The seeded maintenance schedule has no public HTTP authorization or profile shape *(resolved: ADR-028)*
 
 **Blocking evidence:** Protocol §2.9 defines GET/PUT/DELETE schedule routes as
