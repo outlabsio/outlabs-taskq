@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete: every native orchestration prerequisite is now contracted, implemented and accepted. FR-03 is the active QDarte native-registry and domain-effect slice. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on both local PostgreSQL 18.3 and exact 16.14 after the complete finite-projection slice. The million-row gate is 2/2 on both majors, the exact finite surface/kernel subset is 53/53 under warnings-as-errors, DB-free is 340/340, and Ruff/format are clean. Published `v0.1.0a7` wheel and sdist pass Python 3.12/3.13 × core/HTTP/OutLabs isolation (12/12), execute the public fake orchestration lifecycle, and assert migrations 0001–0013, the 65-function catalog and public workflow projection imports; exact-tip CI run `30015623745` is green. FR-03 replacement branches exact-pin a7 in API/workers; canonical models live under `qdarte_runtime.core.tasking`; the native catalog plus pure and content-coordinator bindings pass 1165/1165 runtime tests with clean Ruff/196-file MyPy and 639/639 worker tests with clean Ruff/55-file MyPy. The closed inventory is 275 files/23 declarations/21 handlers/30 relations/130 routes, including an executable source-backed effect-owner oracle for every native task. The API's unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. No worker or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | FR-03C's pure and queue-native follow-up cohorts are complete. Continue the source-derived native read/effect cohorts; any missing domain authority or idempotent effect mechanism remains a docs-first stop before binding |
+| Next review | S5-QD-FR-CQ-11 is open: source proves `photo_verify_scope` completion performs launch-pipeline mutations and conditional retry/review handoffs despite the frozen read-only classification. Adjudicate the effect/follow-up ownership docs-first before binding that handler |
 
 ## Now
 
@@ -78,6 +78,7 @@
   - [ ] **FR-03C · Native handler bindings** — refactor pure/read/effect cohorts to the taskq handler signature without constructing an old job/attempt/client, then prove every binding and follow-up graph through `taskq.testing`.
     - [x] **FR-03C-PURE · Pure cluster-research binding** — runtime `e0acb75` owns the single deterministic full projection and bounded native digest projection. Workers `a032e8d` binds `native_cluster_research(JobContext, NativeClusterResearchInput) -> NativeClusterResearchOutput`; it constructs no old job, attempt or client and invokes no lifecycle method. Production `taskq.testing.work()` proves claim, handler normalization and terminal completion with no follow-up/effect; the result digest covers the complete inherited projection and its ordered candidate/proposal identities are pinned. The temporary incumbent handler calls the same pure function while it awaits deletion. The replacement oracle is 274 files/23 declarations/21 handlers/30 relations/130 routes. Runtime passes 1162/1162 with clean Ruff and 196-file MyPy; workers pass 635/635 with clean Ruff and 55-file MyPy. No worker process, database, queue, provider, service or production state changed.
     - [x] **FR-03C-FOLLOWUPS · Queue-native content coordinator** — CQ-09/10 were resolved docs-first before implementation. Runtime `55668a4` makes canonical QDarte scope explicit on all 21 native inputs and replaces the insufficient content selector payload with at most 20 discriminated, fully planned, scope-equal photo/editorial children. Workers `29cb1e9` binds the coordinator without an old job/client/planner and returns one taskq `Complete` carrying exact child policies; the real testing fake proves parent settlement and all child inserts are atomic, while an invalid second child produces zero enqueues and an empty plan is typed `no_change`. The replacement oracle is 275 files/23 declarations/21 handlers/30 relations/130 routes. Runtime passes 1165/1165 with clean Ruff and 196-file MyPy; workers pass 639/639 with clean Ruff and 55-file MyPy. No worker process, database, queue, provider, service or production state changed.
+    - [ ] **FR-03C-PHOTO · Native photo-verification binding** — blocked on CQ-11. The native handler must preserve provider verification, immutable artifacts, launch-pipeline truth and conditional retry/review behavior without importing an old job/client or performing domain mutation from settlement.
   - [ ] **FR-03D · General idempotent domain effects** — replace the 12 old result-route families with one closed inspect/apply reporter union, authoritative plan validation and stable job/family/entity/operation idempotency.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
@@ -333,6 +334,39 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-11 — Photo verification is not read-only at the old completion boundary *(open)*
+
+**Blocking evidence:** the frozen native effect table currently classifies
+`photo_verify_scope` as provider/filesystem verification with no domain
+mutation. Direct source tracing disproves that classification. The worker
+returns per-entity verdicts, then old job completion calls
+`LaunchPipelineTransitionService.queue_photo_verify_content_handoff()`. A pass
+updates the photo gate and continues the content path; a first failure may
+plan and enqueue a retry `photo_find_scope`; a terminal failure records a
+launch-pipeline blocker. Those writes and handoffs currently happen inside the
+old settlement transaction and are therefore deletion targets, not behavior
+that may disappear.
+
+**Required adjudication:** reclassify photo verification as provider read plus
+immutable artifact plus a closed `photo_verification` domain-effect family.
+Each bounded entity verdict is applied through `context.report_effect()` using
+the stable `(taskq job id, family, entity, operation)` identity. The
+authoritative API validates the entity against the stored native payload,
+updates launch-pipeline state idempotently, and returns only a bounded receipt.
+Conditional retry/review children must be fully planned before the parent is
+enqueued and carried as closed branches in the strict native input; the
+handler selects at most one already-valid branch per entity and returns native
+taskq follow-ups atomically with settlement. Cap total planned/selected
+children at 20, require scope equality, and prove pass/fail/retry/replay plus
+response-loss conservation. Amend the Tier-3 specification, machine effect
+inventory, native definitions and source-derived oracles together before
+implementation.
+
+**Stop:** do not bind `photo_verify_scope` as read-only, do not preserve its
+old completion hook, do not let the reporter enqueue a child, do not ask the
+handler to call an API planner after provider work, and do not construct an
+old job/client as a bridge.
 
 ### S5-QD-FR-CQ-10 — Content-enrich follow-ups lack executable child payloads *(resolved: fully planned native children)*
 
