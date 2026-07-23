@@ -302,6 +302,25 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-02 — Inconsistent follow-up holder has no declared internal-error raise *(open)*
+
+**Blocking evidence:** the migration-0008 collision vector can encounter an
+active job that already owns the derived `chain:<parent_job_id>:<step>` key but
+does not match the contracted child. Manifest §15.5 requires that case to be a
+“registered internal failure, never a second child,” while §15.2 declares the
+private helper as raising only `TQ422`, and the public `complete_job` row likewise
+does not name the internal failure. Treating the holder as `existed` would attach
+the wrong child; treating it as deterministic `TQ422` would misclassify database
+state as caller input. Implementation stopped with migration 0008 and its tests
+uncommitted.
+
+**Recommendation:** use the existing registered non-retryable `TQ500` internal
+error for this residual invariant breach. Amend Manifest §15.2 and the
+`complete_job` raises row docs-first to include `TQ500` only for inconsistent
+derived-key holders; keep the helper private, migration identity/signature and
+Protocol wire envelope unchanged. Then resume the immutable migration and prove
+that the exception rolls back parent settlement and every child insert.
+
 ### S5-QD-FR-CQ-01 — Manifest names a nonexistent private follow-up return composite *(resolved: ADR-025)*
 
 **Blocking evidence:** the first migration-0008 implementation pass found no
