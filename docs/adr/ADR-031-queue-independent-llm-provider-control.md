@@ -1,8 +1,12 @@
 # ADR-031 — Queue-independent LLM provider control
 
 **Status:** Accepted 2026-07-23
-**Resolves:** S5-QD-FR-CQ-12
+**Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13
 **Amends:** ADR-022
+
+**Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
+from cross-attempt provider authority and freezes generation rollover after
+unknown-cost expiry.
 
 ## Context
 
@@ -46,11 +50,17 @@ without seeing an attempt id or fence.
    revalidates the current attempt and validates the closed lane, entity,
    operation, provider, model, fingerprint and token estimate against the
    stored strict task input.
-5. The host derives reservation identity from the current taskq job, the
-   reporter-owned attempt, and the canonical reserve request. PostgreSQL
-   `clock_timestamp()` owns reservation, expiry, event and settlement time.
-   Exact reserve replay returns the same receipt; a changed canonical request
-   fails closed.
+5. The host derives a stable logical control identity from the current taskq
+   job, closed lane, entity and operation. Each provider-call generation has
+   its own reservation and idempotency identity derived from that control
+   identity, its positive generation number, the reporter-owned attempt and
+   canonical reserve request. PostgreSQL `clock_timestamp()` owns reservation,
+   expiry, event and settlement time. Exact reserve replay by the **same**
+   attempt returns the same receipt; a changed canonical request fails closed.
+   A different current attempt cannot inherit live provider-egress authority:
+   it receives the typed retryable `reservation_pending` receipt carrying only
+   the reservation identity and database-stamped expiry, and performs no
+   provider call.
 6. Settlement row-locks the reservation, verifies ownership and stores a
    canonical settlement hash in the existing bounded reservation metadata.
    The reservation transition and exactly one provider usage event occur in
@@ -60,15 +70,20 @@ without seeing an attempt id or fence.
    becomes `expired_unsettled`. Its budget hold is released so it cannot
    orphan capacity, but its usage posture remains **unknown cost**, never zero
    usage. It is retained for audit and is not rewritten as a successful,
-   failed, or free provider call. Late settlement is refused with the typed
-   expired-unsettled receipt.
+   failed, or free provider call. The first current attempt that observes the
+   expiry is stored as its expiry observer and receives the typed
+   expired-unsettled receipt; exact replay by that attempt returns the same
+   receipt. A later attempt may create the next numbered generation and spend
+   a new budget unit, while the expired generation remains immutable.
 8. Native LLM handlers use this order:
    inspect domain effect → reserve provider → call provider in the worker →
    apply domain effect → settle provider. A committed domain apply discovered
    after response loss skips the provider call. A process lost after provider
-   egress but before domain apply may repeat the provider read on reclaim only
-   under the already-counted attempt reservation; taskq makes no exactly-once
-   claim for external provider reads.
+   egress but before domain apply cannot transfer its live reservation to a
+   replacement attempt. Reclaim waits through `reservation_pending`, observes
+   the old generation as `expired_unsettled`, then may reserve a new generation.
+   Taskq makes no exactly-once claim for external provider reads, but QDarte
+   never silently rewrites possibly incurred cost as known or zero usage.
 9. The control family is shared by every native LLM lane. Per-lane provider
    wrappers, old queue job/attempt/client/lifecycle imports, caller clocks and
    caller idempotency are forbidden.
@@ -80,9 +95,10 @@ without seeing an attempt id or fence.
 - Authentication and authoritative-queue authorization precede body decode.
   Wrong task, stale/cancelled attempt, lane, entity, operation, provider,
   model, fingerprint or ownership produces no reservation or event mutation.
-- Reserve/settle replay, a concurrent settlement race, expiry, provider
-  failure, response loss, task-attempt retry, secret/error redaction and
-  resource cleanup require executable evidence.
+- Same-attempt reserve replay, cross-attempt pending refusal, expiry-observer
+  replay, next-generation admission, settle replay, a concurrent settlement
+  race, provider failure, response loss, secret/error redaction and resource
+  cleanup require executable evidence.
 - A hand-derived reporter catalog must equality-check the closed member and
   both operations. Direct service and authenticated HTTP paths must run the
   same reserve/settle/expiry histories and compare typed receipts plus raw

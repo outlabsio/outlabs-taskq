@@ -346,7 +346,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-13 — Cross-attempt reservation takeover can erase unknown provider cost *(open 2026-07-23)*
+### S5-QD-FR-CQ-13 — Cross-attempt reservation takeover can erase unknown provider cost *(approved 2026-07-23)*
 
 **Blocking evidence:** implementing ADR-031's required classification
 hard-kill history exposed a contradiction between its unknown-cost rule and
@@ -392,6 +392,11 @@ egress proving either one settled provider event or one retained
 authority, do not overwrite an expired generation, do not invent client time
 or a taskq admission dependency, and do not claim the classification family or
 its hard-kill gate complete until this transition is adjudicated docs-first.
+
+**Adjudication:** approved as recommended. ADR-031 and both Tier-3 reporter
+specifications now freeze same-attempt replay, typed cross-attempt pending,
+database-time expiry observation, immutable unknown-cost history and
+later-attempt numbered generation rollover before source changes resume.
 
 ### S5-QD-FR-CQ-12 — Native LLM handlers need the durable provider-budget control plane *(approved 2026-07-23)*
 

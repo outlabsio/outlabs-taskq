@@ -342,13 +342,19 @@ the handler supplies only one strictly bounded reserve or settle request.
 Reserve accepts a closed lane, entity and operation, provider and model,
 canonical request fingerprint, and token estimate. The host authenticates and
 authorizes the authoritative task queue before body decode, validates those
-fields against stored strict input, derives idempotency from the
-reporter-owned attempt, and stamps time in PostgreSQL. Settle row-locks the
-reservation and atomically records its state plus one provider event using a
-canonical settlement hash. Exact replays return the same receipt and changed
-replays fail closed.
+fields against stored strict input, derives a stable logical identity plus a
+numbered generation from the reporter-owned attempt, and stamps time in
+PostgreSQL. Same-attempt reserve replay is byte-stable. A different attempt
+cannot inherit a live generation and receives typed retryable
+`reservation_pending` until database expiry. Settle row-locks the reservation
+and atomically records its state plus one provider event using a canonical
+settlement hash. Exact replays return the same receipt and changed replays fail
+closed.
 
 An expired unsettled reservation releases its budget hold but remains a typed
 `expired_unsettled` unknown-cost record; it is never represented as zero
-usage. Every adopting side-effecting lane must prove hard-kill reclaim through
-that state machine and does not inherit evidence from a pure-lane drill.
+usage. The first observing attempt is recorded so its exact response replay is
+stable. Only a later attempt may create the next numbered generation and spend
+a new budget unit; no generation is rewritten or transferred. Every adopting
+side-effecting lane must prove hard-kill reclaim through that state machine and
+does not inherit evidence from a pure-lane drill.

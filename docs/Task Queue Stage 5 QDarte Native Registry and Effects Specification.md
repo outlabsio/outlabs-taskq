@@ -412,15 +412,22 @@ credential, header, exception text, or arbitrary metadata.
 The existing reporter-owned attempt envelope supplies attempt authority. The
 host authenticates, resolves the current task's authoritative queue, and
 authorizes `run` before body decode. It then validates the request against the
-stored strict task target and provider plan. PostgreSQL derives reservation
-identity from job, attempt and canonical request and stamps all times.
+stored strict task target and provider plan. PostgreSQL derives a stable
+logical control identity plus a positive reservation generation and stamps all
+times.
 
-Reserve replay is byte-stable. Settlement row-locks the reservation and stores
+Same-attempt reserve replay is byte-stable. A different attempt cannot inherit
+a live provider-call generation: it receives typed retryable
+`reservation_pending` with the opaque reservation identity and database expiry
+and performs no provider call. Settlement row-locks the reservation and stores
 a canonical settlement hash in its bounded metadata while recording the
 provider event and reservation transition in the same transaction. Exact
 settlement replay returns the same receipt; mismatch fails closed. Database
 expiry releases the budget hold but leaves a retained
-`expired_unsettled` unknown-cost posture. It never implies zero usage.
+`expired_unsettled` unknown-cost posture. The first observing attempt is stored
+for exact expiry-response replay. Only a later attempt may create the next
+numbered generation and consume a new budget unit; the old generation remains
+immutable. Unknown cost never implies zero usage.
 
 The TripAdvisor classification order is inspect classification effect,
 reserve provider, invoke the provider in the worker, apply the classification
