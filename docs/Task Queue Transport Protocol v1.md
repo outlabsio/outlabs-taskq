@@ -641,7 +641,7 @@ The new exact command is:
 
 | Command | HTTP | SQL | Authorization | Outcomes |
 |---|---|---|---|---|
-| workflow page | `GET /taskq/v1/workflows/{workflow_id}?limit=...&cursor=...` | `taskq.get_workflow_page(uuid,integer,uuid)` | `read` on every authoritative declared queue | 200; hidden `TQ001`; inactive `TQ501`; malformed `TQ422` |
+| workflow page | `GET /taskq/v1/workflows/{workflow_id}?limit=...&cursor=...` | `taskq.get_workflow_page(uuid,integer,uuid)` | `read` on every authoritative declared queue | 200; hidden `TQ001`; inactive `TQ501`; malformed `TQ422`; invariant `TQ500` |
 
 It exists only with capability `read_model_workflow`. `limit` defaults to 50
 and is bounded `1..100`. Items are ordered by job UUID ascending. The opaque
@@ -669,6 +669,8 @@ All timestamps are database values; counts are non-negative integers.
 params, creator, payload, headers, result, progress, error, attempt/event
 records, fence, token, worker identity, provider evidence, or raw metadata.
 Direct SQL returns the same projection and gains no raw relation grant.
+An owner-private missing counter invariant is the existing opaque `TQ500`;
+neither the missing identity nor SQL/catalog detail crosses the wire.
 
 Processing order is normative:
 

@@ -324,6 +324,20 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-07 — ADR-030's approved invariant failure was omitted from the workflow-page error rows *(resolved: ADR-030 propagation)*
+
+**Blocking evidence:** immutable-repair review found that ADR-030 and Manifest
+§18.8 explicitly require a missing live counter invariant to fail as TQ500,
+while Protocol §2.10 and Manifest §18.2 omitted TQ500 from the exact public
+workflow-page error rows. The existing closed TQ500 family already defines the
+opaque wire behavior; there is no new code, status, retry or detail decision.
+
+**Resolution:** propagate the owner-approved ADR-030 decision docs-first:
+Protocol §2.10 and Manifest §18.2 now include invariant TQ500 and explicitly
+forbid identity/catalog detail on the wire. Protocol document revision 1.0.13,
+SQL 0.2.3 and every identity remain unchanged. Migration 0013 implementation
+may follow only after this commit.
+
 ### S5-QD-FR-CQ-06 — Exact workflow counters cannot foreign-key the workflow row without breaking cancellation concurrency *(resolved: ADR-030)*
 
 **Blocking evidence:** the first FR-02D full-suite run reached the existing

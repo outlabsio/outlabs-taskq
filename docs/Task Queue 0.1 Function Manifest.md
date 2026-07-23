@@ -1279,7 +1279,7 @@ catalog and activates only independently proven views.
    taskq.get_workflow_page(uuid,integer,uuid)
      arguments: p_workflow_id, p_limit DEFAULT 50, p_after DEFAULT NULL
      RETURNS taskq.workflow_page
-     EXEC taskq_observer; raises TQ001, TQ422, TQ501
+     EXEC taskq_observer; raises TQ001, TQ422, TQ500, TQ501
    ```
 
    The function is `STABLE SECURITY DEFINER`, owner-owned, path-pinned and
