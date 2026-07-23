@@ -349,6 +349,96 @@ async def test_job_lookup_authorizes_authoritative_queue_and_hides_denial() -> N
     assert all(name != "complete" for name, _ in transport.calls)
 
 
+async def test_complete_authorizes_parent_before_decode_and_every_child_before_sql() -> None:
+    job_id = uuid4()
+    transport = FacadeTransport()
+    transport.projections[job_id] = AuthorizationProjection(
+        job_id=job_id, queue="parents", job_type="tests.parent", status=JobStatus.RUNNING
+    )
+    checked: list[tuple[TaskqAction, str | None]] = []
+
+    async def authenticate(request: Any) -> AuthContext:
+        return AuthContext(actor="worker", principal="worker")
+
+    async def authorize(
+        request: Any,
+        context: AuthContext,
+        action: TaskqAction,
+        queue: str | None,
+    ) -> None:
+        checked.append((action, queue))
+        if queue == "denied":
+            raise HTTPException(status_code=403)
+
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport),
+            authorizer=callable_auth(authenticate, authorize),
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        denied = await client.post(
+            f"/taskq/v1/jobs/{job_id}/complete",
+            headers=_headers(),
+            json={
+                "attempt_id": str(uuid4()),
+                "worker_id": "worker-1",
+                "followups": [
+                    {
+                        "step": "same",
+                        "job_type": "tests.same",
+                        "payload": {},
+                    },
+                    {
+                        "step": "cross",
+                        "job_type": "tests.cross",
+                        "queue": "denied",
+                        "payload": {},
+                    },
+                ],
+            },
+        )
+    assert denied.status_code == 403
+    assert denied.json()["error"]["details"] == {"queue": "denied"}
+    assert checked == [
+        (TaskqAction.RUN, "parents"),
+        (TaskqAction.RUN, "denied"),
+    ]
+    assert [name for name, _ in transport.calls] == ["projection"]
+
+    checked.clear()
+
+    async def deny_parent(
+        request: Any,
+        context: AuthContext,
+        action: TaskqAction,
+        queue: str | None,
+    ) -> None:
+        checked.append((action, queue))
+        raise HTTPException(status_code=403)
+
+    hidden_app = _mounted(
+        create_taskq_app(
+            _resources(transport),
+            authorizer=callable_auth(authenticate, deny_parent),
+            not_found_on_forbidden=True,
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=hidden_app), base_url="http://test"
+    ) as client:
+        hidden = await client.post(
+            f"/taskq/v1/jobs/{job_id}/complete",
+            headers=_headers(),
+            content=b'{"attempt_id":"live-fence","followups":',
+        )
+    assert hidden.status_code == 404
+    assert "live-fence" not in hidden.text
+    assert checked == [(TaskqAction.RUN, "parents")]
+
+
 async def test_worker_presence_preflights_every_queue_before_one_call() -> None:
     transport = FacadeTransport()
     checked: list[str | None] = []

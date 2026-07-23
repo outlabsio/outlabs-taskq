@@ -54,9 +54,15 @@ def test_handler_result_models_are_closed_and_frozen(result: BaseModel) -> None:
 
 
 def test_handler_result_boundaries_are_local_and_exact() -> None:
-    Complete(followups=tuple({"i": index} for index in range(20)))
+    Complete(
+        followups=tuple({"step": f"step-{index}", "job_type": "tests.child"} for index in range(20))
+    )
     with pytest.raises(ValidationError):
-        Complete(followups=tuple({"i": index} for index in range(21)))
+        Complete(
+            followups=tuple(
+                {"step": f"step-{index}", "job_type": "tests.child"} for index in range(21)
+            )
+        )
     for model, field in (
         (Snooze, {"delay_seconds": -1}),
         (Snooze, {"delay_seconds": 2_592_001}),

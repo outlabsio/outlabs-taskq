@@ -1,4 +1,4 @@
-"""Hand-derived Protocol-v1.0.8 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.9 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
@@ -16,10 +16,12 @@ from taskq.protocol import (
     ClaimedJob,
     ClaimedJobWire,
     CommandName,
+    CompleteWireRequest,
     EnqueueWireData,
     EnqueueWireRequest,
     EnqueueManyWireRequest,
     EnqueueManyItem,
+    Followup,
     HeartbeatWireRequest,
     HttpCommandName,
     HttpSurface,
@@ -365,7 +367,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.8"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.9"
     _assert_catalog_matches_hand_derived_oracle()
 
 
@@ -445,6 +447,32 @@ def test_h09_json_and_collection_bounds_are_enforced_by_wire_models() -> None:
         )
     with pytest.raises(ValidationError, match="distinct"):
         WorkerPresenceWireRequest(worker_id="worker-1", queues=("a", "a"))
+
+
+def test_complete_followup_wire_model_is_exactly_the_closed_protocol_shape() -> None:
+    assert set(Followup.model_json_schema()["properties"]) == {
+        "step",
+        "job_type",
+        "queue",
+        "payload",
+        "headers",
+        "priority",
+        "max_attempts",
+        "lease_seconds",
+        "scheduled_at",
+    }
+    request = CompleteWireRequest(
+        attempt_id=uuid4(),
+        worker_id="worker-1",
+        followups=({"step": "next", "job_type": "tests.child"},),
+    )
+    assert request.followups == (Followup(step="next", job_type="tests.child"),)
+    with pytest.raises(ValidationError):
+        CompleteWireRequest(
+            attempt_id=uuid4(),
+            worker_id="worker-1",
+            followups=({"step": "next", "job_type": "tests.child", "typo": True},),
+        )
 
 
 def test_fence_is_write_only_in_requests_and_only_claim_serializes_it() -> None:

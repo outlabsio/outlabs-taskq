@@ -20,7 +20,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.8"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.9"
 T = TypeVar("T")
 
 
@@ -34,6 +34,36 @@ def _bounded_json(value: Any, limit: int, field: str) -> Any:
     if value is not None and _json_size(value) > limit:
         raise ValueError(f"{field} exceeds {limit} UTF-8 bytes")
     return value
+
+
+class Followup(BaseModel):
+    """Closed queue-native child specification emitted only at completion."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    step: str = Field(min_length=1, max_length=64, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    job_type: str = Field(
+        min_length=1,
+        max_length=120,
+        pattern=r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$",
+    )
+    queue: str | None = Field(default=None, pattern=r"^[a-z0-9_]{1,57}$")
+    payload: dict[str, Any] = Field(default_factory=dict)
+    headers: dict[str, Any] = Field(default_factory=dict)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    max_attempts: int | None = Field(default=None, ge=1, le=100)
+    lease_seconds: int | None = Field(default=None, ge=15, le=86400)
+    scheduled_at: datetime | None = None
+
+    @field_validator("payload")
+    @classmethod
+    def _payload_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 65536, "followup payload")
+
+    @field_validator("headers")
+    @classmethod
+    def _headers_bound(cls, value: dict[str, Any]) -> dict[str, Any]:
+        return _bounded_json(value, 8192, "followup headers")
 
 
 class TqCode(StrEnum):
@@ -526,7 +556,7 @@ class HeartbeatWireRequest(AttemptRequest):
 class CompleteWireRequest(AttemptRequest):
     result: dict[str, Any] | None = None
     stats: dict[str, Any] | None = None
-    followups: tuple[dict[str, Any], ...] | None = None
+    followups: tuple[Followup, ...] | None = Field(default=None, max_length=20)
 
     @field_validator("result")
     @classmethod
@@ -1796,6 +1826,7 @@ __all__ = [
     "EnsureQueueWireRequest",
     "ExpireJobOutcome",
     "ExpireWorkerLeasesResult",
+    "Followup",
     "HeartbeatResult",
     "HeartbeatWireData",
     "HeartbeatWireRequest",

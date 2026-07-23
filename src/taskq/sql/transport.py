@@ -46,6 +46,7 @@ from taskq.protocol import (
     EnsureQueueResult,
     ExpireJobOutcome,
     ExpireWorkerLeasesResult,
+    Followup,
     HeartbeatResult,
     JobDetail,
     JobPage,
@@ -505,7 +506,7 @@ class SqlTaskqTransport:
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
         connection: AsyncConnection | None = None,
     ) -> SettleResult:
         return await self._settle(
@@ -518,7 +519,11 @@ class SqlTaskqTransport:
                 "worker_id": worker_id,
                 "result": _json_param(result),
                 "stats": _json_param(stats),
-                "followups": _json_param(followups),
+                "followups": _json_param(
+                    [item.model_dump(mode="json", exclude_none=True) for item in followups]
+                    if followups is not None
+                    else None
+                ),
             },
             connection=connection,
         )

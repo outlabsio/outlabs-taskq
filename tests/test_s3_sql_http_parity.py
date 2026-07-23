@@ -18,8 +18,9 @@ from taskq.http import (
     create_taskq_app,
     no_auth_for_tests,
 )
-from taskq.protocol import EnqueueCommand, HttpCommandName, JobDetail
+from taskq.protocol import EnqueueCommand, Followup, HttpCommandName, JobDetail
 from taskq.sql.transport import SqlTaskqTransport
+from taskq.testing import FakeTaskQClient
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -196,6 +197,93 @@ async def test_read_oracle_rejects_a_deliberately_mutated_projection(
         with pytest.raises(AssertionError):
             _assert_job_matches_raw(mutated, raw)
     finally:
+        await transport.aclose()
+
+
+async def test_followup_graph_is_equivalent_across_sql_http_fake_and_raw_rows(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+) -> None:
+    parent_queues = ("followup_parity_sql", "followup_parity_http")
+    child_queue = "followup_parity_child"
+    for queue in (*parent_queues, child_queue):
+        await operator.fetchrow(
+            "SELECT * FROM taskq.ensure_queue($1, '{}'::jsonb, 'parity-audit')",
+            queue,
+        )
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    resources = TaskqFacadeTransports(
+        producer=transport,
+        runner=transport,
+        observer=transport,
+        authorization=transport,
+        claim_wait_hub=ClaimWaitHub(),
+    )
+    app = _mounted(create_taskq_app(resources, authorizer=no_auth_for_tests()))
+    asgi = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    client = AsyncTaskqHttpClient(
+        "http://test",
+        bearer_token="parity-test-only",
+        client=asgi,
+        claim_wait_seconds=0,
+    )
+    fake = FakeTaskQClient(queues=("followup_fake_parent", child_queue))
+    followup = Followup(
+        step="next",
+        job_type="tests.child",
+        queue=child_queue,
+        payload={"value": 7},
+        headers={"source": "parent"},
+    )
+
+    async def settle(
+        surface: SqlTaskqTransport | AsyncTaskqHttpClient | FakeTaskQClient,
+        queue: str,
+    ) -> object:
+        parent = await surface.enqueue(
+            EnqueueCommand(queue=queue, job_type="tests.parent", payload={})
+        )
+        claimed = await surface.claim(queue, "parity-worker")
+        assert claimed.state.value == "claimed"
+        job = claimed.jobs[0]
+        result = await surface.complete(
+            job.job_id,
+            job.attempt_id,
+            "parity-worker",
+            followups=(followup,),
+        )
+        assert result.result.value == "ok"
+        return parent.job_id
+
+    try:
+        sql_parent = await settle(transport, parent_queues[0])
+        http_parent = await settle(client, parent_queues[1])
+        fake_parent = await settle(fake, "followup_fake_parent")
+        raw_children = await pg.fetch(
+            "SELECT parent_job_id,queue,job_type,payload,headers,idempotency_key,status "
+            "FROM taskq.jobs WHERE parent_job_id=ANY($1::uuid[]) ORDER BY parent_job_id",
+            [sql_parent, http_parent],
+        )
+        assert len(raw_children) == 2
+        for child in raw_children:
+            assert child["queue"] == child_queue
+            assert child["job_type"] == "tests.child"
+            assert json.loads(child["payload"]) == {"value": 7}
+            assert json.loads(child["headers"]) == {"source": "parent"}
+            assert child["idempotency_key"] == f"chain:{child['parent_job_id']}:next"
+            assert child["status"] == "queued"
+        assert len(fake.pending) == 1
+        fake_child = fake.pending[0]
+        assert fake_child.parent_job_id == fake_parent
+        assert fake_child.queue == child_queue
+        assert fake_child.job_type == "tests.child"
+        assert fake_child.payload == {"value": 7}
+        assert fake_child.headers == {"source": "parent"}
+        assert fake_child.idempotency_key == f"chain:{fake_parent}:next"
+    finally:
+        await client.aclose()
+        await asgi.aclose()
         await transport.aclose()
 
 

@@ -15,6 +15,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from taskq.errors import TaskqConfigError
+from taskq.protocol import Followup
 
 
 class _ExecutionModel(BaseModel):
@@ -23,7 +24,7 @@ class _ExecutionModel(BaseModel):
 
 class Complete(_ExecutionModel):
     result: dict[str, Any] = Field(default_factory=dict)
-    followups: tuple[dict[str, Any], ...] = Field(default=(), max_length=20)
+    followups: tuple[Followup, ...] = Field(default=(), max_length=20)
 
 
 class Snooze(_ExecutionModel):
@@ -234,6 +235,7 @@ __all__ = [
     "CancellationToken",
     "Complete",
     "EffectReporterCallback",
+    "Followup",
     "HANDLER_RESULT_TYPES",
     "HandlerResult",
     "JobContext",

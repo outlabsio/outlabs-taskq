@@ -77,6 +77,10 @@ class TaskqConfigError(ValueError):
     """Invalid local configuration, before a taskq command is issued."""
 
 
+class InvalidFollowupError(TaskqConfigError):
+    """A handler emitted a child outside its registry-declared finite graph."""
+
+
 class UnknownTaskError(LookupError):
     def __init__(self, name: str) -> None:
         self.name = name
@@ -156,6 +160,7 @@ __all__ = [
     "TaskqConflictError",
     "TaskqError",
     "TaskqInternalError",
+    "InvalidFollowupError",
     "TaskqNotFoundError",
     "TaskqUnavailableError",
     "TaskqValidationError",

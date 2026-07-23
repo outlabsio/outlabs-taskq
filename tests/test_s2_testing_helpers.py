@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq import Complete, Retry, Snooze, Task, TaskQ, TaskRegistry
+from taskq import Complete, FollowupTarget, Retry, Snooze, Task, TaskQ, TaskRegistry
 from taskq.errors import TaskqConfigError
 from taskq.testing import FakeTaskQClient, drain, inline_mode, require_enqueued, work
 from taskq.sql.transport import SqlTaskqTransport
@@ -144,7 +144,13 @@ async def test_inline_followups_are_recorded_or_boundedly_executed() -> None:
     async def parent(payload: Input) -> Complete:
         return Complete(
             result={"doubled": payload.value * 2},
-            followups=({"job_type": "tests.complete", "payload": {"value": 9}},),
+            followups=(
+                {
+                    "step": "complete",
+                    "job_type": "tests.complete",
+                    "payload": {"value": 9},
+                },
+            ),
         )
 
     parent_task = Task(
@@ -152,13 +158,15 @@ async def test_inline_followups_are_recorded_or_boundedly_executed() -> None:
         queue="testing",
         input_model=Input,
         output_model=Output,
+        followup_targets=(FollowupTarget(queue="testing", job_type="tests.complete"),),
         handler=parent,
     )
     tq = TaskQ(FakeTaskQClient(), registry=TaskRegistry((parent_task, COMPLETE_TASK)))
     async with inline_mode(tq, follow=False) as recorded:
         await tq.enqueue(parent_task, {"value": 1})
         assert len(recorded.settled("tests.parent")) == 1
-        assert not recorded.enqueued("tests.complete")
+        assert len(recorded.enqueued("tests.complete")) == 1
+        assert not recorded.settled("tests.complete")
 
     async with inline_mode(tq, follow=True) as executed:
         await tq.enqueue(parent_task, {"value": 1})

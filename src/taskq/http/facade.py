@@ -58,6 +58,7 @@ from taskq.protocol import (
     EnqueueWireRequest,
     EnsureQueueWireRequest,
     FailWireRequest,
+    Followup,
     HeartbeatWireRequest,
     HttpCommandName,
     HttpCommandSpec,
@@ -372,6 +373,26 @@ class _FacadeDispatcher:
             body = await self._body(request, spec)
             return await self._execute(request, name, spec, body, context, queue)
 
+        if spec.queue_source is QueueSource.JOB_LOOKUP:
+            self._validate_query(request, name)
+            queue = await self._authorize(
+                request, name, spec, None, context, authorizer, public_meta
+            )
+            self._validate_headers(request)
+            body = await self._body(request, spec)
+            if name is HttpCommandName.COMPLETE:
+                assert queue is not None and isinstance(body, CompleteWireRequest)
+                await self._authorize_followup_queues(
+                    request,
+                    context,
+                    authorizer,
+                    parent_queue=queue,
+                    followups=body.followups or (),
+                )
+            if spec.surface is not HttpSurface.ACTIVE:
+                raise TaskqCapabilityError(details={"capability": name.value})
+            return await self._execute(request, name, spec, body, context, queue)
+
         self._validate_headers(request)
         body = await self._body(request, spec)
         self._validate_query(request, name)
@@ -475,6 +496,29 @@ class _FacadeDispatcher:
             return projection.queue
         await self._check_authorization(authorizer, request, context, spec.action, None)
         return None
+
+    async def _authorize_followup_queues(
+        self,
+        request: Request,
+        context: AuthContext,
+        authorizer: QueueAuthorizer,
+        *,
+        parent_queue: str,
+        followups: Sequence[Followup],
+    ) -> None:
+        authorized = {parent_queue}
+        for followup in followups:
+            queue = followup.queue or parent_queue
+            if queue in authorized:
+                continue
+            await self._check_authorization(
+                authorizer,
+                request,
+                context,
+                TaskqAction.RUN,
+                queue,
+            )
+            authorized.add(queue)
 
     @staticmethod
     async def _check_authorization(

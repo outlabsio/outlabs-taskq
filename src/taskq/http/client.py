@@ -53,6 +53,7 @@ from taskq.protocol import (
     EnsureQueueWireData,
     ExpireJobOutcome,
     ExpireWorkerLeasesResult,
+    Followup,
     HeartbeatResult,
     HeartbeatWireData,
     HttpCommandName,
@@ -618,7 +619,7 @@ class AsyncTaskqHttpClient:
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
     ) -> SettleResult:
         return await self._settle(
             HttpCommandName.COMPLETE,
@@ -628,7 +629,11 @@ class AsyncTaskqHttpClient:
                 "worker_id": worker_id,
                 "result": dict(result) if result is not None else None,
                 "stats": dict(stats) if stats is not None else None,
-                "followups": [dict(item) for item in followups] if followups is not None else None,
+                "followups": (
+                    [item.model_dump(mode="json", exclude_none=True) for item in followups]
+                    if followups is not None
+                    else None
+                ),
             },
         )
 
@@ -1114,7 +1119,7 @@ class TaskqHttpClient:
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
     ) -> SettleResult:
         return self._settle(
             HttpCommandName.COMPLETE,
@@ -1124,7 +1129,11 @@ class TaskqHttpClient:
                 "worker_id": worker_id,
                 "result": dict(result) if result is not None else None,
                 "stats": dict(stats) if stats is not None else None,
-                "followups": [dict(item) for item in followups] if followups is not None else None,
+                "followups": (
+                    [item.model_dump(mode="json", exclude_none=True) for item in followups]
+                    if followups is not None
+                    else None
+                ),
             },
         )
 

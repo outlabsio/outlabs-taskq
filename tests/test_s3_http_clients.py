@@ -18,6 +18,7 @@ from taskq.protocol import (
     ClaimState,
     EnqueueCommand,
     EnqueueStatus,
+    Followup,
     HttpCommandName,
 )
 from taskq.transport import ProducerTransport, RunnerTransport
@@ -282,6 +283,61 @@ async def test_unkeyed_enqueue_and_settlement_are_never_inner_retried() -> None:
     assert getattr(enqueue_error.value, "code", None) == "TQ503"
     assert getattr(settle_error.value, "code", None) == "TQ503"
     assert counts == {"enqueue": 1, "complete": 1}
+
+
+async def test_both_http_clients_serialize_the_exact_closed_followup_shape() -> None:
+    bodies: list[dict[str, object]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        bodies.append(json.loads(request.content))
+        return _response(
+            request,
+            data={"job_status": "succeeded", "scheduled_at": None},
+        )
+
+    followup = Followup(
+        step="next",
+        job_type="tests.child",
+        queue="children",
+        payload={"value": 1},
+    )
+    async with httpx.AsyncClient(
+        base_url="https://example.test", transport=httpx.MockTransport(handler)
+    ) as raw:
+        async_client = AsyncTaskqHttpClient(
+            "https://example.test", bearer_token="secret", client=raw
+        )
+        await async_client.complete(
+            uuid4(),
+            uuid4(),
+            "worker-1",
+            followups=(followup,),
+        )
+
+    with httpx.Client(
+        base_url="https://example.test", transport=httpx.MockTransport(handler)
+    ) as raw_sync:
+        sync_client = TaskqHttpClient(
+            "https://example.test", bearer_token="secret", client=raw_sync
+        )
+        sync_client.complete(
+            uuid4(),
+            uuid4(),
+            "worker-1",
+            followups=(followup,),
+        )
+
+    assert len(bodies) == 2
+    for body in bodies:
+        assert body["followups"] == [
+            {
+                "step": "next",
+                "job_type": "tests.child",
+                "queue": "children",
+                "payload": {"value": 1},
+                "headers": {},
+            }
+        ]
 
 
 async def test_claim_negotiates_once_and_timeout_normalizes_to_empty() -> None:

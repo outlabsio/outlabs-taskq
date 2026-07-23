@@ -11,8 +11,9 @@ from typing import Any, Generic, TypeAlias, TypeVar, Union, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from taskq.errors import TaskqConfigError, UnknownTaskError
+from taskq.errors import InvalidFollowupError, TaskqConfigError, UnknownTaskError
 from taskq.execution import HANDLER_RESULT_TYPES, JobContext
+from taskq.protocol import Followup
 
 InT = TypeVar("InT", bound=BaseModel)
 OutT = TypeVar("OutT", bound=BaseModel)
@@ -66,6 +67,19 @@ RetryValue: TypeAlias = bool | int | RetryStrategy
 Handler: TypeAlias = Callable[..., Any]
 
 
+class FollowupTarget(BaseModel):
+    """One finite child target a parent task is allowed to create."""
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    queue: str = Field(pattern=r"^[a-z0-9_]{1,57}$")
+    job_type: str = Field(
+        min_length=1,
+        max_length=120,
+        pattern=r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$",
+    )
+
+
 def _validate_wire_name(value: str, *, field: str) -> None:
     if not 1 <= len(value) <= 120 or _WIRE_NAME.fullmatch(value) is None:
         raise TaskqConfigError(f"{field} must match the durable wire-name grammar")
@@ -117,6 +131,7 @@ class Task(Generic[InT, OutT]):
     retry: RetryValue = True
     priority: int | None = None
     lease_seconds: int | None = None
+    followup_targets: tuple[FollowupTarget, ...] = ()
     handler: Handler | None = None
     handler_positional_arity: int = dataclass_field(init=False, repr=False)
 
@@ -142,6 +157,12 @@ class Task(Generic[InT, OutT]):
             raise TaskqConfigError("priority must be between 0 and 1000")
         if self.lease_seconds is not None and not 15 <= self.lease_seconds <= 86400:
             raise TaskqConfigError("lease_seconds must be between 15 and 86400")
+        targets = tuple(self.followup_targets)
+        if any(not isinstance(target, FollowupTarget) for target in targets):
+            raise TaskqConfigError("followup_targets must contain FollowupTarget values")
+        if len({(target.queue, target.job_type) for target in targets}) != len(targets):
+            raise TaskqConfigError("followup_targets must be distinct")
+        object.__setattr__(self, "followup_targets", targets)
         arity = (
             _validate_handler(self.handler, self.input_model, self.output_model)
             if self.handler is not None
@@ -210,5 +231,65 @@ class TaskRegistry:
             raise UnknownTaskError(task_or_name.name)
         return registered
 
+    def validate_followup_graph(self) -> None:
+        """Reject incomplete declarations before a worker can claim work."""
 
-__all__ = ["RetryStrategy", "RetryValue", "Task", "TaskRegistry"]
+        for parent in self._canonical.values():
+            for declared in parent.followup_targets:
+                child = self._canonical.get(declared.job_type)
+                if child is None:
+                    raise TaskqConfigError(
+                        f"followup target is not registered: {declared.job_type!r}"
+                    )
+                if child.queue != declared.queue:
+                    raise TaskqConfigError(
+                        f"followup target queue does not match registered task: "
+                        f"{declared.job_type!r}"
+                    )
+
+    def normalize_followups(
+        self,
+        parent: Task[Any, Any],
+        followups: Iterable[Followup],
+    ) -> tuple[Followup, ...]:
+        """Validate and canonicalize one handler's finite child graph."""
+
+        declared = {(target.queue, target.job_type) for target in parent.followup_targets}
+        normalized: list[Followup] = []
+        for followup in followups:
+            target = self.resolve(followup.job_type)
+            if target is None:
+                raise InvalidFollowupError(
+                    f"followup task is not registered: {followup.job_type!r}"
+                )
+            queue = followup.queue or parent.queue
+            identity = (queue, target.name)
+            if target.queue != queue or identity not in declared:
+                raise InvalidFollowupError(
+                    f"followup target is not declared for parent: {identity!r}"
+                )
+            try:
+                payload = target.validate_payload(followup.payload)
+            except Exception as exc:
+                raise InvalidFollowupError(
+                    f"followup payload is invalid for target: {target.name!r}"
+                ) from exc
+            normalized.append(
+                followup.model_copy(
+                    update={
+                        "job_type": target.name,
+                        "queue": queue if queue != parent.queue else None,
+                        "payload": payload,
+                    }
+                )
+            )
+        return tuple(normalized)
+
+
+__all__ = [
+    "FollowupTarget",
+    "RetryStrategy",
+    "RetryValue",
+    "Task",
+    "TaskRegistry",
+]

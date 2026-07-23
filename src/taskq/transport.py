@@ -23,6 +23,7 @@ from taskq.protocol import (
     EnsureQueueResult,
     ExpireJobOutcome,
     ExpireWorkerLeasesResult,
+    Followup,
     HeartbeatResult,
     JobDetail,
     JobPage,
@@ -126,7 +127,7 @@ class RunnerTransport(ClosableTransport, Protocol):
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
     ) -> SettleResult: ...
 
     async def fail(

@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from pydantic import BaseModel
 
-from taskq import Complete, JobContext, Retry, Task, TaskQ, TaskRegistry
+from taskq import Complete, FollowupTarget, JobContext, Retry, Task, TaskQ, TaskRegistry
 from taskq.testing import FakeTaskQClient, drain, inline_mode
 
 
@@ -65,7 +65,13 @@ async def test_repeated_followup_and_drain_caps_release_overflow_without_leaks()
     async def parent(payload: Input) -> Complete:
         return Complete(
             result={"value": payload.value},
-            followups=({"job_type": "audit.child", "payload": {"value": payload.value}},),
+            followups=(
+                {
+                    "step": "child",
+                    "job_type": "audit.child",
+                    "payload": {"value": payload.value},
+                },
+            ),
         )
 
     async def retry(payload: Input) -> Retry:
@@ -83,6 +89,7 @@ async def test_repeated_followup_and_drain_caps_release_overflow_without_leaks()
         queue="audit",
         input_model=Input,
         output_model=Output,
+        followup_targets=(FollowupTarget(queue="audit", job_type="audit.child"),),
         handler=parent,
     )
     retry_task = Task(

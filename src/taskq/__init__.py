@@ -5,6 +5,7 @@ from __future__ import annotations
 __version__ = "0.1.0a6"
 
 from taskq.errors import (
+    InvalidFollowupError,
     TaskqBackpressureError,
     TaskqCapabilityError,
     TaskqConfigError,
@@ -23,6 +24,7 @@ from taskq.execution import (
     CancellationReason,
     CancellationToken,
     Complete,
+    Followup,
     HandlerResult,
     JobContext,
     NonRetryable,
@@ -54,7 +56,7 @@ from taskq.protocol import (
     SettleRetryScheduledResult,
     TqCode,
 )
-from taskq.registry import RetryStrategy, RetryValue, Task, TaskRegistry
+from taskq.registry import FollowupTarget, RetryStrategy, RetryValue, Task, TaskRegistry
 from taskq.settings import WorkerSettings
 from taskq.transport import (
     AuthorizationLookupTransport,
@@ -101,6 +103,8 @@ __all__ = [
     "CancellationReason",
     "CancellationToken",
     "Complete",
+    "Followup",
+    "FollowupTarget",
     "EnqueueCreatedResult",
     "EnqueueExistedResult",
     "EnqueueResult",
@@ -142,6 +146,7 @@ __all__ = [
     "TaskqConflictError",
     "TaskqError",
     "TaskqInternalError",
+    "InvalidFollowupError",
     "TaskqNotFoundError",
     "TaskqUnavailableError",
     "TaskqValidationError",

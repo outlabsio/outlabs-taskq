@@ -43,6 +43,7 @@ from taskq.protocol import (
     EnqueueExistedResult,
     EnqueueManyItem,
     EnqueueResult,
+    Followup,
     HeartbeatResult,
     JobStatus,
     SettleAlreadySettledResult,
@@ -72,6 +73,7 @@ class EnqueuedJob(_TestingModel):
     idempotency_key: str | None = None
     status: JobStatus
     scheduled_at: datetime | None = None
+    parent_job_id: UUID | None = None
 
 
 class RecordedEnqueue(_TestingModel):
@@ -82,6 +84,7 @@ class RecordedEnqueue(_TestingModel):
     headers: dict[str, Any]
     idempotency_key: str | None = None
     status: Literal["created", "existed"]
+    parent_job_id: UUID | None = None
 
 
 class RecordedSettlement(_TestingModel):
@@ -140,6 +143,7 @@ class _FakeJob:
     attempt_number: int = 0
     failure_count: int = 0
     settled_command: str | None = None
+    parent_job_id: UUID | None = None
 
 
 @dataclass(slots=True)
@@ -162,6 +166,7 @@ _SAFE_FIELDS = {
     "idempotency_key",
     "status",
     "scheduled_at",
+    "parent_job_id",
 }
 
 
@@ -254,6 +259,7 @@ class FakeTaskQClient:
             idempotency_key=job.command.idempotency_key,
             status=job.status,
             scheduled_at=job.command.scheduled_at,
+            parent_job_id=job.parent_job_id,
         )
 
     async def enqueue(self, command: EnqueueCommand) -> EnqueueResult:
@@ -298,6 +304,7 @@ class FakeTaskQClient:
                 headers=deepcopy(command.headers or {}),
                 idempotency_key=command.idempotency_key,
                 status=status,
+                parent_job_id=job.parent_job_id,
             )
         )
         return result
@@ -608,13 +615,49 @@ class FakeTaskQClient:
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
     ) -> SettleResult:
         self._ensure_open()
         job, replay = self._replay_or_lost(job_id, attempt_id, worker_id, "complete")
         if replay is not None:
             return replay
         assert job is not None
+        children: list[tuple[_FakeJob, Literal["created", "existed"]]] = []
+        seen_steps: set[str] = set()
+        for followup in followups or ():
+            if followup.step in seen_steps:
+                raise TaskqConfigError("followup steps must be distinct")
+            seen_steps.add(followup.step)
+            queue = followup.queue or job.command.queue
+            if queue not in self._known_queues:
+                raise TaskqNotFoundError()
+            key = f"chain:{job.job_id}:{followup.step}"
+            identity = (queue, key)
+            existing_id = self._active_keys.get(identity)
+            command = EnqueueCommand(
+                queue=queue,
+                job_type=followup.job_type,
+                payload=deepcopy(followup.payload),
+                priority=followup.priority,
+                scheduled_at=followup.scheduled_at,
+                idempotency_key=key,
+                max_attempts=followup.max_attempts,
+                lease_seconds=followup.lease_seconds,
+                headers=deepcopy(followup.headers),
+            )
+            if existing_id is None:
+                child = _FakeJob(
+                    job_id=uuid4(),
+                    command=command,
+                    status=JobStatus.QUEUED,
+                    parent_job_id=job.job_id,
+                )
+                children.append((child, "created"))
+                continue
+            child = self._jobs[existing_id]
+            if child.parent_job_id != job.job_id or child.command != command:
+                raise TaskqInternalError()
+            children.append((child, "existed"))
         self._finish(
             job,
             command="complete",
@@ -622,6 +665,26 @@ class FakeTaskQClient:
             intent=Complete(result=dict(result or {}), followups=tuple(followups or ())),
             outcome="ok",
         )
+        for child, status in children:
+            if status == "created":
+                self._jobs[child.job_id] = child
+                self._order.append(child.job_id)
+                assert child.command.idempotency_key is not None
+                self._active_keys[(child.command.queue, child.command.idempotency_key)] = (
+                    child.job_id
+                )
+            self._enqueues.append(
+                RecordedEnqueue(
+                    job_id=child.job_id,
+                    queue=child.command.queue,
+                    job_type=child.command.job_type,
+                    payload=deepcopy(child.command.payload),
+                    headers=deepcopy(child.command.headers or {}),
+                    idempotency_key=child.command.idempotency_key,
+                    status=status,
+                    parent_job_id=job.job_id,
+                )
+            )
         return SettleOkResult(job_status=JobStatus.SUCCEEDED, scheduled_at=None)
 
     async def fail(
@@ -855,7 +918,7 @@ class _BoundSqlTransport:
         *,
         result: Mapping[str, Any] | None = None,
         stats: Mapping[str, Any] | None = None,
-        followups: Sequence[Mapping[str, Any]] | None = None,
+        followups: Sequence[Followup] | None = None,
     ) -> SettleResult:
         settled = await self.transport.complete(
             job_id,
@@ -1065,14 +1128,21 @@ class _InlineFakeTaskQClient(FakeTaskQClient):
         result = await super().enqueue(command)
         if not result.created:
             return result
+        await self._execute_job(result.job_id)
+        return result
+
+    async def _execute_job(self, job_id: UUID) -> None:
         if self.executed >= self.max_jobs:
             raise AssertionError("inline execution exceeded max_jobs; possible runaway followup")
-        task = self.registry.resolve(command.job_type)
+        job = self._jobs[job_id]
+        task = self.registry.resolve(job.command.job_type)
         if task is None or task.handler is None:
-            raise TaskqConfigError(f"inline task has no registered handler: {command.job_type!r}")
+            raise TaskqConfigError(
+                f"inline task has no registered handler: {job.command.job_type!r}"
+            )
         self.executed += 1
         worker_id = f"taskq-inline-{uuid4()}"
-        claimed = await self.claim(command.queue, worker_id, job_id=result.job_id)
+        claimed = await self.claim(job.command.queue, worker_id, job_id=job_id)
         if claimed.state is not ClaimState.CLAIMED:
             raise AssertionError(f"inline job was not claimable: {claimed.state.value}")
         before = len(self.settlements)
@@ -1082,21 +1152,12 @@ class _InlineFakeTaskQClient(FakeTaskQClient):
         record = self.settlements[before]
         if self.follow and isinstance(record.intent, Complete):
             for followup in record.intent.followups:
-                allowed = {"job_type", "payload", "idempotency_key"}
-                if set(followup) - allowed:
-                    raise TaskqConfigError("inline followup contains unsupported fields")
-                job_type = followup.get("job_type")
-                if not isinstance(job_type, str):
-                    raise TaskqConfigError("inline followup requires job_type")
-                follow_task = self.registry.resolve(job_type)
-                if follow_task is None:
-                    raise TaskqConfigError(f"inline followup task is not registered: {job_type!r}")
-                await TaskQ(self, registry=self.registry).enqueue(
-                    follow_task,
-                    followup.get("payload", {}),
-                    idempotency_key=followup.get("idempotency_key"),
-                )
-        return result
+                queue = followup.queue or record.queue
+                key = f"chain:{record.job_id}:{followup.step}"
+                child_id = self._active_keys.get((queue, key))
+                if child_id is None:
+                    raise AssertionError("native inline followup was not inserted")
+                await self._execute_job(child_id)
 
 
 def _max_jobs(value: int | None) -> int:

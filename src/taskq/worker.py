@@ -16,6 +16,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from taskq.errors import (
+    InvalidFollowupError,
     TaskqCapabilityError,
     TaskqConfigError,
     TaskqError,
@@ -713,6 +714,7 @@ class WorkerSupervisor:
     ) -> None:
         if not worker_id or len(worker_id) > 200:
             raise TaskqConfigError("worker_id must be non-empty and at most 200 characters")
+        registry.validate_followup_graph()
         self.transport = transport
         self.registry = registry
         self.worker_id = worker_id
@@ -974,8 +976,13 @@ class WorkerSupervisor:
 
         try:
             intent = self._normalize_handler_result(task, handler_value, handler_error)
+            invalid_followup = False
+        except InvalidFollowupError:
+            intent = NonRetryable(error="invalid_followup")
+            invalid_followup = True
         except (ValidationError, TaskqConfigError) as exc:
             intent = NonRetryable(error=f"invalid_handler_result: {_safe_handler_error(exc)}")
+            invalid_followup = False
         reason = control.cancellation.reason
         if reason is CancellationReason.OPERATOR:
             intent = Cancel(reason="operator_cancel_requested")
@@ -985,6 +992,13 @@ class WorkerSupervisor:
             intent = None
 
         try:
+            if invalid_followup:
+                return await self._settle_invalid_followup(
+                    claim,
+                    context.progress,
+                    capability_skew=False,
+                    control=control,
+                )
             return await self._settle_intent(
                 claim, intent, reason, context=context, control=control
             )
@@ -1147,7 +1161,13 @@ class WorkerSupervisor:
         if isinstance(value, HANDLER_RESULT_TYPES):
             if isinstance(value, Complete):
                 validated = task.output_model.model_validate(value.result)
-                return value.model_copy(update={"result": validated.model_dump(mode="json")})
+                followups = self.registry.normalize_followups(task, value.followups)
+                return value.model_copy(
+                    update={
+                        "result": validated.model_dump(mode="json"),
+                        "followups": followups,
+                    }
+                )
             return value
         candidate = {} if value is None else value
         validated = task.output_model.model_validate(candidate)
@@ -1376,7 +1396,7 @@ class WorkerSupervisor:
                 claim.job_id,
                 claim.attempt_id,
                 self.worker_id,
-                "invalid_followup: rejected by active SQL contract",
+                "invalid_followup: rejected by active worker or SQL contract",
                 retryable=False,
                 progress=progress,
             )

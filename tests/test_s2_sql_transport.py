@@ -22,6 +22,7 @@ from taskq.protocol import (
     EnqueueCommand,
     EnqueueManyItem,
     EnqueueStatus,
+    Followup,
     SettleOutcome,
 )
 from taskq.sql.manifest import (
@@ -215,6 +216,42 @@ async def test_runner_transport_all_commands_and_fence_redaction(
     cancelled = await transports["runner"].cancel_running(job_id, attempt_id, "worker", "stop")
     assert cancelled.result == "ok" and cancelled.job_status == "cancelled"
     assert str(attempt_id) not in caplog.text
+
+
+async def test_runner_transport_serializes_typed_cross_queue_followup(
+    pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    await _queue(transports, "s2_parent")
+    await _queue(transports, "s2_child")
+    await _enqueue(transports, "s2_parent")
+    job_id, attempt_id = await _claim(transports, "s2_parent", "worker")
+    settled = await transports["runner"].complete(
+        job_id,
+        attempt_id,
+        "worker",
+        followups=(
+            Followup(
+                step="child",
+                job_type="tests.child",
+                queue="s2_child",
+                payload={"value": 7},
+            ),
+        ),
+    )
+    assert settled.result == "ok"
+    child = await pg.fetchrow(  # type: ignore[union-attr]
+        "SELECT queue,job_type,parent_job_id,idempotency_key,payload "
+        "FROM taskq.jobs WHERE parent_job_id=$1",
+        job_id,
+    )
+    assert child is not None
+    assert dict(child) == {
+        "queue": "s2_child",
+        "job_type": "tests.child",
+        "parent_job_id": job_id,
+        "idempotency_key": f"chain:{job_id}:child",
+        "payload": '{"value": 7}',
+    }
 
 
 async def test_observer_and_housekeeper_transport(

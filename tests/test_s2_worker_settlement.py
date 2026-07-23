@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from taskq import (
     Cancel,
     Complete,
+    FollowupTarget,
     JobRunOutcome,
     JobRunState,
     NonRetryable,
@@ -66,7 +67,7 @@ async def cancel_handler(payload: Input) -> Cancel:
 async def followup_handler(payload: Input) -> Complete:
     return Complete(
         result={"doubled": payload.value * 2},
-        followups=({"job_type": "later.task", "payload": {}},),
+        followups=({"step": "later", "job_type": "later.task", "payload": {"value": 1}},),
     )
 
 
@@ -103,9 +104,23 @@ def _supervisor(
                 queue="worker",
                 input_model=Input,
                 output_model=Output,
+                followup_targets=(
+                    (FollowupTarget(queue="worker", job_type="later.task"),)
+                    if handler is followup_handler
+                    else ()
+                ),
                 handler=handler,  # type: ignore[arg-type]
             )
         )
+        if handler is followup_handler:
+            registry.register(
+                Task(
+                    name="later.task",
+                    queue="worker",
+                    input_model=Input,
+                    output_model=Output,
+                )
+            )
     return WorkerSupervisor(
         transport,  # type: ignore[arg-type]
         registry,

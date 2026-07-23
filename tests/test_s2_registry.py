@@ -12,6 +12,8 @@ from hypothesis import given, strategies as st
 from pydantic import BaseModel, ValidationError
 
 from taskq import (
+    Followup,
+    FollowupTarget,
     JobContext,
     ClaimedJob,
     EnqueueCreatedResult,
@@ -130,6 +132,87 @@ def test_invalid_task_policy(kwargs: dict[str, object], message: str) -> None:
             input_model=Input,
             output_model=Output,
             **kwargs,
+        )
+
+
+def test_followup_model_is_closed_bounded_and_registry_canonicalized() -> None:
+    child = Task(
+        name="math.child",
+        aliases=("math.child_old",),
+        queue="children",
+        input_model=Input,
+        output_model=Output,
+    )
+    parent = Task(
+        name="math.parent",
+        queue="parents",
+        input_model=Input,
+        output_model=Output,
+        followup_targets=(FollowupTarget(queue="children", job_type="math.child"),),
+    )
+    registry = TaskRegistry((parent, child))
+    registry.validate_followup_graph()
+    normalized = registry.normalize_followups(
+        parent,
+        (
+            Followup(
+                step="next",
+                job_type="math.child_old",
+                queue="children",
+                payload={"value": 4},
+            ),
+        ),
+    )
+    assert normalized == (
+        Followup(
+            step="next",
+            job_type="math.child",
+            queue="children",
+            payload={"value": 4},
+        ),
+    )
+    with pytest.raises(ValidationError):
+        Followup(step="bad space", job_type="math.child")
+    with pytest.raises(ValidationError):
+        Followup(step="next", job_type="math.child", invented=True)
+    with pytest.raises(ValidationError):
+        Followup(step="next", job_type="math.child", payload={"blob": "x" * 65_536})
+
+
+def test_followup_graph_rejects_missing_mismatched_and_undeclared_targets() -> None:
+    target = FollowupTarget(queue="children", job_type="math.child")
+    parent = Task(
+        name="math.parent",
+        queue="parents",
+        input_model=Input,
+        output_model=Output,
+        followup_targets=(target,),
+    )
+    missing = TaskRegistry((parent,))
+    with pytest.raises(TaskqConfigError, match="not registered"):
+        missing.validate_followup_graph()
+
+    wrong_queue_child = Task(
+        name="math.child",
+        queue="wrong",
+        input_model=Input,
+        output_model=Output,
+    )
+    mismatched = TaskRegistry((parent, wrong_queue_child))
+    with pytest.raises(TaskqConfigError, match="queue does not match"):
+        mismatched.validate_followup_graph()
+
+    child = Task(
+        name="math.child",
+        queue="children",
+        input_model=Input,
+        output_model=Output,
+    )
+    registry = TaskRegistry((parent, child))
+    with pytest.raises(TaskqConfigError, match="not declared"):
+        registry.normalize_followups(
+            parent,
+            (Followup(step="wrong", job_type="math.child", queue="other"),),
         )
 
 

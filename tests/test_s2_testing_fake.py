@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from taskq import TaskQ
+from taskq import Followup, TaskQ
 from taskq.errors import TaskqConfigError, TaskqConflictError
 from taskq.execution import Cancel, Complete, NonRetryable, Retry, Snooze
 from taskq.protocol import (
@@ -211,6 +211,37 @@ async def test_fake_records_every_runner_settlement_intent() -> None:
     assert intents[4] is None and fake.settlements[4].cause == "released"
     assert isinstance(intents[5], Cancel)
     assert {job.status for job in fake.pending} == {JobStatus.QUEUED}
+
+
+@pytest.mark.asyncio
+async def test_fake_native_followup_graph_matches_derived_child_contract() -> None:
+    fake = FakeTaskQClient(queues=("testing",))
+    parent = await _enqueue_and_claim(fake, suffix="parent")
+    followup = Followup(
+        step="child",
+        job_type="tests.child",
+        payload={"value": 7},
+    )
+    settled = await fake.complete(
+        parent.job_id,
+        parent.attempt_id,
+        "worker",
+        followups=(followup,),
+    )
+    replay = await fake.complete(
+        parent.job_id,
+        parent.attempt_id,
+        "worker",
+        followups=(followup,),
+    )
+    assert settled.result is SettleOutcome.OK
+    assert replay.result is SettleOutcome.ALREADY_SETTLED
+    assert len(fake.pending) == 1
+    child = fake.pending[0]
+    assert child.parent_job_id == parent.job_id
+    assert child.idempotency_key == f"chain:{parent.job_id}:child"
+    assert child.job_type == "tests.child"
+    assert child.payload == {"value": 7}
 
 
 @pytest.mark.asyncio
