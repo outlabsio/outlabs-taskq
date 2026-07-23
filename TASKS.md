@@ -27,7 +27,7 @@
 |---|---|
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01 and native follow-ups, workflows/dependencies, and schedules are complete; FR-02D now owns the last finite operator projections before the orchestration-wide audit and QDarte consumption. Production remains untouched |
 | Suite | taskq 577/577 regular with 1 opt-in skip on both local PostgreSQL 18.3 and a disposable exact 16.14 container after the complete schedule slice; the expanded million-row claim/dependency/finalizer/schedule plan gate is 2/2 on both majors, the schedule subset is 25/25 under warnings-as-errors on both, DB-free is 338/338, and Ruff/format are clean. The complete Python 3.12/3.13 × wheel/sdist × core/HTTP/OutLabs installed-artifact matrix is 12/12 and now executes the public schedule fake lifecycle in addition to asserting migrations 0001–0010 and the 62-function catalog. FR-01 repository-local drift gates pass across all four QDarte repositories; runtime is 1151/1151, workers 629/629, and admin 114/114 plus TypeScript/build. The API inventory gate passes independently; its unrelated whole-repository baseline currently has 15 order/environment failures among 1738 tests and remains a required cleanup before FR-AUDIT. The disposable PG18.3 local cutover gate passed twice from fresh containers through 0007; QDarte remains pinned to immutable a6 until the native-orchestration release is deliberately cut |
-| Contracts | Protocol v1 document revision 1.0.13 + Function Manifest target SQL 0.2.3 / installed SQL 0.2.2 (+ ADR-012..029). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; attempt/event timeline and generic reporting are rejected. Installed capabilities remain unchanged until immutable 0011 backing and proof-gated 0012 activation |
+| Contracts | Protocol v1 document revision 1.0.13 + Function Manifest target SQL 0.2.3 / installed SQL 0.2.2 (+ ADR-012..030). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters. Installed capabilities remain unchanged until immutable 0011 backing and proof-gated 0012 activation |
 | Next review | FR-02D-SPEC is complete. Bridge support, immutable backing, independent B9 evaluation, metadata-only activation, generated surface and audit proceed in that order. No production deployment, QDarte migration, old-ledger import or C8 observation has occurred |
 
 ## Now
@@ -324,7 +324,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-06 — Exact workflow counters cannot foreign-key the workflow row without breaking cancellation concurrency *(open)*
+### S5-QD-FR-CQ-06 — Exact workflow counters cannot foreign-key the workflow row without breaking cancellation concurrency *(resolved: ADR-030)*
 
 **Blocking evidence:** the first FR-02D full-suite run reached the existing
 choreographed `cancel_workflow` versus held-open `complete_job` history and
@@ -360,6 +360,12 @@ cancellation history to 1/1 in 0.20s. The queued→running→succeeded counter
 vector remained 1/1. No committed source or contract was changed by this
 prototype. This confirms the recommended repair addresses the measured lock
 cause without weakening count exactness or ADR-026 concurrency.
+
+**Resolution:** the owner approved ADR-030 on 2026-07-23. The private counter
+has no workflow FK; owner-private workflow lifecycle owns identity, job
+transitions are UPDATE-only and fail loudly on a missing live invariant row.
+Protocol 1.0.13, SQL 0.2.3, migration 0011 and every public identity remain
+unchanged. Implementation may resume docs-first.
 
 ### S5-QD-FR-CQ-05 — The seeded maintenance schedule has no public HTTP authorization or profile shape *(resolved: ADR-028)*
 

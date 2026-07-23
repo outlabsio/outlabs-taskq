@@ -19,7 +19,7 @@ Canonical home for the taskq design corpus. Host apps (Diverse, QDarte, outlabsA
 
 ## Tier 1 — decisions
 
-[ADR-001..029](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), ADR-023 (durable two-phase admission), ADR-024 (native follow-up activation), ADR-025 (private follow-up return correction), ADR-026 (sealed workflow/dependency activation), ADR-027 (native recurring schedules), ADR-028 (maintenance-schedule HTTP boundary), and ADR-029 (finite operator/workflow projections) are accepted. Reopening one requires new evidence and a new ADR.
+[ADR-001..030](./adr/README.md). Accepted across the design reviews, contract adjudications, and implementation gates; ADR-018 (operator UI stack), ADR-020 (SQL-contract compatibility), ADR-021 (read-model conformance repairs), ADR-022 (trusted worker side-effect reporting), ADR-023 (durable two-phase admission), ADR-024 (native follow-up activation), ADR-025 (private follow-up return correction), ADR-026 (sealed workflow/dependency activation), ADR-027 (native recurring schedules), ADR-028 (maintenance-schedule HTTP boundary), ADR-029 (finite operator/workflow projections), and ADR-030 (workflow-counter lock order) are accepted. Reopening one requires new evidence and a new ADR.
 
 ## Tier 2 — operating plan
 

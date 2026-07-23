@@ -1290,13 +1290,19 @@ catalog and activates only independently proven views.
    not get a wider projection merely because it bypasses HTTP.
 
 3. **Private exact counts.** Owner-private relation
-   `taskq.workflow_member_counts` has primary key/FK `workflow_id` with cascade
-   and six non-negative bigint columns for
+   `taskq.workflow_member_counts` has primary key `workflow_id`, deliberately
+   without a foreign key to the workflow, and six non-negative bigint columns for
    `blocked|queued|running|succeeded|failed|cancelled`. Owner-private
    `taskq.update_workflow_member_counts()` returns trigger, is volatile,
    `SECURITY DEFINER`, path-pinned and PUBLIC-revoked. It adjusts exactly the
    old/new workflow-status buckets on job insert, delete, workflow change or
-   status change. Migration 0011 backfills before creating the trigger.
+   status change using UPDATE only; a missing invariant row for a live workflow
+   is TQ500. Owner-private `taskq.manage_workflow_member_counts()` has the same
+   hardening and creates/removes counter identity with workflow lifecycle.
+   Migration 0011 backfills before creating the two exact triggers
+   `workflows_member_counts_lifecycle_trg` and
+   `jobs_workflow_member_counts_trg`. This no-FK shape is required by ADR-030:
+   counter maintenance may not lock a parent workflow during job settlement.
    No application role receives relation or function privilege.
 
 4. **Indexes.** Migration 0011 adds exactly:
