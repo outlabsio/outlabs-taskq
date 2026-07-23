@@ -241,7 +241,37 @@ No generic arbitrary-method/path/SQL reporter exists. Adding an effect family
 is docs-first and extends the closed union, registry declaration, authorization
 matrix, idempotency ledger, machine effect manifest, and vectors together.
 
-### 6.1 Non-domain operations
+### 6.1 Private reporter transport
+
+The QDarte host exposes exactly one internal effect endpoint:
+
+```text
+POST /internal/taskq/native-effects/{job_id}
+```
+
+It is not part of taskq Protocol v1 and is never mounted as a public operator
+or producer route. The host uses the same `QueueAuthorizer` supplied to the
+native taskq facade. It authenticates, then authorizes `run` on the
+authoritative queue, before reading or decoding the body. The body is streamed
+under the existing 8KB effect-request ceiling and contains only:
+
+- reporter-owned `attempt_id` and `worker_id`;
+- one discriminated request from the closed native effect union.
+
+The handler never supplies or sees the attempt identity. The transport binds
+it from `WorkerEffectAttempt`; the API revalidates the current heartbeat,
+queue, task type and stored strict payload before ledger inspection or domain
+mutation. Invalid JSON/shape returns a fixed non-echoing validation error;
+stale authority or canonical-intent mismatch returns a fixed conflict. No
+request field, credential, domain error text or task fence is echoed.
+
+The first active union member is `contact_verification`. Future families extend
+the same union docs-first; they do not add arbitrary paths or a generic method
+selector. SQL-only tests may call the adapter directly, while HTTP parity must
+prove bad credentials and queue denial happen before body decode and produce
+zero ledger/domain writes.
+
+### 6.2 Non-domain operations
 
 Provider/search/model reads may repeat only inside their existing metered
 reservation and retry policy; they never claim exactly-once behavior.
@@ -254,7 +284,7 @@ stable job/operation identity and an independently observable receipt.
 Ambiguous execution is inspected before retry. Neither may execute from
 settlement or from a generic reporter escape hatch.
 
-### 6.2 Settlement separation
+### 6.3 Settlement separation
 
 The old `publish_scope` mutation inside `complete_job` is a deletion target.
 The native publish handler obtains the stable `publish` receipt before it
