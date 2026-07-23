@@ -338,7 +338,8 @@ request field, credential, domain error text or task fence is echoed.
 
 The active union members are `contact_verification`,
 `website_verification`, `tripadvisor_classification`, `photo_verification`,
-`editorial_enrichment`, and the private `llm_provider_control` member. Future families
+`editorial_enrichment`, `listing_research`, and the private
+`llm_provider_control` member. Future families
 extend the same union docs-first; they do not add arbitrary paths or a generic
 method selector. SQL-only tests may call the adapter directly, while HTTP
 parity must prove bad credentials and authoritative-queue denial happen before
@@ -349,6 +350,44 @@ the executable native-model ceiling. Authentication and authoritative
 queue-scoped `run` authorization still complete before reading or decoding the
 body. Every closed member retains its own narrower field and collection
 bounds; the larger aggregate ceiling does not admit arbitrary JSON.
+
+#### Listing-research member
+
+`listing_research_scope` uses the existing private reporter route and
+`qdarte_content` queue authorization. Before enqueueing the parent, the
+producer mints one stable UUID `bundle_id` for each planned entity and may
+attach one fully materialized `content_synthesis_scope` child that references
+that same bundle. Entity and branch-plan sets are equal, bundle identities are
+unique, child scope equals parent scope, steps are unique, and the job carries
+at most 20 children. A handler never mints an artifact identity, calls a
+planner, or constructs synthesis input after provider work.
+
+The handler may report only `inspect` or `apply` for family
+`listing_research`, operation key `apply`, the planned entity key, stable
+`bundle_id`, and one bounded research result. A ready result carries the exact
+canonical writer-input bundle accepted by QDarte's writer-input firewall; an
+underfilled result carries no bundle. The result includes only bounded
+warnings, source-discovery mode, input fingerprint and guard reason needed by
+the authoritative transition. The complete reporter envelope remains at most
+64KB, collections are finite, strings are bounded, and provider/model labels,
+caller timestamps, filesystem paths, credentials, diagnostics and arbitrary
+result metadata are absent.
+
+The API re-derives content and plan authority from the stored strict task
+input, revalidates the writer-input firewall, and persists the artifact under
+the producer-minted `bundle_id`. It evaluates current content and launch state
+at database time and commits artifact, pipeline mutation and effect receipt in
+one transaction. Its family-specific response returns the ordinary stable
+receipt plus exactly one authoritative disposition:
+`synthesis_ready`, `curated_hold`, or `blocked_exhausted`. Inspect and exact
+apply replay return the same disposition and receipt.
+
+After a committed apply, the handler selects the already-materialized
+synthesis child only for `synthesis_ready`. The other dispositions select no
+child. The synthesis domain reader later resolves the stable `bundle_id`;
+application artifacts are not copied into taskq, and no old queue/client or
+completion hook remains in that path. Response-loss replay returns the
+identical receipt, disposition and child.
 
 #### Editorial-enrichment member
 

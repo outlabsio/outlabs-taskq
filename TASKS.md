@@ -28,7 +28,7 @@
 | Stage | **Stage 5 QDarte full replacement** — the owner has retired the contact-only strangler direction as the destination. The only active goal is one native taskq system for every QDarte lane, followed by deletion of both old queue implementations, every compatibility mode/wrapper, and their execution data. Business content remains; queue history is not migrated. FR-00/01/02 are complete and FR-03 is active. CQ-11 and FR-03C-PHOTO are complete: the hidden completion effects are native and the real photo-specific process-kill conservation gate passes. Production remains untouched |
 | Suite | taskq 584/584 regular with 1 opt-in skip on local PostgreSQL 18.3 using the CI-shaped Redis; the previously accepted exact-16.14 lane is unchanged and Ruff is clean. Published `v0.1.0a7` remains the exact QDarte pin. Runtime is 1172/1172 with clean Ruff/196-file MyPy; workers are 684/684 with clean Ruff/64-file MyPy; the API is 1764 passed/10 unchanged unrelated baseline failures with clean Ruff/202-file MyPy. The photo process-kill drill killed the first worker after provider return and artifact publication, reclaimed the same job through lease expiry, conserved two external calls as one known provider event plus one `expired_unsettled` generation, applied one `verified` effect, retained one artifact and an exact empty child set, and left both old ledgers empty. The drill also caught and fixed the trusted reporter's missing photo queue/type registration. No persistent QDarte database or production state changed |
 | Contracts | Protocol v1 document revision 1.0.13 + Function Manifest/installed SQL 0.2.3 through immutable migration 0013 (+ ADR-012..031). ADR-029 freezes only finite running/finished queue pages and one exact workflow projection; ADR-030 preserves cancellation lock order through no-FK private counters; ADR-031 adds only QDarte's private closed provider-control reporter member. B9-backed migration 0012 activates all three finite projections, and 0013 repairs only the committed workflow-page composite assignment without changing its identity or capability state |
-| Next review | CQ-14 and the native editorial-enrichment family are complete across taskq `85ec95e`, runtime `ebf31d1`, API `eb0c8e7`, and workers `d0dd596`. Continue the source-swept FR-03D families; `listing_research_scope` is the next family whose completion hook combines a closed mutation with a preplanned child |
+| Next review | CQ-15 freezes the native listing-research family docs-first: producer-minted stable bundle identity, bounded canonical writer bundle, authoritative typed disposition, and a preplanned synthesis branch. Implement the runtime/API/worker family without restoring an old result route or planning after provider work |
 
 ## Now
 
@@ -94,6 +94,7 @@
     - [x] **FR-03D-CLASSIFICATION · Native classification family and hard-kill conservation complete** — API `7dc69fd`/`08aff8b` adds the source-backed classification adapter, durable provider-control transactions and loop-isolated tests; workers `4c1e817`/`5dce354` bind the exact queue/type and compose the classification-only `WorkerService`. CQ-13 remediations `97be822`/`2229cfe` prevent cross-attempt provider authority while a live reservation exists. Workers `8ec7b37` and API `1f6ffbe` add a guarded local process-kill harness and immutable evidence: a real first worker exits `-9` after provider return, the same taskq job reclaims through `lease_expired`, attempt 2 records generation 1 as `expired_unsettled` without egress, attempt 3 spends generation 2 and succeeds, and the raw oracle proves 2 external calls = 1 provider event + 1 unknown-cost generation, one native effect, zero releases and zero old job/event rows. Runtime 1170/1170, workers 676/676, taskq 584/584 plus one opt-in skip, and the API's recorded 1761-pass/10-failure unrelated baseline all reproduce with clean static gates. No persistent database, external provider, old worker or production state changed.
     - [x] **FR-03D-EDITORIAL-SPEC · Bounded editorial-enrichment effect frozen** — CQ-14 resolves the mismatch between a content-carrying editorial result and the private reporter's former 8KB ceiling without restoring an old result route or adding artifact-location coupling. The existing private endpoint remains authenticate → authoritative queue-run authorize → bounded decode, but its aggregate ceiling becomes the native model ceiling of 64KB. The closed `editorial_enrichment` member carries one strict draft/status result, uses stored input for row identity, applies at database time, and returns only a bounded receipt. Exact per-entity optional review branches are producer-planned, scope-equal, capped at 20 and selected only after the effect commits; response-loss replay returns the identical receipt and child. Metered model calls use ADR-031 provider control. No Tier-0/1, SQL, migration, package, QDarte source, database, provider or production state changed.
     - [x] **FR-03D-EDITORIAL · Native editorial-enrichment family complete** — runtime `ebf31d1` adds the strict draft/status effect, exact per-entity review plans and the editorial ADR-031 provider member under the 64KB aggregate boundary; the machine effect inventory now cites only the native handler and authoritative domain owner. API `eb0c8e7` authorizes the current content task from stored SQL authority, raises the private streamed ceiling only after authentication/queue-run authorization, applies bounded locales and review state at database time, and records the effect receipt atomically. Workers `d0dd596` inspects before egress, reserves/settles provider usage, applies once, and returns only the scope-equal preplanned review child; replay skips the provider and returns byte-equivalent result/child intent. Runtime passes 1173 with one unrelated dependency warning, workers 687, and the API baseline is 1766 pass/10 unchanged unrelated failures; focused warning-as-error, Ruff and configured MyPy gates are clean. No old job/attempt/client enters the native graph, no service/provider/database/queue/worker started, and production remains untouched.
+    - [x] **FR-03D-LISTING-SPEC · Native listing-research artifact and branch contract frozen** — CQ-15 resolves the completion-time artifact identity and branch-selection gap without putting application blobs in taskq or restoring an old result route. Producers mint one stable bundle UUID and fully materialize an optional scope-equal synthesis child before parent enqueue. The closed `listing_research` effect carries only a bounded writer-firewalled bundle or bounded underfill result; the API persists it under that identity and atomically returns the stable receipt plus `synthesis_ready | curated_hold | blocked_exhausted` from authoritative current state. The worker only selects the preplanned child after that disposition commits; inspect and response-loss replay return the identical disposition, receipt and child. No Tier-0/1, SQL, migration, package, QDarte source, database, provider or production state changed.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -348,6 +349,45 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-15 — Listing artifact identity and synthesis eligibility exist only at completion time *(resolved: producer-minted bundle identity plus authoritative typed disposition)*
+
+**Blocking evidence:** the source-derived table correctly requires a closed
+`listing_research` mutation plus a preplanned synthesis branch, but the old
+completion hook generates the reusable artifact identity while applying the
+worker result and decides synthesis eligibility from current content and
+launch-pipeline state. A fully preplanned native child therefore cannot name
+the artifact it will consume, while a worker choosing from its own readiness
+flag would bypass curated holds and exhaustion. Planning the child after
+provider work violates CQ-10; returning to the old result route preserves the
+retiring wrapper; embedding the complete research bundle in taskq duplicates
+application data and may exceed the bounded child contract.
+
+**Resolution:** the producer mints a stable per-entity `bundle_id` before the
+parent enqueue and uses it in both the listing plan and optional fully
+materialized synthesis child. The listing effect persists the bounded,
+writer-firewalled bundle under that identity and atomically evaluates
+authoritative current state. Its family-specific response returns the stable
+effect receipt plus exactly one disposition:
+`synthesis_ready | curated_hold | blocked_exhausted`. The handler selects the
+already-planned synthesis child only for `synthesis_ready`; the other
+dispositions select none. A future native synthesis handler resolves the
+bundle through a bounded domain read by `bundle_id`, never through taskq or an
+old queue client.
+
+The reporter envelope remains capped at 64KB. Ready results contain exactly a
+canonical writer-input bundle whose manifest is semantically revalidated;
+underfilled results contain no bundle. Counts, warnings, fingerprints and
+guard reasons are finite and bounded, and arbitrary result metadata, raw
+provider bodies, diagnostics, credentials, caller timestamps and filesystem
+paths are forbidden. Inspect/apply replay returns the same receipt and
+disposition; response-loss replay creates neither a second artifact nor a
+different child.
+
+This is a Tier-3 internal integration correction. It changes no taskq
+Protocol, Function Manifest, SQL contract, migration or public facade. The
+owner has authorized the primary agent to self-review while the external
+reviewer is unavailable; this resolution is recorded before implementation.
 
 ### S5-QD-FR-CQ-14 — Editorial content cannot fit the private reporter's 8KB envelope *(resolved: bounded 64KB content-effect envelope)*
 
