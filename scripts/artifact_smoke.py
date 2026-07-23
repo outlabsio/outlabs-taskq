@@ -75,6 +75,8 @@ def main() -> None:
         Complete,
         Followup,
         JobContext,
+        ScheduleDefinition,
+        ScheduleState,
         TaskQ,
         TaskRegistry,
         WorkerOptions,
@@ -180,6 +182,26 @@ def main() -> None:
         assert replayed_parent.job_id == parent.job_id
         sealed = await facade.seal_workflow(workflow.workflow_id, actor="artifact-smoke")
         assert sealed.outcome == "sealed"
+        schedule_definition = ScheduleDefinition.model_validate(
+            {
+                "target": {
+                    "kind": "job",
+                    "queue": "artifact",
+                    "job_type": "artifact.scheduled",
+                },
+                "recurrence": {"kind": "interval", "interval_seconds": 60},
+                "catchup_policy": "fire_all",
+                "max_catchup": 1,
+            }
+        )
+        schedule = await fake.put_schedule("artifact.minute", schedule_definition, "artifact-smoke")
+        assert schedule.outcome == "created"
+        assert (await fake.get_schedule("artifact.minute")).state is ScheduleState.ACTIVE
+        retired = await fake.retire_schedule(
+            "artifact.minute", schedule.profile.version, "artifact-smoke"
+        )
+        assert retired.outcome == "retired"
+        assert retired.profile.state is ScheduleState.RETIRED
 
     asyncio.run(smoke_testing())
 
