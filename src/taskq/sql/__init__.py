@@ -531,6 +531,7 @@ def _verify_impl(conn: Connection, migrations: Sequence[Migration] | None = None
             _check_constraints(conn),
             _check_indexes(conn),
             _check_views(conn),
+            _check_triggers(conn),
             _check_relation_privileges(conn),
             _check_seed_state(conn),
             _check_external_foreign_keys(conn),
@@ -953,6 +954,24 @@ def _check_views(conn: Connection) -> VerifyCheck:
         {"schema": SCHEMA},
     ).mappings()
     return _digest_check("views", rows, _manifest.VIEW_DEFINITIONS)
+
+
+def _check_triggers(conn: Connection) -> VerifyCheck:
+    rows = conn.execute(
+        text(
+            """
+            SELECT t.tgname AS relname,
+                   pg_catalog.md5(pg_catalog.pg_get_triggerdef(t.oid, false)) AS digest
+              FROM pg_catalog.pg_trigger t
+              JOIN pg_catalog.pg_class c ON c.oid = t.tgrelid
+              JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+             WHERE n.nspname = :schema AND NOT t.tgisinternal
+             ORDER BY t.tgname
+            """
+        ),
+        {"schema": SCHEMA},
+    ).mappings()
+    return _digest_check("triggers", rows, _manifest.TRIGGERS)
 
 
 def _check_relation_privileges(conn: Connection) -> VerifyCheck:

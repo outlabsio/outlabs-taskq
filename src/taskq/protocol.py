@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.12"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.13"
 T = TypeVar("T")
 
 
@@ -1019,6 +1019,60 @@ class WorkflowAuthorizationProjection(BaseModel):
     declared_queues: tuple[str, ...]
 
 
+class WorkflowReadProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: UUID
+    kind: WorkflowKind
+    status: WorkflowStatus
+    sealed: bool
+    cancel_requested: bool
+    declared_queues: tuple[str, ...]
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+class WorkflowStateCounts(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    blocked: int = Field(ge=0)
+    queued: int = Field(ge=0)
+    running: int = Field(ge=0)
+    succeeded: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    cancelled: int = Field(ge=0)
+
+
+class WorkflowMemberProjection(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    job_id: UUID
+    queue: str
+    job_type: str
+    step_key: str
+    status: JobStatus
+    outcome: str | None = None
+    pending_deps: int = Field(ge=0)
+    attempt_count: int = Field(ge=0)
+    failure_count: int = Field(ge=0)
+    created_at: datetime
+    scheduled_at: datetime
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    updated_at: datetime
+
+
+class WorkflowPage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    profile: WorkflowReadProfile
+    counts: WorkflowStateCounts
+    items: tuple[WorkflowMemberProjection, ...]
+    next_after: UUID | None = None
+
+
 class ScheduleState(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -1255,6 +1309,7 @@ class CommandName(StrEnum):
     WORKER_HEARTBEAT = "worker_heartbeat"
     GET_AUTHORIZATION_PROJECTION = "get_authorization_projection"
     GET_WORKFLOW_AUTHORIZATION_PROJECTION = "get_workflow_authorization_projection"
+    GET_WORKFLOW_PAGE = "get_workflow_page"
     GET_JOB = "get_job"
     GET_QUEUE_STATS = "get_queue_stats"
     GET_QUEUE_PROFILE = "get_queue_profile"
@@ -1558,6 +1613,12 @@ COMMAND_SPECS: Final = MappingProxyType(
             _OBSERVER,
             ("ok",),
             (TqCode.NOT_FOUND,),
+        ),
+        CommandName.GET_WORKFLOW_PAGE: _spec(
+            "taskq.get_workflow_page(uuid,integer,uuid)",
+            _OBSERVER,
+            ("ok",),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.CAPABILITY),
         ),
         CommandName.GET_JOB: _spec(
             "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
@@ -2351,7 +2412,11 @@ __all__ = [
     "WorkflowCancelWireRequest",
     "WorkflowAuthorizationProjection",
     "WorkflowKind",
+    "WorkflowMemberProjection",
+    "WorkflowPage",
+    "WorkflowReadProfile",
     "WorkflowResult",
+    "WorkflowStateCounts",
     "WorkflowStatus",
     "WorkflowWireData",
 ]

@@ -67,6 +67,7 @@ from taskq.protocol import (
     SETTLE_RESULT_ADAPTER,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowPage,
     WorkflowResult,
 )
 
@@ -924,6 +925,27 @@ class SqlTaskqTransport:
             )
             row = rows[0] if rows else None
             return QueueProfile.model_validate(row) if row is not None else None
+
+        return await self._run(operation)
+
+    async def get_workflow_page(
+        self,
+        workflow_id: UUID,
+        *,
+        limit: int = 50,
+        after: UUID | None = None,
+    ) -> WorkflowPage:
+        async def operation(conn: AsyncConnection) -> WorkflowPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_workflow_page(:workflow_id, :limit, :after)",
+                {"workflow_id": workflow_id, "limit": limit, "after": after},
+            )
+            data = dict(row)
+            data["profile"] = dict(data["profile"])
+            data["counts"] = dict(data["counts"])
+            data["items"] = [dict(item) for item in data["items"]]
+            return WorkflowPage.model_validate(data)
 
         return await self._run(operation)
 

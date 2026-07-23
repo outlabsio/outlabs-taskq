@@ -360,6 +360,7 @@ def test_capability_protocol_method_sets_are_exact() -> None:
         "get_job",
         "get_queue_stats",
         "get_queue_profile",
+        "get_workflow_page",
         "list_jobs",
         "get_contract_meta",
         "metrics",
@@ -450,7 +451,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.12"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.13"
     _assert_catalog_matches_hand_derived_oracle()
 
 

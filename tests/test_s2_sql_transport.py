@@ -57,7 +57,7 @@ async def transports(sqlalchemy_dsn: str) -> AsyncIterator[dict[str, SqlTaskqTra
 
 def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS)
-    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 47
+    assert len(METHOD_FUNCTIONS) == len(PUBLIC_FUNCTIONS) == 48
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
@@ -375,7 +375,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.2.2"
+    assert meta.contract_version == "0.2.3"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -466,7 +466,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.2.2"
+    assert (await transport.get_contract_meta()).contract_version == "0.2.3"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

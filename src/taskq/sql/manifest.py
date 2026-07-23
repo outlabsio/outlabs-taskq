@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.2.2.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.2.3.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.2.2"
+CONTRACT_VERSION = "0.2.3"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -52,6 +52,7 @@ TABLES = frozenset(
         "schedules",
         "schema_migrations",
         "workers",
+        "workflow_member_counts",
         "workflows",
     }
 )
@@ -73,6 +74,7 @@ TABLE_SHAPES = {
     "schedules": (25, "88fc147fc072032e53292d85d4221ab0"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
     "workers": (9, "25f0d3e2a63909dd4c52719c1f53bae4"),
+    "workflow_member_counts": (7, "e67c8f0527d766aabed968828b715d78"),
     "workflows": (16, "d3f3ac436c0c6b69a9f2a11ac8357018"),
 }
 
@@ -94,6 +96,7 @@ CONSTRAINTS = {
     "schedules": (11, "ebdc41f67bf31c91d1fe215f9c59304f"),
     "schema_migrations": (1, "9a70b629e02d9c9c4c87285047e4c5fa"),
     "workers": (1, "21a9c8f0ac7e4e770db780e76f5c2909"),
+    "workflow_member_counts": (7, "8ebd9e0d24f45a6d03bbace6ffb0218f"),
     "workflows": (8, "57da0d13fc463f4e7034b21ecee615a9"),
 }
 
@@ -119,6 +122,9 @@ INDEXES = {
     "jobs_idem_uq": "f98d23c969575471f8495ad15cf52e7c",
     "jobs_pkey": "b59e69add87d0884c846718de43ad608",
     "jobs_running_idx": "afaae7903e591ffc4b37aa0803909d8e",
+    "taskq_jobs_finished_page_idx": "57c29b5584e219f10a116a547cb8ca35",
+    "taskq_jobs_running_page_idx": "8bccca5a06abf38572eeefbd1c1651af",
+    "taskq_jobs_workflow_page_idx": "087d5ee07fab975ca1dd1683087bd2bb",
     "jobs_workflow_state_idx": "5b4b0d89b781ae404916db187cf80ba5",
     "jobs_workflow_step_uq": "7eeaab0df8faf0900e8ed4f24fc763d4",
     "meta_pkey": "0d779a67c6f4038a1c416b7775e6c96e",
@@ -131,6 +137,7 @@ INDEXES = {
     "uq_job_attempts_running": "dc6b831d4b3259c15d2a6c7f68b6794a",
     "workers_pkey": "c800776a247ce583b0e856c87493c7c4",
     "workers_seen_idx": "c5414b98a1d4a1df241eacf53433412e",
+    "workflow_member_counts_pkey": "62678a23481a47eb004c57b4f2d3239a",
     "workflows_cancel_idx": "8ebdccd99ee8872c4fda1107449608ae",
     "workflows_finalize_idx": "fd3c52cd8e700836ff8210954a5f2a32",
     "workflows_pkey": "0c296a3e7b13c6006a18b95cd1c8a451",
@@ -141,6 +148,11 @@ VIEW_DEFINITIONS = {
     "dead_jobs": "a1d7c075defc79dd3863aed346024101",
     "queue_stats": "76c6cf76aa0accc11b8c9a1b07a54d9a",
     "worker_status": "7e1a77b0bc8380895aaf512c29e6f1d1",
+}
+
+TRIGGERS = {
+    "jobs_workflow_member_counts_trg": "e205009f6b176d0896964355ac52b416",
+    "workflows_member_counts_lifecycle_trg": "b320cf77e24f9a929354b960dfdd54d2",
 }
 
 COMPOSITES = {
@@ -281,6 +293,48 @@ COMPOSITES = {
         ("workflow_id", "uuid"),
         ("status", "text"),
     ),
+    "workflow_member_projection": (
+        ("job_id", "uuid"),
+        ("queue", "text"),
+        ("job_type", "text"),
+        ("step_key", "text"),
+        ("status", "text"),
+        ("outcome", "text"),
+        ("pending_deps", "integer"),
+        ("attempt_count", "integer"),
+        ("failure_count", "integer"),
+        ("created_at", "timestamp with time zone"),
+        ("scheduled_at", "timestamp with time zone"),
+        ("started_at", "timestamp with time zone"),
+        ("finished_at", "timestamp with time zone"),
+        ("updated_at", "timestamp with time zone"),
+    ),
+    "workflow_page": (
+        ("as_of", "timestamp with time zone"),
+        ("profile", "taskq.workflow_read_profile"),
+        ("counts", "taskq.workflow_state_counts"),
+        ("items", "taskq.workflow_member_projection[]"),
+        ("next_after", "uuid"),
+    ),
+    "workflow_read_profile": (
+        ("workflow_id", "uuid"),
+        ("kind", "text"),
+        ("status", "text"),
+        ("sealed", "boolean"),
+        ("cancel_requested", "boolean"),
+        ("declared_queues", "text[]"),
+        ("created_at", "timestamp with time zone"),
+        ("updated_at", "timestamp with time zone"),
+        ("finished_at", "timestamp with time zone"),
+    ),
+    "workflow_state_counts": (
+        ("blocked", "bigint"),
+        ("queued", "bigint"),
+        ("running", "bigint"),
+        ("succeeded", "bigint"),
+        ("failed", "bigint"),
+        ("cancelled", "bigint"),
+    ),
 }
 
 
@@ -329,10 +383,12 @@ taskq.get_queue_stats(text)|p_queue text DEFAULT NULL::text|TABLE(as_of timestam
 taskq.get_schedule(text)|p_name text|taskq.schedule_profile|plpgsql|s|u|taskq_operator
 taskq.get_schedule_authorization_projection(text)|p_name text|taskq.schedule_auth_projection|plpgsql|s|u|taskq_operator
 taskq.get_workflow_authorization_projection(uuid)|p_workflow_id uuid|taskq.workflow_auth_projection|plpgsql|s|u|taskq_observer
+taskq.get_workflow_page(uuid,integer,uuid)|p_workflow_id uuid, p_limit integer DEFAULT 50, p_after uuid DEFAULT NULL::uuid|taskq.workflow_page|plpgsql|s|u|taskq_observer
 taskq.has_capability(text)|p_name text|boolean|sql|s|u|
 taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|TABLE(ok boolean, cancel_requested boolean, lease_expires_at timestamp with time zone)|plpgsql|v|u|taskq_runner
 taskq.janitor()||jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
 taskq.list_jobs(text,text,integer,jsonb)|p_queue text, p_view text, p_limit integer DEFAULT 50, p_after jsonb DEFAULT NULL::jsonb|taskq.job_page|plpgsql|s|u|taskq_observer
+taskq.manage_workflow_member_counts()||trigger|plpgsql|v|u|
 taskq.metrics()||TABLE(name text, labels jsonb, value numeric)|sql|s|u|taskq_observer
 taskq.pause_queue(text,text,text)|p_name text, p_actor text, p_reason text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.purge_queued(text,integer,text,text)|p_queue text, p_limit integer, p_actor text, p_reason text DEFAULT NULL::text|integer|plpgsql|v|u|taskq_operator
@@ -356,6 +412,7 @@ taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id 
 taskq.tick(integer)|p_reap_limit integer DEFAULT 200|jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
 taskq.truncate_utf8(text,integer)|p_value text, p_max_bytes integer|text|plpgsql|i|s|
 taskq.update_queue_profile(text,jsonb,text,bigint)|p_name text, p_profile jsonb, p_actor text, p_expected_version bigint|taskq.queue_profile_update|plpgsql|v|u|taskq_operator
+taskq.update_workflow_member_counts()||trigger|plpgsql|v|u|
 taskq.uuid7()||uuid|sql|v|s|
 taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)|p_worker_id text, p_queues text[], p_hostname text DEFAULT NULL::text, p_pid integer DEFAULT NULL::integer, p_version text DEFAULT NULL::text, p_meta jsonb DEFAULT NULL::jsonb|TABLE(shutdown_requested boolean)|plpgsql|v|u|taskq_runner
 """.strip()
@@ -414,6 +471,7 @@ PUBLIC_ERRORS = {
     "taskq.get_schedule(text)": frozenset({"TQ001"}),
     "taskq.get_schedule_authorization_projection(text)": frozenset({"TQ001"}),
     "taskq.get_workflow_authorization_projection(uuid)": frozenset({"TQ001"}),
+    "taskq.get_workflow_page(uuid,integer,uuid)": frozenset({"TQ001", "TQ422", "TQ501"}),
     "taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)": frozenset({"TQ422"}),
     "taskq.janitor()": frozenset(),
     "taskq.list_jobs(text,text,integer,jsonb)": frozenset({"TQ001", "TQ422", "TQ501"}),
@@ -461,7 +519,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.2.2"',
+    "contract_version": '"0.2.3"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
         '"followups", "read_model_list_ready", "schedules"]}'

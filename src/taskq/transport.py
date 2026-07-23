@@ -42,6 +42,7 @@ from taskq.protocol import (
     SettleResult,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowPage,
     WorkflowResult,
 )
 
@@ -198,6 +199,10 @@ class ObserverTransport(ClosableTransport, Protocol):
     ) -> JobPage: ...
 
     async def get_queue_profile(self, queue: str) -> QueueProfile | None: ...
+
+    async def get_workflow_page(
+        self, workflow_id: UUID, *, limit: int = 50, after: UUID | None = None
+    ) -> WorkflowPage: ...
 
     async def get_job(
         self,

@@ -539,7 +539,7 @@ async def test_0009_to_0010_transition_and_full_verify(taskq_dsn: str) -> None:
     engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
     try:
         migrations = discover_migrations()
-        assert migrations[-1].id == "0010_schedules"
+        assert migrations[9].id == "0010_schedules"
         async with engine.connect() as conn:
             applied = await conn.run_sync(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[:9])
@@ -556,8 +556,6 @@ async def test_0009_to_0010_transition_and_full_verify(taskq_dsn: str) -> None:
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[9:10])
             )
             assert applied == ["0010_schedules"]
-            report = await verify(conn)
-            assert report.ok, report
             meta = (await conn.exec_driver_sql("SELECT * FROM taskq.get_contract_meta()")).one()
             assert meta.contract_version == "0.2.2"
             assert meta.capabilities["active"] == [
@@ -567,6 +565,12 @@ async def test_0009_to_0010_transition_and_full_verify(taskq_dsn: str) -> None:
                 "read_model_list_ready",
                 "schedules",
             ]
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[10:11])
+            )
+            assert applied == ["0011_finite_projections"]
+            report = await verify(conn)
+            assert report.ok, report
     finally:
         await engine.dispose()
         admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))

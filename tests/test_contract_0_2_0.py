@@ -344,7 +344,7 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
             applied = await conn.run_sync(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[8:])
             )
-            assert applied == ["0009_workflows", "0010_schedules"]
+            assert applied == ["0009_workflows", "0010_schedules", "0011_finite_projections"]
             report = await verify(conn)
             assert report.ok
     finally:

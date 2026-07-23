@@ -807,6 +807,10 @@ async def test_0008_to_0009_transition_is_atomic_and_capability_gated(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[9:10])
             )
             assert applied == ["0010_schedules"]
+            applied = await conn.run_sync(
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[10:11])
+            )
+            assert applied == ["0011_finite_projections"]
             report = await verify(conn)
             assert report.ok
     finally:
