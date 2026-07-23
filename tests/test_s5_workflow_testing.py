@@ -55,16 +55,27 @@ async def test_fake_is_a_native_structural_workflow_transport() -> None:
             step_key="parent",
         )
     )
+    sibling = await fake.enqueue(
+        EnqueueCommand(
+            queue="fake_a",
+            job_type="tests.sibling",
+            payload={},
+            workflow_id=created.workflow_id,
+            step_key="sibling",
+        )
+    )
     child_command = EnqueueCommand(
         queue="fake_b",
         job_type="tests.child",
         payload={},
         workflow_id=created.workflow_id,
         step_key="child",
-        depends_on=(parent.job_id,),
+        depends_on=(parent.job_id, sibling.job_id),
     )
     child = await fake.enqueue(child_command)
-    replay = await fake.enqueue(child_command)
+    replay = await fake.enqueue(
+        child_command.model_copy(update={"depends_on": (sibling.job_id, parent.job_id)})
+    )
     assert child.job_id == replay.job_id
     assert {job.job_id: job.status for job in fake._jobs.values()}[
         child.job_id
@@ -73,6 +84,12 @@ async def test_fake_is_a_native_structural_workflow_transport() -> None:
     claim = await fake.claim("fake_a", "fake-worker", job_id=parent.job_id)
     attempt = claim.jobs[0]
     await fake.complete(parent.job_id, attempt.attempt_id, "fake-worker")
+    assert {job.job_id: job.status for job in fake._jobs.values()}[
+        child.job_id
+    ] is JobStatus.BLOCKED
+    sibling_claim = await fake.claim("fake_a", "fake-worker", job_id=sibling.job_id)
+    sibling_attempt = sibling_claim.jobs[0]
+    await fake.complete(sibling.job_id, sibling_attempt.attempt_id, "fake-worker")
     assert {job.job_id: job.status for job in fake._jobs.values()}[child.job_id] is JobStatus.QUEUED
     sealed = await fake.seal_workflow(created.workflow_id, "unit")
     assert sealed.outcome == "sealed"

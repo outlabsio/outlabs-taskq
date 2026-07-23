@@ -38,6 +38,7 @@ from taskq.protocol import (
     ClaimedJob,
     ClaimResult,
     ClaimState,
+    CreateWorkflowWireRequest,
     EnqueueCommand,
     EnqueueCreatedResult,
     EnqueueExistedResult,
@@ -213,6 +214,13 @@ def _matches(record: RecordedEnqueue | EnqueuedJob, where: Mapping[str, object] 
     )
 
 
+def _workflow_command_identity(command: EnqueueCommand) -> dict[str, Any]:
+    identity = command.model_dump(mode="json")
+    if command.depends_on is not None:
+        identity["depends_on"] = sorted(str(item) for item in command.depends_on)
+    return identity
+
+
 class FakeTaskQClient:
     """Typed unit-test double for producer and runner paths only."""
 
@@ -349,7 +357,7 @@ class FakeTaskQClient:
         existing_id = workflow.steps.get(command.step_key)
         if existing_id is not None:
             existing = self._jobs[existing_id]
-            if existing.command != command:
+            if _workflow_command_identity(existing.command) != _workflow_command_identity(command):
                 raise TaskqConflictError(details={"reason": "workflow_step_mismatch"})
             return self._record_enqueue(existing, command, "existed")
         if workflow.sealed or workflow.cancel_requested:
@@ -422,13 +430,19 @@ class FakeTaskQClient:
     ) -> WorkflowResult:
         self._ensure_open()
         del actor
-        queues = tuple(sorted(set(declared_queues)))
+        request = CreateWorkflowWireRequest(
+            workflow_key=workflow_key,
+            kind=kind,
+            params=dict(params or {}),
+            declared_queues=tuple(declared_queues),
+        )
+        queues = tuple(sorted(request.declared_queues))
         existing_id = self._workflow_keys.get(workflow_key)
         if existing_id is not None:
             workflow = self._workflows[existing_id]
             if (
-                workflow.kind != WorkflowKind(kind)
-                or workflow.params != dict(params or {})
+                workflow.kind != request.kind
+                or workflow.params != request.params
                 or workflow.declared_queues != queues
             ):
                 raise TaskqConflictError(details={"reason": "workflow_mismatch"})
@@ -441,9 +455,9 @@ class FakeTaskQClient:
             raise TaskqNotFoundError()
         workflow = _FakeWorkflow(
             workflow_id=uuid4(),
-            workflow_key=workflow_key,
-            kind=WorkflowKind(kind),
-            params=deepcopy(dict(params or {})),
+            workflow_key=request.workflow_key,
+            kind=request.kind,
+            params=deepcopy(request.params),
             declared_queues=queues,
         )
         self._workflows[workflow.workflow_id] = workflow

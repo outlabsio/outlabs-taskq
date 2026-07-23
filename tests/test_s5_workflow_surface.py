@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from typing import Any
+from uuid import uuid4
 import asyncpg
 from fastapi import FastAPI, HTTPException
 import httpx
@@ -285,6 +286,14 @@ async def test_workflow_authorization_precedes_graph_access_and_rejection_writes
             assert path_denied_before_decode.status_code == 403
             assert calls == [(TaskqAction.ENQUEUE, "workflow_denied")]
             assert await pg.fetchval("SELECT count(*) FROM taskq.jobs") == 0
+
+            denied_seal = await client.post(
+                f"/taskq/v1/workflows/{workflow.workflow_id}/seal",
+                json={},
+            )
+            unknown_seal = await client.post(f"/taskq/v1/workflows/{uuid4()}/seal", json={})
+            assert denied_seal.status_code == unknown_seal.status_code == 404
+            assert denied_seal.json()["error"] == unknown_seal.json()["error"]
     finally:
         await transport.aclose()
 

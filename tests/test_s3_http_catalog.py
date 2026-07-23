@@ -1,4 +1,4 @@
-"""Hand-derived Protocol-v1.0.9 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.10 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
