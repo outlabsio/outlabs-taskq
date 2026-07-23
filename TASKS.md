@@ -366,7 +366,7 @@ application data and may exceed the bounded child contract.
 **Resolution:** the producer mints a stable per-entity `bundle_id` before the
 parent enqueue and uses it in both the listing plan and optional fully
 materialized synthesis child. The listing effect persists the bounded,
-writer-firewalled bundle under that identity and atomically evaluates
+writer-firewalled, synthesis-ready exact-place bundle under that identity and atomically evaluates
 authoritative current state. Its family-specific response returns the stable
 effect receipt plus exactly one disposition:
 `synthesis_ready | curated_hold | blocked_exhausted`. The handler selects the

@@ -365,8 +365,9 @@ planner, or constructs synthesis input after provider work.
 The handler may report only `inspect` or `apply` for family
 `listing_research`, operation key `apply`, the planned entity key, stable
 `bundle_id`, and one bounded research result. A ready result carries the exact
-canonical writer-input bundle accepted by QDarte's writer-input firewall; an
-underfilled result carries no bundle. The result includes only bounded
+canonical writer-input bundle accepted by QDarte's writer-input firewall,
+including its synthesis-ready exact-place evidence threshold; an underfilled
+result carries no bundle. The result includes only bounded
 warnings, source-discovery mode, input fingerprint and guard reason needed by
 the authoritative transition. The complete reporter envelope remains at most
 64KB, collections are finite, strings are bounded, and provider/model labels,
