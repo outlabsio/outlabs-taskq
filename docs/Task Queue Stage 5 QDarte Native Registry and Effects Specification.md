@@ -325,6 +325,58 @@ provider work. FR-04 still owes a real side-effecting hard-kill rehearsal that
 proves immutable-artifact reuse, one photo effect and exact child
 conservation.
 
+#### Discovery import batch artifact and effect
+
+`discovery.import_batch` is an authoritative domain-effect job, not permission
+for a worker process to open the QDarte business database. The old handler's
+calls to the shared direct-database import runtime are deletion targets.
+
+The producer materializes the exact selected shard before enqueue. Its strict
+native input carries:
+
+- the geo scope and source region;
+- the shard index and total shard count;
+- one relative manifest artifact key, SHA-256 digest and byte count;
+- one relative shard artifact key, SHA-256 digest and byte count;
+- the finite normalize choice and bounded import/normalize batch sizes.
+
+The artifact keys resolve only beneath the configured API-owned import root.
+Absolute paths, traversal, symlinks escaping that root, a missing file,
+byte-count drift, digest drift, manifest/shard-index disagreement or a
+manifest-selected path different from the planned shard all fail before
+domain mutation. Manifest bytes are bounded to 64 KiB and the selected data
+artifact to the configured finite import ceiling. Attempt identity, caller
+time, arbitrary result metadata and host paths never enter artifact identity.
+The producer uses one artifact style for a job; replay cannot replace either
+artifact under the same job.
+
+The closed `discovery_import` family has one operation, `apply`, whose stable
+identity is `(taskq job id, discovery_import, partition region, apply)`. The
+authoritative API obtains every field from the stored strict native input,
+verifies the two artifacts, and performs the import plus optional
+normalization through queue-independent discovery-domain services. Import,
+normalization, the bounded result receipt and the native effect ledger commit
+in one database transaction. PostgreSQL time owns every durable timestamp.
+The response returns only the closed
+`imported | imported_and_normalized` outcome, bounded processed/changed
+counts, the two immutable artifact receipts and the stable effect receipt.
+
+The handler inspects before apply. A committed inspection returns the same
+outcome, counts and receipts without rereading artifacts or invoking an
+importer. A pending inspection applies exactly the stored plan through
+`context.report_effect()`. Concurrent same-intent calls serialize to one
+domain mutation; changed artifact or batch intent under the same stable
+identity fails closed. There is no child branch.
+
+Executable vectors must cover artifact-root containment, both digests and
+byte counts, manifest/shard agreement, normalize false/true, effect mismatch,
+concurrent apply and committed-response-loss replay. Raw business-table and
+effect-ledger oracles prove one import run and, when requested, one
+normalization run. The old job/attempt/client, worker-side database session,
+`import_extract_sync`, `import_and_maybe_normalize_sync`, old lifecycle
+settlement and old queue/event rows are forbidden from the native module
+graph.
+
 #### Completion-hook sweep for remaining unbound families
 
 The old completion/result paths were re-derived before binding photo. The
