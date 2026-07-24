@@ -381,6 +381,68 @@ normalization run. The old job/attempt/client, worker-side database session,
 settlement and old queue/event rows are forbidden from the native module
 graph.
 
+#### Publish effect and launch-pipeline truth
+
+`publish_scope` is an authoritative domain-effect job. The worker performs no
+database, filesystem, network or deployment operation and it returns no child.
+The old worker's preparation-only result and the API's settlement-triggered
+`_apply_publish_scope_job` hook are both deletion targets.
+
+The strict native input contains one to twenty producer-planned entities. Each
+entity has a unique bounded entity key, exact content-item id, collection,
+closed `content_lifecycle_publish | geo_page_publish` action, and the bounded
+geo/public-route fields required to validate that plan. A geo-page action
+requires a geo path. Duplicate entity keys or content-item ids, an empty plan,
+and a plan whose explicit content-item list differs from its entity set are
+invalid before enqueue.
+
+The closed `publish` family has one `apply` operation per entity. Its stable
+identity is `(taskq job id, publish, entity key, apply)`. The authoritative API
+loads the current running task and exact stored entity before ledger access.
+The request contains no domain result, row identity, timestamp, blocker,
+route, arbitrary metadata or child plan: the stored entity is the complete
+authority.
+
+Application uses the queue-independent lifecycle or geo-page publication
+service in the same database transaction as the stable effect receipt. The
+result is exactly one of:
+
+- `published`, with the authoritative bounded public route key when one exists;
+  or
+- `blocked`, with a closed bounded blocker code and a bounded operator-safe
+  label.
+
+A blocked result is durable terminal domain truth, not a handler exception.
+The same transaction records the launch-pipeline blocker for that content item.
+A published result refreshes the launch-pipeline item in that transaction.
+PostgreSQL time owns the effect and launch-pipeline timestamps. Existing
+content lifecycle timestamps remain queue-independent domain-service
+semantics; neither a worker clock nor taskq settlement time may be supplied.
+An unexpected infrastructure failure rolls the whole transaction back and
+remains a retryable handler failure.
+
+The lifecycle and geo-page services used by the effect must offer a
+caller-owned-transaction path. A native effect may flush but may not commit
+inside either domain service; the domain mutation, launch-pipeline truth and
+effect ledger must commit or roll back together.
+
+The handler inspects every planned entity before apply. A committed result is
+reused without invoking a publication service. A pending result sends only
+the closed apply request, then returns bounded published/blocked counts,
+per-entity outcomes and stable receipts. Concurrent same-intent calls converge
+to one mutation; changed intent under the same identity fails closed.
+Response-loss replay returns the same result and receipt. No frontend deploy
+or other child is created: source re-derivation confirms the legacy completed-
+job follow-up service has no `publish_scope` branch.
+
+Executable vectors must cover lifecycle publish, geo-page publish, lifecycle
+block, geo-page block, response-loss replay, concurrent same-intent apply,
+wrong task/entity refusal and transaction rollback. Raw domain,
+launch-pipeline and effect-ledger oracles prove one final mutation and one
+receipt per entity. The native module graph forbids the old job, attempt,
+client, completion hook, `_apply_publish_scope_job`, old queue event and
+settlement-triggered child planner.
+
 #### Completion-hook sweep for remaining unbound families
 
 The old completion/result paths were re-derived before binding photo. The
