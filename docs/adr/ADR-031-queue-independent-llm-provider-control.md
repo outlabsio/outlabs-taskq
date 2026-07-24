@@ -4,7 +4,7 @@
 **Resolves:** S5-QD-FR-CQ-12, S5-QD-FR-CQ-13; amended by the approved
 S5-QD-FR-CQ-11 photo-verification, CQ-14 editorial-enrichment and CQ-16
 content-synthesis bindings; amended by CQ-17 translation and CQ-18 review
-bindings
+bindings; amended by CQ-20 / ADR-032 for grounded region-rescue search
 **Amends:** ADR-022
 
 **Amended 2026-07-23:** CQ-13 distinguishes same-attempt response replay
@@ -29,6 +29,10 @@ translation-specific provider proxy.
 producer-materialized review packet is the provider request authority. Review
 provider execution remains in the worker; the control member neither fetches
 application state nor becomes a review proxy.
+
+**Amended 2026-07-23:** CQ-20 / ADR-032 adds
+`region_rescue_grounded/grounded_search`. Region-rescue provider execution
+remains worker-owned and uses the same reserve/settle/expiry state machine.
 
 ## Context
 
@@ -109,8 +113,9 @@ without seeing an attempt id or fence.
 9. The closed lane/operation pairs currently are
    `tripadvisor_classifier/classify`, `photo_verification/verify`,
    `editorial_enrichment/enrich`, `content_synthesis/synthesize`,
-   `translation/translate`, and `review/review`. The control family is shared
-   by every native LLM lane. Per-lane provider wrappers, old queue
+   `translation/translate`, `review/review`, and
+   `region_rescue_grounded/grounded_search`. The control family is shared by
+   every native LLM lane. Per-lane provider wrappers, old queue
    job/attempt/client/lifecycle imports, caller clocks and caller idempotency
    are forbidden.
 

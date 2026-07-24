@@ -37,5 +37,6 @@
 | [029](./ADR-029-finite-operator-and-workflow-projections.md) | Finite operator and workflow projections | S5-QD-FR-02D |
 | [030](./ADR-030-workflow-counter-lock-order.md) | Workflow counters preserve cancellation lock order | S5-QD-FR-CQ-06 |
 | [031](./ADR-031-queue-independent-llm-provider-control.md) | Queue-independent LLM provider control | S5-QD-FR-CQ-12 |
+| [032](./ADR-032-queue-independent-search-and-proxy-control.md) | Queue-independent search and proxy control | S5-QD-FR-CQ-20 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

@@ -190,7 +190,7 @@ executable task, including tasks with no authoritative domain write:
 | `photo_verify_scope` | `qdarte_media` | metered provider/filesystem verification plus closed `photo_verification` domain effect and preplanned native follow-up selection |
 | `publish_scope` | `qdarte_publish` | `publish` domain effect; never settlement-triggered |
 | `region_completion_scope` | `qdarte_content` | metered model call plus `region_completion` domain effect |
-| `region_rescue_scope` | `qdarte_discovery` | provider reads plus `media_application` and `region_rescue` domain effects |
+| `region_rescue_scope` | `qdarte_discovery` | controlled provider/search/proxy reads plus one finite `media_application | region_rescue` work unit and an optional producer-planned photo child |
 | `review_scope` | `qdarte_content` | revision-bound packet, metered model call, `review` domain effect and preplanned native branch selection |
 | `translation_scope` | `qdarte_content` | revision-bound source input, metered model call, `translation` domain effect and preplanned review selection |
 | `tripadvisor_classification_scope` | `qdarte_discovery` | metered model call plus `tripadvisor_classification` domain effect |
@@ -279,7 +279,7 @@ by producer-planned native branches when their family binds:
 | Native family | Legacy completion behavior that must not disappear | Native disposition |
 |---|---|---|
 | `buzz_discover_scope` | region-rescue handoff | already-carried closed native follow-up |
-| `region_rescue_scope` | photo-find handoff/autocontinue | preplanned photo-find child |
+| `region_rescue_scope` | photo-find handoff/autocontinue plus artifact mutation | finite producer-planned work units; optional exact photo-find child |
 | `photo_find_scope` | photo-verify or repair-review handoff | preplanned mutually exclusive child |
 | `editorial_enrich_scope` | repair-review handoff | preplanned review child |
 | `listing_research_scope` | synthesis handoff or pipeline refresh/blocker | closed effect plus preplanned synthesis branch |
@@ -291,6 +291,65 @@ The machine effect inventory records these source-derived dispositions and its
 oracle equality-checks them. A future binding stops if its current source
 contains a completion mutation or child-selection path absent from that
 record. This sweep authorizes no sibling implementation in the photo slice.
+
+#### Region rescue finite workflow and external controls
+
+`region_rescue_scope` is not a recursive list-processing job and does not
+retain the old completion-time autocontinue loop. The producer expands one
+bounded rescue request into a finite sealed workflow before any worker egress.
+Each native rescue job represents exactly one discriminated work unit:
+
+- one media-assignment batch;
+- one place promotion; or
+- one reserved buzz lead.
+
+The workflow records every dependency and ordering edge up front. It may
+include producer-planned buzz-preparation prerequisites, but a rescue handler
+never creates another rescue job. Empty or over-limit workflows, duplicate
+entity/work-unit identities, a branch outside the workflow declaration, and a
+scope mismatch fail before sealing.
+
+For a create-path unit, the producer mints the stable place and content-item
+identities before enqueue. It may then attach one exact, scope-equal
+`photo_find_scope` branch using those identities. The handler can select only
+that child after the authoritative effect commits. It never asks the API to
+mint identity, call a planner, discover another work unit, or mutate its task
+payload after provider work. Native region rescue therefore declares only
+`photo_find_scope` as a follow-up target.
+
+A buzz-lead work unit carries the exact discovery-artifact reservation. Before
+worker egress, the producer transaction binds that reservation to the native
+taskq job id. Effect inspection revalidates that the reservation is current
+for the stored work unit. The apply transaction commits exactly one closed
+`media_application | region_rescue` domain mutation, updates the authoritative
+artifact state at PostgreSQL time, and returns a bounded disposition plus
+stable receipt. The disposition alone decides whether the preplanned photo
+branch is selected. Exact replay returns the same artifact, receipt,
+disposition and child; changed canonical intent fails closed.
+
+External work uses only the queue-independent controls:
+
+- grounded model search uses ADR-031 lane
+  `region_rescue_grounded/grounded_search`;
+- metered search API work uses ADR-032 `search_api_control`; and
+- browser-backed work uses ADR-032 `browser_proxy_control`.
+
+Each control is inspected or acquired before egress and settled after the
+domain effect. A committed effect discovered after response loss skips all
+external calls. Database-time expiry retains an `expired_unsettled`
+unknown-usage or unknown-health generation before a later attempt may acquire
+new authority. The native graph imports no old job, attempt, queue client,
+result route, completion service, provider-admission client, search-usage
+client or proxy-lease client.
+
+Required vectors cover every work-unit discriminator, finite workflow sealing,
+dependency order, producer-minted identity, exact photo branch, artifact
+reservation mismatch, all effect dispositions, replay/mismatch, all three
+external controls, same-attempt response loss, cross-attempt pending,
+database-time expiry/generation rollover, concurrent settlement and a real
+hard kill. Before/after extraction parity must preserve provider budget and
+failover, search quota and usage events, proxy lease and health events,
+artifact state, media/place mutation and child selection.
 
 #### Buzz discovery artifact and rescue branch
 
@@ -761,8 +820,10 @@ old completion hooks establish these required native dispositions:
 - `buzz_discover_scope`: bounded result effect that atomically owns the
   `buzz_report` or `region_buzz` discovery artifact plus its already planned
   rescue branch; no completion-time artifact hook or planner survives;
-- `region_rescue_scope`: authoritative rescue/media effects plus a preplanned
-  photo-find branch;
+- `region_rescue_scope`: the old artifact mutation, photo-find handoff and
+  recursive autocontinue loop are replaced by a finite producer-planned
+  workflow of one-unit jobs, authoritative rescue/media effects and at most
+  one exact photo-find child;
 - `photo_find_scope`: authoritative media effect plus mutually exclusive
   preplanned verify or repair-review branches;
 - `translation_scope`: authoritative locale effect plus one preplanned normal
