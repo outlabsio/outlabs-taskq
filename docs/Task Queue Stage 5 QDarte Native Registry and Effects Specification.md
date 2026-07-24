@@ -356,7 +356,11 @@ authoritative API obtains every field from the stored strict native input,
 verifies the two artifacts, and performs the import plus optional
 normalization through queue-independent discovery-domain services. Import,
 normalization, the bounded result receipt and the native effect ledger commit
-in one database transaction. PostgreSQL time owns every durable timestamp.
+in one database transaction. PostgreSQL time owns the effect application and
+receipt timestamp; queue scheduling, leases and replay never consult a client
+clock. Existing discovery-domain record timestamps remain the responsibility
+of the queue-independent import/normalization services and are not queue
+fences or replay authority.
 The response returns only the closed
 `imported | imported_and_normalized` outcome, bounded processed/changed
 counts, the two immutable artifact receipts and the stable effect receipt.
