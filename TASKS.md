@@ -90,6 +90,7 @@
     - [x] **FR-03C-OPEN-SOURCE-SPEC · Native open-source discovery boundary frozen** — source re-derivation resolves CQ-26: the family is a closed idempotent reconciliation/import effect plus create-once job-scoped discovery artifacts, not a read-only handler. Result-derived rescue place ids and already-published deployment routes cannot be preplanned, so one stable post-effect application producer command consumes the committed effect digest and uses the existing expand-bind-seal choreography to create exact rescue/deployment work. The worker and reporter never plan or enqueue children; response loss replays effect/artifact truth without discovery or import duplication. No Tier-0/1 contract, taskq SQL/migration, QDarte source, filesystem, database, provider or production state changed.
     - [x] **FR-03C-OPEN-SOURCE-CONTRACTS · Strict artifact/effect surface frozen** — runtime `badc30e` replaces the inherited legacy payload with one strict target/scope model, removes all result-derived taskq follow-up targets, and adds the closed `inspect | prepare | apply` reporter union. Raw/selected/manifest inputs are normalized relative artifacts with byte and SHA-256 identity; prepared truth is bounded existing-source authority plus its receipt; applied truth is exact counts, touched places, published routes, three artifact receipts and one effect receipt. Invalid phase mixtures, duplicate identities, scope drift and count drift fail typed validation. The canonical task digest is repinned, the full runtime passes 1186 with one unchanged dependency warning, and Ruff/MyPy are clean. No API/worker implementation, filesystem, database, provider or production state changed.
     - [x] **FR-03C-OPEN-SOURCE-TRANSACTION · Caller-owned import transaction boundary** — runtime `3d2401d` adds an explicit caller-owned mode to Wikidata reconciliation, OSM batch import and normalization while retaining the legacy commit-by-service default. Native effect callers can now flush intermediate writes for same-transaction visibility without allowing importer batch commits to escape the authoritative effect ledger transaction; focused vectors prove both modes. The full runtime passes 1189 with one unchanged dependency warning, Ruff is clean and MyPy passes 196 source files. No API adapter, worker, filesystem artifact, database, provider or production state changed.
+    - [ ] **FR-03C-OPEN-SOURCE-PROJECTION · Resolve CQ-27 docs-first** — the frozen prepare response can carry 10,000 source ids while the private reporter/effect kernel permits only 65,536 canonical bytes. Freeze a lossless, create-once authority-projection artifact and its replay/verification rules before implementing prepare/apply; truncation and an unbounded ledger exception are forbidden.
   - [ ] **FR-03D · General idempotent domain effects** — replace the 12 old result-route families with one closed inspect/apply reporter union, authoritative plan validation and stable job/family/entity/operation idempotency.
     - [x] **FR-03D-KERNEL · Closed transaction and replay kernel** — API `ffb9b57` adds existing-install migration 0077 plus a route-free internal kernel for the exact 17 source-derived domain-effect families. Stable `(taskq job id, family, entity, operation)` identity, canonical request hashing, mismatch refusal, and domain callback plus bounded receipt share one transaction; a failed mutation rolls the reservation back. Fresh-session response-loss replay and a real two-session concurrent same-intent race prove the callback executes once. Runtime `a87804f` extends the closed scanner/oracle to all 278 queue-sensitive files; `88b3fd6` independently derives the domain families from the effect manifest and equality-checks both the API service set and migration constraint. Ten focused API migration/kernel/inventory tests and the runtime inventory/effect set pass with clean Ruff/format and focused MyPy. No generic effect route, family adapter, old worker, provider, production database or production state changed.
     - [x] **FR-03D-CONTACT-AUTHORITY · First authoritative family adapter** — runtime `d70d8b7` freezes the bounded discriminated contact inspect/apply request and receipt response without attempt/worker identity or request echoes. API `10d0533` separates queue-independent contact domain mutation from the old ledger, then authorizes the native adapter against the current taskq attempt, exact verification queue/type and stored strict entity before ledger access. Place, phone, source and provider-plan metadata come only from the stored payload; PostgreSQL supplies mutation time. Unplanned/wrong/stale tasks fail before effect access. Runtime passes 1167/1167 with clean Ruff and 196-file MyPy; 19 focused API authority/domain/kernel/migration/inventory tests pass with clean Ruff/format and focused MyPy. The replacement oracle is 280 files/23 declarations/21 handlers/30 relations/130 routes. No route, worker handler, generic reporter, provider, production database or production state changed.
@@ -382,6 +383,42 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-27 — Open-source prepare projection exceeds the reporter/effect ceiling *(open)*
+
+**Discovered during the FR-03C open-source API adapter pass (2026-07-24).**
+
+The frozen `NativeOpenSourceImportEffectResponse` permits up to 10,000
+`existing_source_ids`, each up to 200 characters. The authoritative native
+effect kernel, however, rejects any canonical request or result above 65,536
+bytes, and the private reporter uses the same aggregate ceiling. A valid dense
+raw artifact can therefore produce prepare truth that cannot be committed or
+replayed. Truncating the projection is incorrect: the worker could select and
+reimport an omitted existing source. Raising only the ledger ceiling would
+also make the private wire model unbounded relative to its frozen safety
+posture.
+
+**Recommended adjudication:** amend the Tier-3 reporter contract, native
+definitions and machine effect inventory together before implementation. The
+authoritative API writes one create-once, canonical, newline-delimited
+authority-projection artifact beneath the configured shared import root after
+reconciliation. It contains the complete sorted distinct existing-source-id
+set, is bound to `(job_id, target_key, raw_artifact_digest)`, and is returned
+from prepare only by relative key, byte count and SHA-256 receipt. Matching
+bytes replay; conflicting bytes fail closed. The prepare effect ledger retains
+only bounded counts plus the projection receipt. The worker verifies and reads
+that artifact before selection; apply revalidates the same receipt through the
+strict manifest. Empty projections still materialize a canonical empty
+artifact so recovery has one shape.
+
+The API, not the worker, owns these authority bytes because they are derived
+from current database truth. The worker remains the sole owner of provider
+raw/selected artifacts, and neither side may truncate ids, page against
+changing database state, or add an exceptional oversized effect result. Vectors
+must cover more than 65,536 bytes of uncompressed source ids, create-once
+response-loss replay, conflicting bytes, empty projection, root escape,
+selected-existing refusal and apply-manifest receipt equality. No Tier-0/1,
+taskq SQL/migration or public route change is required.
 
 ### S5-QD-FR-CQ-26 — Open-source discovery children depend on committed import results *(resolved: stable post-effect producer command)*
 
