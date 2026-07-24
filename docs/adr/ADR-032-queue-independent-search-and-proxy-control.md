@@ -4,6 +4,11 @@
 **Resolves:** S5-QD-FR-CQ-20
 **Amends:** ADR-022 and ADR-031
 
+**Amended 2026-07-23:** CQ-23 pins the direction-sensitive proxy credential
+boundary: callers never submit proxy authority, while a successful trusted
+claim returns the host-selected lease configuration through secret-safe
+response fields.
+
 ## Context
 
 QDarte's `region_rescue_scope` handler performs three externally metered or
@@ -71,6 +76,16 @@ becoming public taskq commands or arbitrary external-service proxies.
    Inspect-before-egress and committed-effect replay skip external work.
    No old queue job, attempt, client, lifecycle service or table enters the
    native handler graph.
+10. Browser-proxy authority is direction-sensitive. A claim request cannot
+    carry a proxy endpoint, username, password, bypass list or credential
+    selector. Only `claimed | claim_replayed` may return the host-selected
+    endpoint, optional username/password, bounded bypass list and session
+    generation. Credential fields are excluded from `repr` and diagnostics but
+    serialize on the authenticated private reporter response so the trusted
+    worker can open the leased session. `lease_pending`, denied and
+    `expired_unsettled` responses carry no connection material. Settlement
+    echoes none of it, and neither request nor response persists credentials in
+    task input, taskq state, effect receipts or logs.
 
 ## Consequences
 

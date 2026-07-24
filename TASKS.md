@@ -361,6 +361,23 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-23 — A proxy lease receipt without host-selected connection material cannot execute browser work *(resolved: direction-sensitive secret response)*
+
+**Blocking evidence:** ADR-032 correctly forbids handler-supplied proxy
+credentials, but its initial typed claim response carried only lease identity
+and expiry. The worker cannot open the selected proxy session from that receipt.
+Letting the request choose or echo credentials would move host authority into
+task input and logs.
+
+**Resolution:** only a successful trusted claim/replay returns the
+host-selected proxy endpoint, optional username/password, bounded bypass list
+and session generation. Those fields are secret-safe in representations and
+diagnostics but serialize on the authenticated private response. Pending,
+denied and expired-unsettled receipts contain none; settlement echoes none.
+Requests still cannot carry endpoint or credential authority, and no taskq row,
+effect receipt or task payload stores it. This is a private reporter amendment,
+not a public taskq Protocol or SQL change.
+
 ### S5-QD-FR-CQ-22 — Newly discovered buzz leads cannot have exact rescue jobs preplanned before provider work *(resolved: artifact-revision producer command)*
 
 **Blocking evidence:** CQ-19's preplanned rescue branch predates the actual

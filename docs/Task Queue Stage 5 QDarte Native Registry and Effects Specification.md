@@ -354,6 +354,14 @@ new authority. The native graph imports no old job, attempt, queue client,
 result route, completion service, provider-admission client, search-usage
 client or proxy-lease client.
 
+The proxy claim is direction-sensitive. Its request contains only the planned
+pool constraint and canonical fingerprint. A successful claim/replay returns
+the host-selected endpoint, optional username/password, bounded bypass list
+and session generation through secret-safe response fields. Pending, denied
+and expired-unsettled postures return no connection material; settlement
+returns none. Credentials never enter task payloads, caller input, taskq rows,
+effect receipts or diagnostics.
+
 Required vectors cover every work-unit discriminator, finite workflow sealing,
 dependency order, producer-minted identity, exact photo branch, artifact
 reservation mismatch, all effect dispositions, replay/mismatch, all three
