@@ -278,7 +278,7 @@ by producer-planned native branches when their family binds:
 
 | Native family | Legacy completion behavior that must not disappear | Native disposition |
 |---|---|---|
-| `buzz_discover_scope` | region-rescue handoff | already-carried closed native follow-up |
+| `buzz_discover_scope` | result-dependent region-rescue handoff | artifact-only effect; stable post-commit producer command builds the finite rescue workflow |
 | `region_rescue_scope` | photo-find handoff/autocontinue plus artifact mutation | finite producer-planned work units; optional exact photo-find child |
 | `photo_find_scope` | photo-verify or repair-review handoff | preplanned mutually exclusive child |
 | `editorial_enrich_scope` | repair-review handoff | preplanned review child |
@@ -308,6 +308,18 @@ include producer-planned buzz-preparation prerequisites, but a rescue handler
 never creates another rescue job. Empty or over-limit workflows, duplicate
 entity/work-unit identities, a branch outside the workflow declaration, and a
 scope mismatch fail before sealing.
+
+The workflow is created by one QDarte producer command keyed by the immutable
+discovery artifact identity and revision. For a newly discovered artifact,
+that command runs only after the buzz effect commits; the buzz worker cannot
+preplan result-dependent leads and therefore returns no rescue child. The
+command reads the authoritative artifact, reserves its bounded selected leads,
+constructs all work units and dependencies, creates/seals the workflow under a
+stable workflow id, and records a bounded planning receipt. Exact command
+replay returns the same workflow/receipt; changed artifact revision fails
+closed. It is invoked by the ordinary application producer/scheduler boundary,
+never by a worker, reporter, taskq settlement hook or old queue lifecycle
+service.
 
 For a create-path unit, the producer mints the stable place and content-item
 identities before enqueue. It may then attach one exact, scope-equal
@@ -356,17 +368,14 @@ artifact state, media/place mutation and child selection.
 `buzz_discover_scope` is not a read-only provider task. The legacy completion
 path persisted its bounded result as the authoritative `buzz_report` or
 `region_buzz` discovery artifact before it selected the region-rescue
-handoff. The native `buzz_discovery` family replaces both pieces explicitly;
-neither taskq settlement nor an old queue completion hook may create the
-artifact.
+handoff. The native `buzz_discovery` family owns the artifact. Neither taskq
+settlement nor an old queue completion hook may create it.
 
-The producer supplies the complete strict discovery input and at most one
-fully materialized `region_rescue_scope` branch. The branch payload is a
-`NativeRegionRescueInput`, its scope equals the parent scope, and its step is a
-bounded unique identifier. The handler may return that child only after the
-authoritative buzz effect commits. It never asks the API to plan a rescue,
-constructs a child from provider output, or mutates an active queued job to
-attach a branch.
+The handler returns no rescue child for newly discovered content because the
+exact selected leads do not exist before provider work. The stable
+artifact-revision producer command described above owns the later finite
+workflow creation. It is not called by the handler or reporter, and response
+loss cannot create a second workflow.
 
 The worker reports exactly one bounded buzz result. Geo results use the closed
 `BuzzDiscoverGeoResultSummary`; cluster results use a strict native summary
@@ -817,9 +826,10 @@ native module graph.
 The CQ-11 source sweep is complete before the remaining FR-03 bindings. The
 old completion hooks establish these required native dispositions:
 
-- `buzz_discover_scope`: bounded result effect that atomically owns the
-  `buzz_report` or `region_buzz` discovery artifact plus its already planned
-  rescue branch; no completion-time artifact hook or planner survives;
+- `buzz_discover_scope`: bounded result effect atomically owns the
+  `buzz_report` or `region_buzz` discovery artifact; a stable post-commit
+  application producer command builds the finite rescue workflow, and no
+  worker/completion-time planner survives;
 - `region_rescue_scope`: the old artifact mutation, photo-find handoff and
   recursive autocontinue loop are replaced by a finite producer-planned
   workflow of one-unit jobs, authoritative rescue/media effects and at most

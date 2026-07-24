@@ -104,7 +104,7 @@
     - [x] **FR-03D-REVIEW · Native review family complete** — runtime `b654f86` adds the bounded producer packet, exact validated branch plans, closed inspect/apply response, native output and ADR-031 `review/review` member while moving the machine inventory to the native handler and authoritative domain owner. API `af60d17` authenticates the live task and stored packet, rejects revision drift before egress, reuses the queue-independent review/media mutation, preserves the old repair classification through a shared domain policy, records database-time effect truth, refuses unplanned provider/model pairs and returns only the closed publish/repair/translation/human/block/reject/stale outcome. Workers `19a9dae` enforces exact task-to-provider-lane authority, inspects before provider use, reserves/settles metered usage, commits one effect, selects only its matching preplanned child and makes replay or `input_stale` perform zero provider calls. Runtime passes 1177, workers 706 and API 1776 pass/10 unchanged unrelated failures with clean Ruff and configured MyPy; 75 focused API/domain vectors pass. No old queue client, attempt model, result route, result file or completion-time planner enters the native path; no service, provider, persistent database or production state changed.
     - [x] **FR-03D-BUZZ · Native buzz-discovery family complete** — CQ-19 corrects the completion-hook inventory before source. Runtime `23f2a69` adds the strict scope-equal rescue branch, closed cluster/geo result and inspect/apply/artifact response while moving the machine effect inventory to the native worker and authoritative domain owner. API `a429c21` authorizes the live discovery task and stored scope before decode, persists exactly one database-timed `buzz_report` or `region_buzz` artifact without constructing an old queue object, and returns replay-stable effect/artifact receipts; changed canonical content fails closed. Workers `e73f13e` inspects before discovery, applies once, selects only the producer-planned rescue child, and makes committed replay perform zero provider calls. Runtime passes 1178, workers 710 and API 1779 pass/10 unchanged unrelated failures with clean Ruff, changed-file formatting and configured MyPy. No old result route, job/event model, completion hook or planner enters the native graph; no service, provider, persistent database or production state changed.
     - [x] **FR-03D-RESCUE-SPEC · Finite native region-rescue workflow and controls frozen** — source tracing resolves CQ-20/21 before binding. ADR-032 extracts the old search-quota and proxy-lease guarantees into closed attempt-bound private controls and extends ADR-031 only for grounded rescue search. The recursive completion-time rescue loop becomes a producer-built finite sealed workflow of one-unit media/promotion/buzz jobs; producers mint create-path identities, reserve artifacts against the native job id and fully plan the only permitted photo child before egress. Replay, expiry, hard-kill, extraction-parity and zero-old-client evidence are binding. No Tier-0 contract, taskq SQL/migration, QDarte source, database, provider or production state changed.
-    - [ ] **FR-03D-RESCUE · Native region-rescue family** — implement the finite producer/workflow planner, strict one-unit definitions, artifact reservation and authoritative rescue/media effect; add ADR-031/032 provider, search and proxy controls; bind the exact native handler and prove replay, response loss, concurrent settlement, external-control parity and hard-kill conservation without an old queue/client/completion path.
+    - [ ] **FR-03D-RESCUE · Native region-rescue family** — revise buzz to artifact-only completion, implement the stable artifact-revision producer/workflow planner, strict one-unit definitions, artifact reservation and authoritative rescue/media effect; add ADR-031/032 provider, search and proxy controls; bind the exact native handler and prove replay, response loss, concurrent settlement, external-control parity and hard-kill conservation without an old queue/client/completion path.
   - [ ] **FR-03E · Disposable SQL/HTTP completion** — provision all five queues and run all 21 handlers through real a7 SQL/HTTP against fresh and sanitized production-shaped local databases, proving no old worker or queue row changes.
 
 - [ ] **S5-QD-FR-04 · All-lane local migration** — migrate pure, leaf verification/classification, media/content effect, chained content/publish, and discovery/import/scheduled waves into the one native worker. Each wave proves replay, cancellation, retry exhaustion, response loss, hard-kill reclaim, bounded concurrency, effect conservation and exact follow-up/dependency graphs with no dual publisher or consumer.
@@ -359,6 +359,25 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-22 — Newly discovered buzz leads cannot have exact rescue jobs preplanned before provider work *(resolved: artifact-revision producer command)*
+
+**Blocking evidence:** CQ-19's preplanned rescue branch predates the actual
+buzz result. The exact selected leads, artifact revision and any create-path
+identities do not exist until the provider result is committed. Constructing
+the child afterward in the handler would violate the producer-planned branch
+rule; calling a planner from the reporter would make settlement own domain
+orchestration.
+
+**Resolution:** buzz apply commits only the immutable authoritative artifact.
+A separate QDarte producer command keyed by artifact identity/revision then
+reserves selected leads and creates/seals the complete finite rescue workflow
+under stable identities. It runs after artifact commit at the ordinary
+application producer/scheduler boundary, never in a worker, reporter or taskq
+settlement hook. Exact replay returns the same workflow receipt and changed
+artifact revision fails closed. The rescue implementation removes the former
+buzz child from the native worker graph while preserving artifact-driven
+automatic orchestration outside settlement.
 
 ### S5-QD-FR-CQ-21 — Region rescue cannot preserve completion-time planning as a recursive native job *(resolved: finite producer-planned workflow)*
 
