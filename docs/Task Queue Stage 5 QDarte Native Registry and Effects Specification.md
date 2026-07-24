@@ -300,7 +300,7 @@ bounded rescue request into a finite sealed workflow before any worker egress.
 Each native rescue job represents exactly one discriminated work unit:
 
 - one media-assignment batch;
-- one place promotion; or
+- one place promotion carrying its producer-planned content-item identity; or
 - one reserved buzz lead.
 
 The workflow records every dependency and ordering edge up front. It may
@@ -328,6 +328,14 @@ that child after the authoritative effect commits. It never asks the API to
 mint identity, call a planner, discover another work unit, or mutate its task
 payload after provider work. Native region rescue therefore declares only
 `photo_find_scope` as a follow-up target.
+
+An existing-place promotion is still a create path when no content item exists
+for its target collection. Its work unit therefore carries a required
+`content_item_id` alongside the authoritative promotion candidate. The
+producer derives that identity from immutable source intent before enqueue.
+Exact replay preserves it; dedupe may return an existing authoritative item
+without rewriting it, leaving the unused planned identity as bounded task
+intent. Settlement never mints a replacement identity.
 
 A buzz-lead work unit carries the exact discovery-artifact reservation. Before
 worker egress, the producer transaction binds that reservation to the native

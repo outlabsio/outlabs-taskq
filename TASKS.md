@@ -370,7 +370,7 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
-### S5-QD-FR-CQ-24 — Promotion work units cannot preserve producer-owned content identity *(open)*
+### S5-QD-FR-CQ-24 — Promotion work units cannot preserve producer-owned content identity *(resolved: additive planned identity)*
 
 **Blocking evidence:** the frozen native rescue specification requires every
 create-path work unit to carry producer-minted place and content-item
@@ -381,8 +381,8 @@ has no item in the target collection. The reporter therefore cannot bind the
 promotion kernel without either minting identity during settlement or routing
 through the old completion helper; both are forbidden.
 
-**Recommended adjudication:** amend the Tier-3 native-effects specification
-docs-first and add a required `content_item_id` to
+**Resolution:** the Tier-3 native-effects specification requires a
+`content_item_id` on
 `NativeRegionRescuePromotionUnit`. The stable producer command derives it from
 the immutable source identity before enqueue, exactly as it already does for a
 buzz-lead unit. Validation requires it to differ across distinct promotion
