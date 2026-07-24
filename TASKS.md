@@ -365,6 +365,27 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-24 — Promotion work units cannot preserve producer-owned content identity *(open)*
+
+**Blocking evidence:** the frozen native rescue specification requires every
+create-path work unit to carry producer-minted place and content-item
+identities before enqueue. `NativeRegionRescuePromotionUnit` carries the
+authoritative existing `place_id` only through its promotion candidate, while
+the preserved promotion mutation creates a `ContentItem` whenever that place
+has no item in the target collection. The reporter therefore cannot bind the
+promotion kernel without either minting identity during settlement or routing
+through the old completion helper; both are forbidden.
+
+**Recommended adjudication:** amend the Tier-3 native-effects specification
+docs-first and add a required `content_item_id` to
+`NativeRegionRescuePromotionUnit`. The stable producer command derives it from
+the immutable source identity before enqueue, exactly as it already does for a
+buzz-lead unit. Validation requires it to differ across distinct promotion
+units, exact replay preserves it, dedupe may return an existing authoritative
+item without rewriting that identity, and the unused planned id remains only
+bounded task intent. No taskq Protocol, Function Manifest, SQL contract,
+migration or wire-command identity changes.
+
 ### S5-QD-FR-CQ-23 — A proxy lease receipt without host-selected connection material cannot execute browser work *(resolved: direction-sensitive secret response)*
 
 **Blocking evidence:** ADR-032 correctly forbids handler-supplied proxy
