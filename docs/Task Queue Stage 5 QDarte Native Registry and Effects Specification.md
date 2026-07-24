@@ -185,7 +185,7 @@ executable task, including tasks with no authoritative domain write:
 | `editorial_enrich_scope` | `qdarte_content` | metered model call plus `editorial_enrichment` domain effect |
 | `frontend_deploy_scope` | `qdarte_publish` | separately idempotent `frontend_deploy` operation and bounded route verification |
 | `listing_research_scope` | `qdarte_content` | provider reads plus `listing_research` domain effect |
-| `open_source_discover_scope` | `qdarte_discovery` | provider/filesystem reads, `open_source_import` domain effect, native follow-up |
+| `open_source_discover_scope` | `qdarte_discovery` | provider/filesystem discovery, immutable artifact, closed prepare/import effect, then a stable post-effect producer command |
 | `photo_find_scope` | `qdarte_media` | provider/filesystem operation plus `photo_application` domain effect |
 | `photo_verify_scope` | `qdarte_media` | metered provider/filesystem verification plus closed `photo_verification` domain effect and preplanned native follow-up selection |
 | `publish_scope` | `qdarte_publish` | `publish` domain effect; never settlement-triggered |
@@ -509,6 +509,72 @@ operation identity and zero automatic duplicate executions. The old job,
 attempt, API client, advisory event writer, `/Volumes/Server87` literal,
 absolute result paths and old settlement lifecycle are forbidden from the
 native module graph.
+
+#### Open-source discovery artifact, effect and post-effect planning
+
+`open_source_discover_scope` is not a read-only provider task and it cannot
+carry exact rescue or deployment children before discovery. The incumbent
+handler reconciles source identities, reads existing source ids, creates raw
+and selected filesystem artifacts, imports and optionally normalizes domain
+rows, derives rescue place ids from the normalization result, and can cause a
+frontend deployment when a touched place is already published. Treating those
+last two actions as preplanned children would either guess result-dependent
+identity or restore completion-time planning.
+
+The native family therefore has four explicit phases:
+
+1. after the terminal-effect inspection returns pending, the worker performs
+   the bounded provider fetch and publishes a create-once raw candidate
+   artifact beneath the configured shared artifact root;
+2. a closed `open_source_import/prepare` reporter operation authorizes the
+   stored running discovery task and raw artifact, performs the bounded
+   identity reconciliation under application authority, derives the existing
+   source-id projection from that artifact, and records its stable prepare
+   receipt in the same transaction;
+3. the worker filters the already-fetched candidates against that projection
+   and publishes the create-once selected artifact plus strict manifest. Raw,
+   selected and manifest receipts carry relative keys, byte sizes and SHA-256
+   digests; no absolute path crosses the reporter boundary; and
+4. `open_source_import/apply` reauthorizes the stored task, verifies root
+   containment, manifest identity, byte sizes and digests, then imports and
+   optionally normalizes through queue-independent domain kernels. Import,
+   normalization, bounded touched-place/public-route truth and the stable
+   effect receipt commit in one database transaction.
+
+Inspect precedes provider/filesystem work. A committed apply response
+skips every earlier phase and returns the same bounded counts, artifact/effect
+receipts and post-effect planning identity. A lost prepare response replays
+the prepare receipt and never reruns reconciliation; the raw artifact prevents
+a provider refetch. Artifact publication is create-once: matching bytes replay,
+conflicting bytes fail closed. A lost apply response replays the committed
+receipt without rereading or reimporting the artifact.
+
+Result-dependent work belongs to one separately invoked QDarte producer
+command keyed by the committed open-source job id and effect digest. After the
+effect commits, that command reads only authoritative effect/domain truth and:
+
+- when `followup_region_rescue` was requested and touched places exist,
+  expands, binds and seals the exact finite native rescue workflow using the
+  existing artifact-revision choreography; and
+- when normalization changed already-published public routes under an enabled
+  deployment policy, creates the exact `frontend_deploy_scope` job carrying
+  those content ids and route keys.
+
+The command records a bounded planning receipt. Exact replay returns the same
+workflow/job identities; changed effect digest or derived plan fails closed.
+Crash before seal is recovered by the established expand-bind-seal replay.
+Empty rescue/deployment sets are durable no-op dispositions. The command is
+invoked by the ordinary application producer/scheduler boundary after terminal
+effect truth exists, never by the worker, reporter, taskq settlement hook or
+old queue lifecycle service. The handler returns no result-derived child.
+
+Executable vectors cover prepare/apply authority, root escape, byte/digest and
+manifest mismatch, create-once artifact conflict, apply response loss,
+concurrent same-intent apply, normalization-disabled behavior, empty result,
+rescue-only, deploy-only, combined post-effect planning, command replay and
+crash-before-seal. Raw oracles prove one import/normalization mutation, one
+effect identity, one immutable artifact set, exact planned children, and zero
+old job/event/result-route writes.
 
 #### Completion-hook sweep for remaining unbound families
 
@@ -1100,9 +1166,11 @@ old completion hooks establish these required native dispositions:
 - `region_completion_scope`, `publish_scope`, `discovery.import_batch`, and
   `tripadvisor_region_import`: authoritative effect only, with no
   completion-time child;
-- `open_source_discover_scope` and `tripadvisor_session_prime`: their
-  immutable artifact/operation receipt plus already-declared preplanned
-  children; and
+- `open_source_discover_scope`: closed prepare/import truth plus immutable
+  artifact; its result-dependent rescue/deployment work is built only by the
+  stable post-effect producer command described above;
+- `tripadvisor_session_prime`: its immutable operation receipt plus
+  already-declared preplanned children; and
 - `frontend_deploy_scope`: a separately inspected operation receipt with no
   domain-effect or child-planning shortcut.
 

@@ -86,6 +86,7 @@
     - [x] **FR-03C-PUBLISH-SPEC · Native publication boundary frozen** — source re-derivation confirms that `publish_scope` owns the authoritative content/geo publication plus launch-pipeline refresh-or-blocker truth and has no completion-time child. The strict per-entity `publish/apply` effect derives all authority from the stored running task, applies through caller-owned domain transactions, commits domain state, launch-pipeline truth and the stable receipt together, and exposes only closed published/blocked results. Workers perform no database, filesystem, deployment or child-planning work; the old preparation result and settlement hook are deletion targets. No Tier-0 contract, SQL, migration, QDarte source, database, provider or production state changed.
     - [x] **FR-03C-PUBLISH-SPLIT · Hidden derivative boundary adjudicated docs-first** — owner-authorized internal review resolves CQ-25 by keeping publication as one database effect while moving the legacy hidden derivative upload into the already-declared `frontend_deploy_scope` operation. Producers may preplan one exact deployment child; only an all-published result selects it. The deployment worker owns the fixed derivative/build/deploy pipeline behind a durable create-once job-scoped operation-state file; completed recovery records without rerun, while a started state becomes typed `execution_unknown` and never authorizes an automatic duplicate. No Tier-0 contract, SQL, migration, QDarte source, filesystem, provider or production state changed.
     - [x] **FR-03C-PUBLISH · Native publication and frontend deployment families complete** — runtime `1a069a0` freezes the strict exact-content/route deployment child and closed inspect/record receipts; API `9892c28` suppresses the old synchronous derivative bridge, commits publication plus pending derivative truth, and owns a stable external-operation ledger in migration 0080; workers `20849c6` selects the child only after every publication effect succeeds and executes the fixed deploy pipeline behind create-once job state, artifact SHA-256 validation and bounded live-route verification. A started operation becomes `execution_unknown` and is never automatically duplicated; a completed operation replays only after every artifact digest is revalidated. Runtime `da8b7c7` binds the machine inventory to the native executor and API ledger. Runtime passes 1185, workers 748, and the API passes 1818 with the same 11 unrelated baseline failures; 44 focused API effect/migration tests plus Ruff and focused MyPy are clean. All commits are pushed on the non-deploying replacement branches. No old queue client, persistent database, external provider, deployment process or production state changed.
+    - [x] **FR-03C-OPEN-SOURCE-SPEC · Native open-source discovery boundary frozen** — source re-derivation resolves CQ-26: the family is a closed idempotent reconciliation/import effect plus create-once job-scoped discovery artifacts, not a read-only handler. Result-derived rescue place ids and already-published deployment routes cannot be preplanned, so one stable post-effect application producer command consumes the committed effect digest and uses the existing expand-bind-seal choreography to create exact rescue/deployment work. The worker and reporter never plan or enqueue children; response loss replays effect/artifact truth without discovery or import duplication. No Tier-0/1 contract, taskq SQL/migration, QDarte source, filesystem, database, provider or production state changed.
   - [ ] **FR-03D · General idempotent domain effects** — replace the 12 old result-route families with one closed inspect/apply reporter union, authoritative plan validation and stable job/family/entity/operation idempotency.
     - [x] **FR-03D-KERNEL · Closed transaction and replay kernel** — API `ffb9b57` adds existing-install migration 0077 plus a route-free internal kernel for the exact 17 source-derived domain-effect families. Stable `(taskq job id, family, entity, operation)` identity, canonical request hashing, mismatch refusal, and domain callback plus bounded receipt share one transaction; a failed mutation rolls the reservation back. Fresh-session response-loss replay and a real two-session concurrent same-intent race prove the callback executes once. Runtime `a87804f` extends the closed scanner/oracle to all 278 queue-sensitive files; `88b3fd6` independently derives the domain families from the effect manifest and equality-checks both the API service set and migration constraint. Ten focused API migration/kernel/inventory tests and the runtime inventory/effect set pass with clean Ruff/format and focused MyPy. No generic effect route, family adapter, old worker, provider, production database or production state changed.
     - [x] **FR-03D-CONTACT-AUTHORITY · First authoritative family adapter** — runtime `d70d8b7` freezes the bounded discriminated contact inspect/apply request and receipt response without attempt/worker identity or request echoes. API `10d0533` separates queue-independent contact domain mutation from the old ledger, then authorizes the native adapter against the current taskq attempt, exact verification queue/type and stored strict entity before ledger access. Place, phone, source and provider-plan metadata come only from the stored payload; PostgreSQL supplies mutation time. Unplanned/wrong/stale tasks fail before effect access. Runtime passes 1167/1167 with clean Ruff and 196-file MyPy; 19 focused API authority/domain/kernel/migration/inventory tests pass with clean Ruff/format and focused MyPy. The replacement oracle is 280 files/23 declarations/21 handlers/30 relations/130 routes. No route, worker handler, generic reporter, provider, production database or production state changed.
@@ -378,6 +379,48 @@ direction.
 *(subsequent stages remain sequenced by the Build Plan)*
 
 ## Contract questions (STOP-and-record before coding around)
+
+### S5-QD-FR-CQ-26 — Open-source discovery children depend on committed import results *(resolved: stable post-effect producer command)*
+
+**Discovered during the FR-03C open-source binding pass (2026-07-24).**
+
+The frozen effect table called this family provider/filesystem work, one
+`open_source_import` effect and already-declared native follow-ups. Direct
+source tracing disproved the last phrase. The incumbent handler reconciles
+Wikidata identities, reads existing source ids, creates raw and selected
+artifacts, imports and optionally normalizes domain rows, then derives rescue
+place ids from `normalize_summary.touched_place_ids`. Separately, old workflow
+completion can derive frontend deployment routes when those touched places are
+already published. Neither exact child exists before discovery/import.
+
+Having the handler build those children would violate the producer-planning
+rule. Having the reporter enqueue them would combine authority and queue
+publication. Omitting either behavior would silently remove the existing
+rescue or published-site convergence guarantee.
+
+**Resolution:** amend the Tier-3 specification docs-first. The native family
+uses a create-once raw provider artifact, a closed idempotent `prepare`
+operation for identity reconciliation and existing-source authority, a
+create-once selected artifact/manifest, and a closed `apply` effect that
+verifies/imports/normalizes the artifact and commits bounded
+touched-place/public-route truth. A separately invoked application
+producer command, keyed by job id plus committed effect digest, then derives
+and records the exact result-dependent plan. It reuses the established
+expand-bind-seal choreography for rescue and creates an exact frontend
+deployment job only when published routes changed under enabled deployment
+policy. The worker and reporter return/enqueue no result-derived child.
+
+Exact command replay returns the same workflow/job identities. Changed effect
+truth, artifact bytes or derived plan fails closed. Empty result sets are
+durable no-ops. This command is an ordinary post-effect producer/scheduler
+action, never taskq settlement or a compatibility wrapper around the old
+queue.
+
+**Adjudication (2026-07-24): approved through owner-authorized internal review
+while the external reviewer is unavailable.** This is the same
+artifact-revision producer pattern already accepted for result-dependent buzz
+rescue, extended to the open-source import receipt. No Tier-0/1, taskq SQL or
+migration change is required.
 
 ### S5-QD-FR-CQ-25 — Publication hides a non-transactional derivative upload inside the domain mutation *(resolved: preplanned frontend deployment operation)*
 
