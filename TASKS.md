@@ -404,13 +404,16 @@ inventory docs-first to split publication into:
 1. the existing closed `publish/apply` database effect, which applies content
    or geo-page publication, records launch-pipeline truth, and marks derivative
    work pending without performing external work; and
-2. one producer-planned native derivative/deployment operation with its own
+2. one producer-planned native `frontend_deploy_scope` child with its own
    stable job/operation identity, inspect/execute/record state machine and
-   ambiguous-execution policy. It may be the already-declared
-   `frontend_deploy_scope` family only if source re-derivation proves that
-   family can own media derivation without weakening its deployment/route
-   verification guarantees; otherwise freeze a separately named operation
-   before implementation.
+   ambiguous-execution policy. A follow-up source trace confirms this is the
+   correct existing owner: its payload already carries exact content ids and
+   public route keys, and its handler already owns the same site root,
+   subprocess boundary, deployment receipt and live-route verification.
+   Native frontend deployment must incorporate the bounded derivative step
+   before build/deploy and persist derivative plus deployment truth in its
+   stable operation receipt. A second media-operation family would duplicate
+   the same host authority and is not recommended.
 
 The producer must materialize the complete child before enqueue. Publication
 may select only that stored child after the database effect commits; no
