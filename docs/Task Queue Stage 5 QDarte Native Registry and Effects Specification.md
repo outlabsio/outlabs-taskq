@@ -270,6 +270,61 @@ event or the typed `expired_unsettled` unknown-cost posture, together with one
 mutually exclusive photo effect. This evidence is required at the photo gate
 and does not waive FR-04.
 
+#### Photo-find artifacts, authoritative application and branch selection
+
+`photo_find_scope` is one bounded entity operation, not an attempt-scoped
+result-file upload. For every planned entity the producer supplies one strict
+branch plan containing at most one of:
+
+- a complete scope-equal `photo_verify_scope` child;
+- a complete scope-equal `review_scope` repair child; or
+- no child.
+
+The branch choice is producer authority. A handler cannot infer it from
+`enrichment_mode`, a retry counter, current database state or provider output.
+Entity identities and branch steps are unique, branch plans cover the exact
+entity set, total children are capped at 20, and a child payload is validated
+before the parent can be enqueued. Only `usable_media_applied` may select the
+stored child. Every non-success outcome selects none.
+
+Downloaded candidates and the selection manifest are immutable artifacts
+under a path derived from `(taskq job id, photo_find_artifact, entity key)`;
+attempt id is forbidden from artifact identity. The manifest is strict and
+bounded: it carries the chosen outcome, bounded reason, at most one hero,
+at most six gallery candidates and at most eight selection-trace entries.
+Every referenced candidate carries a relative artifact key, SHA-256 digest,
+bounded media/source/rights metadata and no credential, prompt, provider body,
+exception text or absolute host path. Publication is create-once: replay or
+reclaim may reuse byte-identical artifacts but must fail closed if any byte or
+digest changes. A non-success result still publishes the immutable manifest
+but references no image artifact.
+
+The closed `photo_application` effect has one operation key, `apply`, per
+planned entity. Its intent contains only the immutable manifest receipt and
+the bounded result decoded from that manifest. The authoritative API obtains
+content/place identity from the stored native input, resolves every artifact
+key beneath the configured shared artifact root, verifies every digest before
+mutation, and applies the existing media, hold, blocker and optional
+Wikidata-fill behavior using PostgreSQL time. It never trusts caller row
+identity, caller time or an absolute local path. The domain mutation and
+stable effect receipt share one transaction.
+
+The handler orders inspect effect, perform provider/filesystem work only when
+pending, publish immutable artifacts, apply the effect, then select only the
+stored child matching the committed outcome. A lost apply response re-inspects
+and returns the same effect receipt, artifact receipts and child without
+provider or filesystem work. Concurrent same-intent application produces one
+domain mutation. A different manifest or result under the same stable effect
+identity fails closed.
+
+The old photo-result route, attempt-scoped artifact directory, event writes,
+completion hook and generic child planner are deletion targets. Native code
+must not construct an old job/attempt/client, submit an old photo-result
+request, call `queue_photo_find_verify_handoff`, or plan a child after
+provider work. FR-04 still owes a real side-effecting hard-kill rehearsal that
+proves immutable-artifact reuse, one photo effect and exact child
+conservation.
+
 #### Completion-hook sweep for remaining unbound families
 
 The old completion/result paths were re-derived before binding photo. The
