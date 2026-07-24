@@ -384,8 +384,8 @@ graph.
 #### Publish effect and launch-pipeline truth
 
 `publish_scope` is an authoritative domain-effect job. The worker performs no
-database, filesystem, network or deployment operation and it returns no child.
-The old worker's preparation-only result and the API's settlement-triggered
+database, filesystem, network or deployment operation. The old worker's
+preparation-only result and the API's settlement-triggered
 `_apply_publish_scope_job` hook are both deletion targets.
 
 The strict native input contains one to twenty producer-planned entities. Each
@@ -394,6 +394,13 @@ closed `content_lifecycle_publish | geo_page_publish` action, and the bounded
 geo/public-route fields required to validate that plan. A geo-page action
 requires a geo path. Duplicate entity keys or content-item ids, an empty plan,
 and inconsistent geo/action fields are invalid before enqueue.
+
+The producer may also supply exactly one fully materialized, scope-equal
+`frontend_deploy_scope` child. Its content-item ids are the exact publish
+entity set and its public-route keys are the exact non-null planned route set.
+The branch step is unique and the child validates before the parent enqueues.
+The handler cannot synthesize, widen or modify it. A successful publication
+effect set selects the stored child; any blocked entity selects no child.
 
 The closed `publish` family has one `apply` operation per entity. Its stable
 identity is `(taskq job id, publish, entity key, apply)`. The authoritative API
@@ -404,6 +411,8 @@ authority.
 
 Application uses the queue-independent lifecycle or geo-page publication
 service in the same database transaction as the stable effect receipt. The
+native lifecycle path never runs the legacy synchronous media-derivative
+bridge; it records derivative work as pending for the deployment operation. The
 result is exactly one of:
 
 - `published`, with the authoritative bounded public route key when one exists;
@@ -430,9 +439,12 @@ reused without invoking a publication service. A pending result sends only
 the closed apply request, then returns bounded published/blocked counts,
 per-entity outcomes and stable receipts. Concurrent same-intent calls converge
 to one mutation; changed intent under the same identity fails closed.
-Response-loss replay returns the same result and receipt. No frontend deploy
-or other child is created: source re-derivation confirms the legacy completed-
-job follow-up service has no `publish_scope` branch.
+Response-loss replay returns the same result and receipt. Only the optional
+stored frontend-deploy child may be returned, and only after every entity is
+published. Source re-derivation confirms the legacy completed-job follow-up
+service has no `publish_scope` branch; the native child is an explicit repair
+for the derivative upload that was previously hidden inside the domain
+mutation, not preservation of a settlement hook.
 
 Executable vectors must cover lifecycle publish, geo-page publish, lifecycle
 block, geo-page block, response-loss replay, concurrent same-intent apply,
@@ -441,6 +453,62 @@ launch-pipeline and effect-ledger oracles prove one final mutation and one
 receipt per entity. The native module graph forbids the old job, attempt,
 client, completion hook, `_apply_publish_scope_job`, old queue event and
 settlement-triggered child planner.
+
+#### Frontend deployment and derivative operation
+
+`frontend_deploy_scope` is one external operation, not a domain effect and not
+permission to call an arbitrary command. Its strict input contains:
+
+- a producer-minted bounded deployment key;
+- the closed `staging | production` environment and bounded HTTPS site origin;
+- one to one hundred unique content-item ids and public-route keys;
+- the fixed non-empty locale subset `es | en`; and
+- no workflow/job/attempt identity, command, path, environment map, credential
+  or arbitrary metadata.
+
+The worker derives all host paths and the fixed deploy command from trusted
+configuration. The existing deployment pipeline is the sole execution owner:
+it already performs bounded media preparation/derivation, frontend export,
+build, deployment and route verification against the same content and route
+scope. The old per-item derivative bridge is forbidden from native
+publication.
+
+The closed `frontend_deploy` reporter family has `inspect` and `record`
+operations under the stable identity
+`(taskq job id, frontend_deploy, deployment key, deploy)`. `record` carries
+only a bounded create-once operation receipt: environment, deployment key,
+relative log key and digest, relative deploy-receipt keys and digests, verified
+route count, and a closed `completed | failed | execution_unknown` outcome.
+The API validates the current running publish-queue task and exact stored plan
+before ledger access. It never accepts a command, host path, credential,
+unbounded log, route response body or caller time.
+
+Before execution the worker creates, with exclusive creation, a durable
+job-scoped operation-state file beneath the configured shared artifact root.
+It contains the stable task/deployment identity, canonical input digest and
+`started` state. On success the worker atomically replaces it with `completed`
+state plus bounded content-addressed receipts, then records that receipt
+through the reporter. A reclaim observing `completed` records/reuses it without
+execution. A reclaim observing `started` returns and records
+`execution_unknown`; it never automatically reruns the deployment. A known
+pre-execution validation failure may fail without creating state. Once state
+is created, no automatic retry may execute the command again.
+
+This is the ambiguous-execution policy: response loss after reporter record is
+ordinary effect replay; process loss after the deploy but before reporter
+record converges from the completed state file; process loss during the
+external operation remains explicitly unknown and requires operator
+reconciliation. Unknown never means failed and never authorizes a second
+deployment.
+
+Executable vectors cover strict plan equality, exclusive state creation,
+completed recovery, started/unknown recovery, record-response loss, digest
+mismatch, wrong task/entity refusal, derivative/build/deploy failure and exact
+route verification. Raw effect-ledger and filesystem oracles prove one
+operation identity and zero automatic duplicate executions. The old job,
+attempt, API client, advisory event writer, `/Volumes/Server87` literal,
+absolute result paths and old settlement lifecycle are forbidden from the
+native module graph.
 
 #### Completion-hook sweep for remaining unbound families
 
