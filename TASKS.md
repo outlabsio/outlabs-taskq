@@ -377,6 +377,55 @@ direction.
 
 ## Contract questions (STOP-and-record before coding around)
 
+### S5-QD-FR-CQ-25 — Publication hides a non-transactional derivative upload inside the domain mutation *(awaiting adjudication)*
+
+**Discovered during FR-03C publish implementation (2026-07-23).**
+
+The source-derived inventory classified `publish_scope` as one authoritative
+database effect and confirmed that the old completed-job follow-up service has
+no publish branch. Implementation then traced one layer deeper:
+`ContentLifecycleActionService.publish_item()` calls
+`run_publish_time_derivative_upload()` before committing the content row. That
+bridge runs a synchronous media generator in a worker thread, may invoke a
+Node subprocess, reads/writes the site filesystem and can upload derivative
+media. Its failure does not block publication; instead the content row records
+bounded `media_derivatives_pending` evidence.
+
+The frozen publish amendment is therefore incomplete. Calling the bridge
+inside `publish/apply` would falsely imply that an external filesystem/network
+operation is atomic with the effect ledger. Omitting it would silently remove
+existing behavior. Treating it as an incidental implementation detail would
+also violate the source-derived effect inventory and FR-03's no-hidden-effects
+rule.
+
+**Recommendation:** amend the Tier-3 Stage-5 specification and machine effect
+inventory docs-first to split publication into:
+
+1. the existing closed `publish/apply` database effect, which applies content
+   or geo-page publication, records launch-pipeline truth, and marks derivative
+   work pending without performing external work; and
+2. one producer-planned native derivative/deployment operation with its own
+   stable job/operation identity, inspect/execute/record state machine and
+   ambiguous-execution policy. It may be the already-declared
+   `frontend_deploy_scope` family only if source re-derivation proves that
+   family can own media derivation without weakening its deployment/route
+   verification guarantees; otherwise freeze a separately named operation
+   before implementation.
+
+The producer must materialize the complete child before enqueue. Publication
+may select only that stored child after the database effect commits; no
+settlement-time planner or reporter-enqueued job is permitted. A derivative
+failure remains durable pending/failed operational truth and never rolls back
+an already committed publication. Replay vectors must prove one publication
+effect, one stable derivative operation, no duplicate upload after an
+ambiguous response, and exact pending-state convergence.
+
+**Stop posture:** runtime `207e47d`, API `409a228`, workers `be1bff3` and runtime
+inventory `9f5bfe1` are pushed but remain uncomposed and unactivated. No native
+publish worker, service or route was started; no database, filesystem,
+provider or production state changed. Do not mark FR-03C-PUBLISH complete or
+bind another family until this question is adjudicated docs-first.
+
 ### S5-QD-FR-CQ-24 — Promotion work units cannot preserve producer-owned content identity *(resolved: additive planned identity)*
 
 **Blocking evidence:** the frozen native rescue specification requires every
