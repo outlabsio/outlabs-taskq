@@ -393,8 +393,7 @@ entity has a unique bounded entity key, exact content-item id, collection,
 closed `content_lifecycle_publish | geo_page_publish` action, and the bounded
 geo/public-route fields required to validate that plan. A geo-page action
 requires a geo path. Duplicate entity keys or content-item ids, an empty plan,
-and a plan whose explicit content-item list differs from its entity set are
-invalid before enqueue.
+and inconsistent geo/action fields are invalid before enqueue.
 
 The closed `publish` family has one `apply` operation per entity. Its stable
 identity is `(taskq job id, publish, entity key, apply)`. The authoritative API
