@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — released package **`0.1.0a12`** uses SQL contract **`0.2.5`**. The SQL kernel, typed client, worker and CLI, testing helpers, optional FastAPI facade, authorization boundary, durable admission, atomic follow-ups, workflows, schedules, projections, and worker presence are implemented.
+**Status:** alpha — current package version **`0.1.0a17`** uses SQL contract **`0.2.6`**. The SQL kernel, typed client, worker and CLI, testing helpers, optional FastAPI facade, authorization boundary, durable admission, atomic follow-ups, workflows, schedules, projections, and worker presence are implemented.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -20,13 +20,11 @@ Start here:
 
 ## Install
 
-Published via [GitHub Releases](https://github.com/outlabsio/outlabs-taskq/releases) (not PyPI yet). Pin the exact wheel:
+Until the next packaged release is published, install directly from the clean public branch:
 
 ```bash
-pip install https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a12/outlabs_taskq-0.1.0a12-py3-none-any.whl
-# extras:
-#   ...whl[http]
-#   ...whl[outlabs]
+pip install "outlabs-taskq @ git+https://github.com/outlabsio/outlabs-taskq.git@main"
+# extras use the equivalent VCS requirement in your dependency manager.
 ```
 
 ## Package layout
