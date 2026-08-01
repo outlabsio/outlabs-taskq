@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-28",
+  "method": {
+    "baseline": "fresh packaged 0001-0015 migration chain",
+    "catalog_delta": "WFC-I00/I04 nullable columns, six named constraints, two composite appends, policy claim indexes, and the bounded workflow-cancellation frontier index",
+    "cleanup": "both disposable databases dropped after capture",
+    "digest_queries": "same normalized pg_catalog queries used by taskq.verify()"
+  },
+  "postgres": [
+    {
+      "version": "16.14 (Debian 16.14-1.pgdg13+1)",
+      "result": "passed"
+    },
+    {
+      "version": "18.4",
+      "result": "passed"
+    }
+  ],
+  "identical_cross_major_result": {
+    "composites": {
+      "claimed_job_attributes": 16,
+      "workflow_read_profile_attributes": 13
+    },
+    "constraints": {
+      "jobs": [20, "9f7f486f864bcfaf09f43bfd4b8dffc2"],
+      "workflow_member_counts": [8, "a189ce4052298ca2208e6f7518a0f5a3"],
+      "workflows": [11, "b35b364d2ab059ce10e9248c5dd9abfc"]
+    },
+    "indexes": {
+      "jobs_affinity_policy_idx": "71f8d3c1a6b25063b3c1e9bd7094689e",
+      "jobs_claim_policy_idx": "46eb01bf1ce48d2ead1147847a637939",
+      "jobs_workflow_cancel_idx": "092a4c56bd382e8444bd4b41125eb3df"
+    },
+    "tables": {
+      "jobs": [41, "943b80b9adef46c731b9208b3710b820"],
+      "workflow_member_counts": [8, "f79bc1d967e8eca2cabd56a7d4bdb132"],
+      "workflows": [18, "6bc37874b900f701e146cda14552835a"]
+    }
+  }
+}

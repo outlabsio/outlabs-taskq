@@ -1,0 +1,29 @@
+{
+  "protocol_candidate_revision": "1.0.15",
+  "active_protocol_revision": "1.0.14",
+  "policy_format": 1,
+  "limits": {
+    "supported_policy_hashes": 32,
+    "reachable_queues": 32,
+    "workflow_member_default": 10000,
+    "workflow_member_maximum": 1000000,
+    "local_step_ascii_bytes": 64,
+    "derived_workflow_step_ascii_bytes": 103,
+    "derived_idempotency_key_ascii_bytes": 107
+  },
+  "canonical_policy": {
+    "canonical_json": "{\"format\":1,\"parents\":[{\"job_type\":\"graph.middle\",\"queue\":\"middle_q\",\"revision\":\"middle-v2\",\"targets\":[{\"job_type\":\"graph.leaf\",\"queue\":\"leaf_q\"}]},{\"job_type\":\"graph.root\",\"queue\":\"root_q\",\"revision\":\"root-v1\",\"targets\":[{\"job_type\":\"graph.middle\",\"queue\":\"middle_q\"}]}],\"roots\":[{\"job_type\":\"graph.root\",\"queue\":\"root_q\"}]}",
+    "sha256": "be885a6c346c08b599163ab3ddd488bbdc39f2d71e04f87964ff2b4563dd3bd3",
+    "reachable_queues": [
+      "leaf_q",
+      "middle_q",
+      "root_q"
+    ]
+  },
+  "derived_identity": {
+    "parent_job_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+    "local_step": "next",
+    "workflow_step": "c:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:next",
+    "idempotency_key": "chain:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa:next"
+  }
+}

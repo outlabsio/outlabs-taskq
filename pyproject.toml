@@ -1,0 +1,95 @@
+[project]
+name = "outlabs-taskq"
+version = "0.1.0a17"
+description = "Postgres-native task queue: SQL-first contract, Python client, optional FastAPI facade."
+authors = [
+    { name = "OUTLABS LLC", email = "contact@outlabs.io" },
+]
+maintainers = [
+    { name = "OUTLABS LLC", email = "contact@outlabs.io" },
+]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.12"
+keywords = [
+    "postgres",
+    "postgresql",
+    "task-queue",
+    "job-queue",
+    "fastapi",
+    "pydantic",
+    "async",
+]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Framework :: FastAPI",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "asyncpg>=0.29.0",
+    "croniter>=2.0.0",
+]
+
+[project.optional-dependencies]
+http = [
+    "fastapi>=0.115.0",
+    "httpx>=0.27.0",
+]
+outlabs = [
+    "outlabs-taskq[http]",
+    "outlabs-auth==0.1.0a26",
+]
+dev = [
+    "hypothesis>=6.0.0",
+    "psycopg[binary]>=3.2.0,<4.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "ruff>=0.6.0",
+]
+
+[project.urls]
+Homepage = "https://outlabs.io"
+Repository = "https://github.com/outlabsio/outlabs-taskq"
+Documentation = "https://github.com/outlabsio/outlabs-taskq/tree/main/docs"
+
+[project.scripts]
+taskq = "taskq.cli:main"
+taskq-bench = "taskq.bench:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build]
+exclude = ["**/.gitkeep"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/taskq"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/docs",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]

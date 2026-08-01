@@ -1,0 +1,195 @@
+{
+  "capability": "workflow_continuations",
+  "composites": {
+    "claimed_job": [
+      ["job_id", "uuid"],
+      ["queue", "text"],
+      ["job_type", "text"],
+      ["priority", "smallint"],
+      ["payload", "jsonb"],
+      ["headers", "jsonb"],
+      ["progress", "jsonb"],
+      ["attempt_id", "uuid"],
+      ["attempt_number", "integer"],
+      ["failure_count", "smallint"],
+      ["max_attempts", "smallint"],
+      ["lease_expires_at", "timestamp with time zone"],
+      ["workflow_id", "uuid"],
+      ["step_key", "text"],
+      ["lease_seconds", "integer"],
+      ["continuation_policy_hash", "text"]
+    ],
+    "workflow_read_profile": [
+      ["workflow_id", "uuid"],
+      ["kind", "text"],
+      ["status", "text"],
+      ["sealed", "boolean"],
+      ["cancel_requested", "boolean"],
+      ["declared_queues", "text[]"],
+      ["created_at", "timestamp with time zone"],
+      ["updated_at", "timestamp with time zone"],
+      ["finished_at", "timestamp with time zone"],
+      ["member_limit", "integer"],
+      ["admitted_total", "bigint"],
+      ["remaining_capacity", "bigint"],
+      ["continuation_policy_hash", "text"]
+    ]
+  },
+  "constraint_additions": {
+    "jobs_continuation_policy_hash_ck": "CHECK (continuation_policy_hash ~ '^[0-9a-f]{64}$')",
+    "jobs_continuation_policy_shape_ck": "CHECK (continuation_policy_hash IS NULL OR workflow_id IS NOT NULL)",
+    "workflow_member_counts_admitted_total_ck": "CHECK (admitted_total >= 0)",
+    "workflows_continuation_policy_hash_ck": "CHECK (continuation_policy_hash ~ '^[0-9a-f]{64}$')",
+    "workflows_continuation_policy_shape_ck": "CHECK (continuation_policy_hash IS NULL OR member_limit IS NOT NULL)",
+    "workflows_member_limit_ck": "CHECK (member_limit BETWEEN 1 AND 1000000)"
+  },
+  "contract_version": "0.2.5",
+  "definition_migration": "0016_workflow_continuations.sql",
+  "function_body_replacements": [
+    "taskq._enqueue_followup(uuid,text,jsonb,integer)",
+    "taskq.advance_workflow_cancellations(integer)",
+    "taskq.cancel_workflow(uuid,text,text)",
+    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
+    "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
+    "taskq.create_workflow(text,text,jsonb,text[],text)",
+    "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+    "taskq.finalize_workflows(integer)",
+    "taskq.get_workflow_page(uuid,integer,uuid)",
+    "taskq.manage_workflow_member_counts()",
+    "taskq.seal_workflow(uuid,text)"
+  ],
+  "index_additions": {
+    "jobs_affinity_policy_idx": {
+      "definition": "CREATE INDEX jobs_affinity_policy_idx ON taskq.jobs USING btree (queue, affinity_key, continuation_policy_hash, priority, scheduled_at, id) WHERE ((status = 'queued'::text) AND (cancel_requested_at IS NULL) AND (affinity_key IS NOT NULL))",
+      "digest": "71f8d3c1a6b25063b3c1e9bd7094689e"
+    },
+    "jobs_claim_policy_idx": {
+      "definition": "CREATE INDEX jobs_claim_policy_idx ON taskq.jobs USING btree (queue, continuation_policy_hash, priority, scheduled_at, id) WHERE ((status = 'queued'::text) AND (cancel_requested_at IS NULL))",
+      "digest": "46eb01bf1ce48d2ead1147847a637939"
+    },
+    "jobs_workflow_cancel_idx": {
+      "definition": "CREATE INDEX jobs_workflow_cancel_idx ON taskq.jobs USING btree (workflow_id, id) WHERE ((workflow_id IS NOT NULL) AND ((status = ANY (ARRAY['blocked'::text, 'queued'::text])) OR ((status = 'running'::text) AND (cancel_requested_at IS NULL))))",
+      "digest": "092a4c56bd382e8444bd4b41125eb3df"
+    }
+  },
+  "index_removals": [
+    "jobs_affinity_idx"
+  ],
+  "metadata": {
+    "after_0016": {
+      "active": [
+        "admission_reservations",
+        "dependencies_workflows",
+        "followups",
+        "read_model_list_finished",
+        "read_model_list_ready",
+        "read_model_list_running",
+        "read_model_workflow",
+        "schedules",
+        "worker_presence"
+      ]
+    },
+    "after_0017": {
+      "active": [
+        "admission_reservations",
+        "dependencies_workflows",
+        "followups",
+        "read_model_list_finished",
+        "read_model_list_ready",
+        "read_model_list_running",
+        "read_model_workflow",
+        "schedules",
+        "worker_presence",
+        "workflow_continuations"
+      ]
+    },
+    "supported_contract_versions": [
+      "0.1.2",
+      "0.1.3",
+      "0.1.4",
+      "0.1.5",
+      "0.2.0",
+      "0.2.1",
+      "0.2.2",
+      "0.2.3",
+      "0.2.4",
+      "0.2.5"
+    ]
+  },
+  "policy_claim_shape": {
+    "affinity_frontier_index": "jobs_affinity_policy_idx",
+    "direct_or_filter": "forbidden_unbounded_shape",
+    "frontier_bound": "(1 + cardinality(supported_policy_hashes)) * batch <= 1650",
+    "frontier_global_order": "priority, scheduled_at, id",
+    "frontier_local_order": "continuation_policy_hash, priority, scheduled_at, id",
+    "normal_frontier_index": "jobs_claim_policy_idx",
+    "supported_policy_hash_limit": 32,
+    "targeted_index": "jobs_pkey"
+  },
+  "private_functions": {
+    "taskq._enqueue_followup(uuid,text,jsonb,integer)": {
+      "change": "replace_body",
+      "grants": [],
+      "result": "TABLE(job_id uuid, created boolean)"
+    },
+    "taskq._reserve_workflow_members(uuid,integer,text)": {
+      "arguments": "p_workflow_id uuid, p_count integer, p_continuation_policy_hash text",
+      "grants": [],
+      "language": "plpgsql",
+      "parallel": "unsafe",
+      "result": "bigint",
+      "volatility": "volatile"
+    }
+  },
+  "protocol_document_revision": "1.0.15",
+  "public_overloads": {
+    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])": {
+      "arguments": "p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[]",
+      "grants": ["taskq_runner"],
+      "result": "taskq.claim_batch",
+      "sql_defaults": false
+    },
+    "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)": {
+      "arguments": "p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_result jsonb, p_stats jsonb, p_followups jsonb, p_continuation_policy_hash text",
+      "grants": ["taskq_runner"],
+      "result": "taskq.settle_result",
+      "sql_defaults": false
+    },
+    "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)": {
+      "arguments": "p_workflow_key text, p_kind text, p_params jsonb, p_declared_queues text[], p_actor text, p_member_limit integer, p_continuation_policy_hash text",
+      "grants": ["taskq_producer"],
+      "result": "taskq.workflow_result",
+      "sql_defaults": false
+    }
+  },
+  "schema_version": 1,
+  "table_shape_deltas": {
+    "jobs": {
+      "columns": 41,
+      "digest": "943b80b9adef46c731b9208b3710b820"
+    },
+    "workflow_member_counts": {
+      "columns": 8,
+      "digest": "f79bc1d967e8eca2cabd56a7d4bdb132"
+    },
+    "workflows": {
+      "columns": 18,
+      "digest": "6bc37874b900f701e146cda14552835a"
+    }
+  },
+  "constraint_shape_deltas": {
+    "jobs": {
+      "constraints": 20,
+      "digest": "9f7f486f864bcfaf09f43bfd4b8dffc2"
+    },
+    "workflow_member_counts": {
+      "constraints": 8,
+      "digest": "a189ce4052298ca2208e6f7518a0f5a3"
+    },
+    "workflows": {
+      "constraints": 11,
+      "digest": "b35b364d2ab059ce10e9248c5dd9abfc"
+    }
+  },
+  "activation_migration": "0017_activate_workflow_continuations.sql"
+}

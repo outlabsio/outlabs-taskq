@@ -1,0 +1,1506 @@
+"""SQLAlchemy asyncio adapter for the complete public contract-0.1 surface."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from datetime import datetime
+from decimal import Decimal
+from types import MappingProxyType
+from typing import Any, Literal, TypeVar
+from uuid import UUID, uuid4
+
+from sqlalchemy import text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
+
+from taskq.errors import (
+    TaskqConfigError,
+    TaskqConflictError,
+    TaskqError,
+    TaskqInternalError,
+    TaskqValidationError,
+    taskq_error_from_exception,
+)
+from taskq.protocol import (
+    ADMISSION_RESERVATION_ADAPTER,
+    AdmissionCancelRequest,
+    AdmissionCancelResult,
+    AdmissionFinishRequest,
+    AdmissionFinishResult,
+    AdmissionJobCommand,
+    AdmissionReservationResult,
+    AdmissionReserveRequest,
+    AuthorizationProjection,
+    CLAIM_BATCH_ADAPTER,
+    COMMAND_SPECS,
+    CancelResult,
+    ClaimResult,
+    CommandName,
+    CommandOkOutcome,
+    ConfigChangeOutcome,
+    ContractMeta,
+    ENQUEUE_RESULT_ADAPTER,
+    EnqueueCommand,
+    EnqueueManyItem,
+    EnqueueResult,
+    EnqueueStatus,
+    EnsureQueueResult,
+    ExpireJobOutcome,
+    ExpireWorkerLeasesResult,
+    Followup,
+    HeartbeatResult,
+    JobDetail,
+    JobPage,
+    Metric,
+    QueueStats,
+    QueueProfile,
+    QueueControlOutcome,
+    RedriveFailedResult,
+    ScheduleActionResult,
+    ScheduleAuthorizationProjection,
+    ScheduleClaim,
+    ScheduleClaimResult,
+    ScheduleDefinition,
+    ScheduleProfile,
+    ScheduleWriteResult,
+    SettleResult,
+    SETTLE_RESULT_ADAPTER,
+    WorkflowAuthorizationProjection,
+    WorkflowKind,
+    WorkflowPage,
+    WorkflowResult,
+    WorkerPresencePage,
+)
+from taskq.continuations import (
+    ContinuationClaimWireOptions,
+    ContinuationCompleteWireOptions,
+    ContinuationWorkflowWireOptions,
+)
+
+T = TypeVar("T")
+
+_ADMISSION_CONFLICT_REASONS = frozenset(
+    {
+        "idempotency_mismatch",
+        "reservation_conflict",
+        "reservation_expired",
+        "reservation_cancelled",
+        "finish_mismatch",
+    }
+)
+_WORKFLOW_CONFLICT_REASONS = frozenset(
+    {
+        "dependency_terminal",
+        "workflow_member_redrive_forbidden",
+        "workflow_mismatch",
+        "workflow_sealed",
+        "workflow_step_mismatch",
+        "workflow_member_limit_exceeded",
+    }
+)
+_CONTINUATION_SAFE_REASONS = frozenset(
+    {
+        "continuation_parent_not_member",
+        "continuation_policy_mismatch",
+        "continuation_policy_required",
+        "continuation_queue_undeclared",
+        "reserved_idempotency_namespace",
+        "workflow_member_limit_exceeded",
+    }
+)
+_SCHEDULE_CONFLICT_REASONS = frozenset(
+    {"schedule_mismatch", "schedule_version_conflict", "schedule_retired"}
+)
+_SCHEDULE_PROFILE_FIELDS = (
+    "schedule_id",
+    "name",
+    "target",
+    "recurrence",
+    "catchup_policy",
+    "max_catchup",
+    "state",
+    "next_fire_at",
+    "last_fire_at",
+    "version",
+)
+_SCHEDULE_CLAIM_FIELDS = (
+    "schedule_id",
+    "name",
+    "definition_version",
+    "as_of",
+    "target",
+    "recurrence",
+    "catchup_policy",
+    "max_catchup",
+    "initialized",
+    "next_fire_at",
+    "token",
+    "lease_seconds",
+)
+
+METHOD_FUNCTIONS = MappingProxyType(
+    {command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()}
+)
+
+
+def _json(value: Any) -> Any:
+    if isinstance(value, str):
+        return json.loads(value)
+    return value
+
+
+def _json_param(value: Any) -> str | None:
+    return None if value is None else json.dumps(value, separators=(",", ":"))
+
+
+def _nested_mapping(value: Any, fields: Sequence[str]) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    return dict(zip(fields, value, strict=True))
+
+
+def _admission_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    """Recover only the frozen safe reason; never surface arbitrary driver detail."""
+
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason"}
+                and value["reason"] in _ADMISSION_CONFLICT_REASONS
+            ):
+                return TaskqConflictError(details={"reason": value["reason"]}, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
+
+
+def _workflow_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason"}
+                and value["reason"] in _WORKFLOW_CONFLICT_REASONS
+            ):
+                return TaskqConflictError(details={"reason": value["reason"]}, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
+
+
+def _continuation_reason(error: TaskqError) -> TaskqError:
+    """Recover only the frozen WFC reason set from driver diagnostics."""
+
+    if not isinstance(error, (TaskqValidationError, TaskqConflictError)):
+        return error
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason"}
+                and value["reason"] in _CONTINUATION_SAFE_REASONS
+            ):
+                return type(error)(details={"reason": value["reason"]}, cause=error.cause)
+            return error
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    return error
+
+
+def _schedule_conflict(error: TaskqConflictError) -> TaskqConflictError:
+    """Recover only the frozen reason and current version from SQL."""
+
+    pending: list[BaseException] = [error]
+    seen: set[int] = set()
+    while pending:
+        current = pending.pop(0)
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        detail = getattr(current, "detail", None)
+        if isinstance(detail, str):
+            try:
+                value = json.loads(detail)
+            except ValueError:
+                value = None
+            if (
+                isinstance(value, dict)
+                and set(value) == {"reason", "current_version"}
+                and value["reason"] in _SCHEDULE_CONFLICT_REASONS
+                and isinstance(value["current_version"], int)
+                and not isinstance(value["current_version"], bool)
+                and value["current_version"] > 0
+            ):
+                return TaskqConflictError(details=value, cause=error.cause)
+            raise TaskqInternalError(cause=error.cause)
+        for candidate in (
+            getattr(current, "cause", None),
+            getattr(current, "orig", None),
+            current.__cause__,
+            current.__context__,
+        ):
+            if isinstance(candidate, BaseException):
+                pending.append(candidate)
+    raise TaskqInternalError(cause=error.cause)
+
+
+def _schedule_profile(value: Any) -> ScheduleProfile:
+    data = _nested_mapping(value, _SCHEDULE_PROFILE_FIELDS)
+    data["target"] = _json(data["target"])
+    data["recurrence"] = _json(data["recurrence"])
+    return ScheduleProfile.model_validate(data)
+
+
+class SqlTaskqTransport:
+    def __init__(self, engine: AsyncEngine, *, owns_engine: bool = False) -> None:
+        self._engine = engine
+        self._owns_engine = owns_engine
+        self._closed = False
+
+    @classmethod
+    def from_dsn(cls, dsn: str, **engine_options: Any) -> SqlTaskqTransport:
+        url = make_url(dsn)
+        if url.drivername == "postgres":
+            url = url.set(drivername="postgresql+asyncpg")
+        elif url.drivername in {"postgresql", "postgresql+psycopg"}:
+            url = url.set(drivername="postgresql+asyncpg")
+        elif url.drivername != "postgresql+asyncpg":
+            raise TaskqConfigError("SqlTaskqTransport requires a PostgreSQL DSN")
+        return cls(create_async_engine(url, **engine_options), owns_engine=True)
+
+    @property
+    def engine(self) -> AsyncEngine:
+        return self._engine
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._owns_engine:
+            await self._engine.dispose()
+
+    async def _run(
+        self,
+        operation: Callable[[AsyncConnection], Awaitable[T]],
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> T:
+        if self._closed:
+            raise TaskqConfigError("transport is closed")
+        try:
+            if connection is not None:
+                return await operation(connection)
+            async with self._engine.begin() as owned_connection:
+                return await operation(owned_connection)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            normalized = taskq_error_from_exception(exc)
+            raise _continuation_reason(normalized) from exc
+
+    @staticmethod
+    def _validated_outcome(command: CommandName, value: Any) -> str:
+        outcome = str(value)
+        if outcome not in COMMAND_SPECS[command].outcomes:
+            raise TaskqInternalError()
+        return outcome
+
+    @staticmethod
+    async def _one(
+        connection: AsyncConnection, statement: str, params: Mapping[str, Any] | None = None
+    ) -> Mapping[str, Any]:
+        result = await connection.execute(text(statement), dict(params or {}))
+        row = result.mappings().first()
+        if row is None:
+            raise TaskqInternalError()
+        return row
+
+    @staticmethod
+    async def _many(
+        connection: AsyncConnection, statement: str, params: Mapping[str, Any] | None = None
+    ) -> list[Mapping[str, Any]]:
+        result = await connection.execute(text(statement), dict(params or {}))
+        return list(result.mappings())
+
+    @staticmethod
+    async def _scalar(
+        connection: AsyncConnection, statement: str, params: Mapping[str, Any] | None = None
+    ) -> Any:
+        result = await connection.execute(text(statement), dict(params or {}))
+        value = result.scalar_one_or_none()
+        if value is None:
+            raise TaskqInternalError()
+        return value
+
+    async def enqueue(
+        self, command: EnqueueCommand, *, connection: AsyncConnection | None = None
+    ) -> EnqueueResult:
+        async def operation(conn: AsyncConnection) -> EnqueueResult:
+            row = await self._one(
+                conn,
+                """SELECT * FROM taskq.enqueue(
+                    :queue, :job_type, CAST(:payload AS jsonb), :priority, :scheduled_at,
+                    :idempotency_key, :concurrency_key, :affinity_key, :max_attempts,
+                    :lease_seconds, :backoff_mode, :backoff_base, :backoff_cap,
+                    :depends_on, :workflow_id, :step_key, NULL, CAST(:headers AS jsonb))""",
+                {
+                    **command.model_dump(exclude={"payload", "headers", "depends_on"}),
+                    "payload": _json_param(command.payload),
+                    "headers": _json_param(command.headers),
+                    "depends_on": (
+                        list(command.depends_on) if command.depends_on is not None else None
+                    ),
+                },
+            )
+            created = row["created"]
+            job_id = row["job_id"]
+            if not isinstance(created, bool) or not isinstance(job_id, UUID):
+                raise TaskqInternalError()
+            return ENQUEUE_RESULT_ADAPTER.validate_python(
+                {
+                    "status": EnqueueStatus.CREATED if created else EnqueueStatus.EXISTED,
+                    "job_id": job_id,
+                    "created": created,
+                    "queue": command.queue,
+                    "job_type": command.job_type,
+                    "idempotency_key": command.idempotency_key,
+                    "scheduled_at": command.scheduled_at,
+                }
+            )
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _workflow_conflict(error) from error
+
+    async def create_workflow(
+        self,
+        workflow_key: str,
+        kind: WorkflowKind | Literal["dag", "batch"],
+        *,
+        params: Mapping[str, Any] | None = None,
+        declared_queues: Sequence[str],
+        actor: str,
+        member_limit: int | None = None,
+        continuation_policy_hash: str | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        continuation = (
+            None
+            if member_limit is None and continuation_policy_hash is None
+            else ContinuationWorkflowWireOptions(
+                **({"member_limit": member_limit} if member_limit is not None else {}),
+                continuation_policy_hash=continuation_policy_hash,
+            )
+        )
+
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            if continuation is not None:
+                row = await self._one(
+                    conn,
+                    "SELECT * FROM taskq.create_workflow("
+                    ":workflow_key,:kind,CAST(:params AS jsonb),:declared_queues,:actor,"
+                    ":member_limit,:continuation_policy_hash)",
+                    {
+                        "workflow_key": workflow_key,
+                        "kind": str(kind),
+                        "params": _json_param(params or {}),
+                        "declared_queues": list(declared_queues),
+                        "actor": actor,
+                        "member_limit": continuation.member_limit,
+                        "continuation_policy_hash": continuation.continuation_policy_hash,
+                    },
+                )
+            else:
+                row = await self._one(
+                    conn,
+                    "SELECT * FROM taskq.create_workflow("
+                    ":workflow_key,:kind,CAST(:params AS jsonb),:declared_queues,:actor)",
+                    {
+                        "workflow_key": workflow_key,
+                        "kind": str(kind),
+                        "params": _json_param(params or {}),
+                        "declared_queues": list(declared_queues),
+                        "actor": actor,
+                    },
+                )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.CREATE_WORKFLOW, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _workflow_conflict(error) from error
+
+    async def seal_workflow(
+        self,
+        workflow_id: UUID,
+        actor: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> WorkflowResult:
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.seal_workflow(:workflow_id,:actor)",
+                {"workflow_id": workflow_id, "actor": actor},
+            )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.SEAL_WORKFLOW, result.outcome)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def reserve_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        intent_hash: str,
+        *,
+        handle: UUID | None = None,
+        reservation_ttl_seconds: int = 300,
+        receipt_ttl_seconds: int = 2_592_000,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionReservationResult:
+        request = AdmissionReserveRequest(
+            idempotency_key=idempotency_key,
+            intent_hash=intent_hash,
+            handle=handle or uuid4(),
+            reservation_ttl_seconds=reservation_ttl_seconds,
+            receipt_ttl_seconds=receipt_ttl_seconds,
+        )
+
+        async def operation(conn: AsyncConnection) -> AdmissionReservationResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.reserve_admission(:queue, :idempotency_key, "
+                ":intent_hash, :handle, :reservation_ttl_seconds, :receipt_ttl_seconds)",
+                {"queue": queue, **request.model_dump()},
+            )
+            data = dict(row)
+            data["receipt"] = _json(data["receipt"])
+            result = ADMISSION_RESERVATION_ADAPTER.validate_python(data)
+            self._validated_outcome(CommandName.RESERVE_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
+
+    async def finish_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        job: AdmissionJobCommand | Mapping[str, Any],
+        receipt: Mapping[str, Any] | None = None,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionFinishResult:
+        request = AdmissionFinishRequest(
+            idempotency_key=idempotency_key,
+            handle=handle,
+            job=job,
+            receipt=dict(receipt or {}),
+        )
+
+        async def operation(conn: AsyncConnection) -> AdmissionFinishResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.finish_admission(:queue, :idempotency_key, :handle, "
+                "CAST(:job AS jsonb), CAST(:receipt AS jsonb))",
+                {
+                    "queue": queue,
+                    "idempotency_key": request.idempotency_key,
+                    "handle": request.handle,
+                    "job": _json_param(request.job.model_dump(mode="json", exclude_none=True)),
+                    "receipt": _json_param(request.receipt),
+                },
+            )
+            result = AdmissionFinishResult.model_validate({**row, "receipt": _json(row["receipt"])})
+            self._validated_outcome(CommandName.FINISH_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
+
+    async def cancel_admission(
+        self,
+        queue: str,
+        idempotency_key: str,
+        handle: UUID,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> AdmissionCancelResult:
+        request = AdmissionCancelRequest(idempotency_key=idempotency_key, handle=handle)
+
+        async def operation(conn: AsyncConnection) -> AdmissionCancelResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.cancel_admission(:queue, :idempotency_key, :handle)",
+                {"queue": queue, **request.model_dump()},
+            )
+            result = AdmissionCancelResult.model_validate({**row, "receipt": _json(row["receipt"])})
+            self._validated_outcome(CommandName.CANCEL_ADMISSION, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _admission_conflict(error) from error
+
+    async def enqueue_many(
+        self,
+        queue: str,
+        items: Sequence[EnqueueManyItem],
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> list[EnqueueResult]:
+        frozen_items = tuple(items)
+
+        async def operation(conn: AsyncConnection) -> list[EnqueueResult]:
+            rows = await self._many(
+                conn,
+                "SELECT * FROM taskq.enqueue_many(:queue, CAST(:items AS jsonb))",
+                {
+                    "queue": queue,
+                    "items": _json_param(
+                        [item.model_dump(mode="json", exclude_none=True) for item in frozen_items]
+                    ),
+                },
+            )
+            by_index: dict[int, Mapping[str, Any]] = {}
+            for row in rows:
+                index = row["input_index"]
+                if not isinstance(index, int) or index in by_index:
+                    raise TaskqInternalError()
+                by_index[index] = row
+            if set(by_index) != set(range(1, len(frozen_items) + 1)):
+                raise TaskqInternalError()
+            results: list[EnqueueResult] = []
+            for index, item in enumerate(frozen_items, 1):
+                row = by_index[index]
+                try:
+                    status = EnqueueStatus(row["outcome"])
+                except (TypeError, ValueError) as exc:
+                    raise TaskqInternalError(cause=exc) from exc
+                job_id = row["job_id"]
+                if not isinstance(job_id, UUID):
+                    raise TaskqInternalError()
+                results.append(
+                    ENQUEUE_RESULT_ADAPTER.validate_python(
+                        {
+                            "status": status,
+                            "job_id": job_id,
+                            "created": status is EnqueueStatus.CREATED,
+                            "queue": queue,
+                            "job_type": item.job_type,
+                            "idempotency_key": item.idempotency_key,
+                            "scheduled_at": item.scheduled_at,
+                        }
+                    )
+                )
+            return results
+
+        return await self._run(operation, connection=connection)
+
+    async def claim(
+        self,
+        queue: str,
+        worker_id: str,
+        *,
+        batch: int = 1,
+        job_types: Sequence[str] | None = None,
+        lease_seconds: int | None = None,
+        affinity_key: str | None = None,
+        job_id: UUID | None = None,
+        supported_policy_hashes: Sequence[str] | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> ClaimResult:
+        continuation = (
+            None
+            if supported_policy_hashes is None
+            else ContinuationClaimWireOptions(
+                supported_policy_hashes=tuple(supported_policy_hashes)
+            )
+        )
+
+        async def operation(conn: AsyncConnection) -> ClaimResult:
+            params = {
+                "queue": queue,
+                "worker_id": worker_id,
+                "batch": batch,
+                "job_types": list(job_types) if job_types is not None else None,
+                "lease_seconds": lease_seconds,
+                "affinity_key": affinity_key,
+                "job_id": job_id,
+            }
+            if continuation is None:
+                statement = (
+                    "SELECT * FROM taskq.claim_jobs(:queue, :worker_id, :batch, "
+                    ":job_types, :lease_seconds, :affinity_key, :job_id)"
+                )
+            else:
+                statement = (
+                    "SELECT * FROM taskq.claim_jobs(:queue, :worker_id, :batch, "
+                    ":job_types, :lease_seconds, :affinity_key, :job_id, "
+                    ":supported_policy_hashes)"
+                )
+                params["supported_policy_hashes"] = list(continuation.supported_policy_hashes)
+            row = await self._one(conn, statement, params)
+            fields = (
+                "job_id",
+                "queue",
+                "job_type",
+                "priority",
+                "payload",
+                "headers",
+                "progress",
+                "attempt_id",
+                "attempt_number",
+                "failure_count",
+                "max_attempts",
+                "lease_expires_at",
+                "workflow_id",
+                "step_key",
+                "lease_seconds",
+                "continuation_policy_hash",
+            )
+            decoded_jobs = []
+            for value in row["jobs"] or ():
+                decoded = _nested_mapping(value, fields)
+                decoded["payload"] = _json(decoded["payload"])
+                decoded["headers"] = _json(decoded["headers"]) or {}
+                decoded["progress"] = _json(decoded["progress"])
+                decoded_jobs.append(decoded)
+            jobs = tuple(decoded_jobs)
+            return CLAIM_BATCH_ADAPTER.validate_python({"state": row["state"], "jobs": jobs})
+
+        return await self._run(operation, connection=connection)
+
+    async def heartbeat(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        *,
+        lease_seconds: int | None = None,
+        progress: Mapping[str, Any] | None = None,
+        stats: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> HeartbeatResult:
+        async def operation(conn: AsyncConnection) -> HeartbeatResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.heartbeat(:job_id, :attempt_id, :worker_id, "
+                ":lease_seconds, CAST(:progress AS jsonb), CAST(:stats AS jsonb))",
+                {
+                    "job_id": job_id,
+                    "attempt_id": attempt_id,
+                    "worker_id": worker_id,
+                    "lease_seconds": lease_seconds,
+                    "progress": _json_param(progress),
+                    "stats": _json_param(stats),
+                },
+            )
+            return HeartbeatResult.model_validate(row)
+
+        return await self._run(operation, connection=connection)
+
+    async def _settle(
+        self,
+        command: CommandName,
+        statement: str,
+        params: Mapping[str, Any],
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        async def operation(conn: AsyncConnection) -> SettleResult:
+            row = await self._one(conn, statement, params)
+            result = SETTLE_RESULT_ADAPTER.validate_python(row)
+            self._validated_outcome(command, result.result)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def complete(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        *,
+        result: Mapping[str, Any] | None = None,
+        stats: Mapping[str, Any] | None = None,
+        followups: Sequence[Followup] | None = None,
+        continuation_policy_hash: str | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        member_followups = any(item.workflow_member is True for item in followups or ())
+        continuation = (
+            ContinuationCompleteWireOptions(continuation_policy_hash=continuation_policy_hash)
+            if continuation_policy_hash is not None
+            else None
+        )
+        if member_followups and continuation is None:
+            raise TaskqConfigError(
+                "member followups require a runtime-owned continuation policy witness"
+            )
+        suffix = ", :continuation_policy_hash)" if continuation is not None else ")"
+        params = {
+            "job_id": job_id,
+            "attempt_id": attempt_id,
+            "worker_id": worker_id,
+            "result": _json_param(result),
+            "stats": _json_param(stats),
+            "followups": _json_param(
+                [item.model_dump(mode="json", exclude_none=True) for item in followups]
+                if followups is not None
+                else None
+            ),
+        }
+        if continuation is not None:
+            params["continuation_policy_hash"] = continuation.continuation_policy_hash
+        return await self._settle(
+            CommandName.COMPLETE,
+            "SELECT * FROM taskq.complete_job(:job_id, :attempt_id, :worker_id, "
+            f"CAST(:result AS jsonb), CAST(:stats AS jsonb), "
+            f"CAST(:followups AS jsonb){suffix}",
+            params,
+            connection=connection,
+        )
+
+    async def fail(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        error: str,
+        *,
+        retryable: bool = True,
+        retry_after_seconds: int | None = None,
+        progress: Mapping[str, Any] | None = None,
+        stats: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        return await self._settle(
+            CommandName.FAIL,
+            "SELECT * FROM taskq.fail_job(:job_id, :attempt_id, :worker_id, :error, "
+            ":retryable, :retry_after_seconds, CAST(:progress AS jsonb), CAST(:stats AS jsonb))",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "error": error,
+                "retryable": retryable,
+                "retry_after_seconds": retry_after_seconds,
+                "progress": _json_param(progress),
+                "stats": _json_param(stats),
+            },
+            connection=connection,
+        )
+
+    async def snooze(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        delay_seconds: int,
+        *,
+        reason: str | None = None,
+        progress: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        return await self._settle(
+            CommandName.SNOOZE,
+            "SELECT * FROM taskq.snooze_job(:job_id, :attempt_id, :worker_id, "
+            ":delay_seconds, :reason, CAST(:progress AS jsonb))",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "delay_seconds": delay_seconds,
+                "reason": reason,
+                "progress": _json_param(progress),
+            },
+            connection=connection,
+        )
+
+    async def release(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        cause: Literal["released", "worker_shutdown", "no_handler"],
+        *,
+        delay_seconds: int = 0,
+        progress: Mapping[str, Any] | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        return await self._settle(
+            CommandName.RELEASE,
+            "SELECT * FROM taskq.release_job(:job_id, :attempt_id, :worker_id, :cause, "
+            ":delay_seconds, CAST(:progress AS jsonb))",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "cause": cause,
+                "delay_seconds": delay_seconds,
+                "progress": _json_param(progress),
+            },
+            connection=connection,
+        )
+
+    async def cancel_running(
+        self,
+        job_id: UUID,
+        attempt_id: UUID,
+        worker_id: str,
+        reason: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> SettleResult:
+        return await self._settle(
+            CommandName.CANCEL_RUNNING,
+            "SELECT * FROM taskq.cancel_running_job(:job_id, :attempt_id, :worker_id, :reason)",
+            {
+                "job_id": job_id,
+                "attempt_id": attempt_id,
+                "worker_id": worker_id,
+                "reason": reason,
+            },
+            connection=connection,
+        )
+
+    async def worker_heartbeat(
+        self,
+        worker_id: str,
+        queues: Sequence[str],
+        *,
+        hostname: str | None = None,
+        pid: int | None = None,
+        version: str | None = None,
+        meta: Mapping[str, Any] | None = None,
+    ) -> bool:
+        async def operation(conn: AsyncConnection) -> bool:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.worker_heartbeat(:worker_id, :queues, :hostname, :pid, "
+                ":version, CAST(:meta AS jsonb))",
+                {
+                    "worker_id": worker_id,
+                    "queues": list(queues),
+                    "hostname": hostname,
+                    "pid": pid,
+                    "version": version,
+                    "meta": _json_param(meta),
+                },
+            )
+            return bool(row["shutdown_requested"])
+
+        return await self._run(operation)
+
+    async def get_authorization_projection(self, job_id: UUID) -> AuthorizationProjection | None:
+        async def operation(conn: AsyncConnection) -> AuthorizationProjection | None:
+            rows = await self._many(
+                conn,
+                "SELECT * FROM taskq.get_authorization_projection(:job_id)",
+                {"job_id": job_id},
+            )
+            return AuthorizationProjection.model_validate(rows[0]) if rows else None
+
+        return await self._run(operation)
+
+    async def get_workflow_authorization_projection(
+        self, workflow_id: UUID
+    ) -> WorkflowAuthorizationProjection:
+        async def operation(conn: AsyncConnection) -> WorkflowAuthorizationProjection:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_workflow_authorization_projection(:workflow_id)",
+                {"workflow_id": workflow_id},
+            )
+            return WorkflowAuthorizationProjection.model_validate(row)
+
+        return await self._run(operation)
+
+    async def get_job(
+        self,
+        job_id: UUID,
+        *,
+        include_error: bool = False,
+        include_result: bool = False,
+        include_progress: bool = False,
+        include_payload: bool = False,
+    ) -> JobDetail | None:
+        async def operation(conn: AsyncConnection) -> JobDetail | None:
+            rows = await self._many(
+                conn,
+                "SELECT * FROM taskq.get_job(:job_id, :include_error, :include_result, "
+                ":include_progress, :include_payload)",
+                {
+                    "job_id": job_id,
+                    "include_error": include_error,
+                    "include_result": include_result,
+                    "include_progress": include_progress,
+                    "include_payload": include_payload,
+                },
+            )
+            if not rows:
+                return None
+            data = dict(rows[0])
+            for field in ("result", "progress", "payload"):
+                data[field] = _json(data[field])
+            return JobDetail.model_validate(data)
+
+        return await self._run(operation)
+
+    async def list_jobs(
+        self, queue: str, view: str, *, limit: int = 50, after: Mapping[str, Any] | None = None
+    ) -> JobPage:
+        async def operation(conn: AsyncConnection) -> JobPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_jobs(:queue, :view, :limit, CAST(:after AS jsonb))",
+                {
+                    "queue": queue,
+                    "view": view,
+                    "limit": limit,
+                    "after": _json_param(after) if after else None,
+                },
+            )
+            data = dict(row)
+            data["items"] = [dict(item) for item in data["items"]]
+            data["next_after"] = _json(data["next_after"])
+            return JobPage.model_validate(data)
+
+        return await self._run(operation)
+
+    async def list_worker_presence(
+        self,
+        *,
+        limit: int = 50,
+        after_last_seen_at: datetime | None = None,
+        after_worker_id: str | None = None,
+    ) -> WorkerPresencePage:
+        async def operation(conn: AsyncConnection) -> WorkerPresencePage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_worker_presence("
+                ":limit, :after_last_seen_at, :after_worker_id)",
+                {
+                    "limit": limit,
+                    "after_last_seen_at": after_last_seen_at,
+                    "after_worker_id": after_worker_id,
+                },
+            )
+            data = dict(row)
+            data["items"] = [dict(item) for item in data["items"]]
+            return WorkerPresencePage.model_validate(data)
+
+        return await self._run(operation)
+
+    async def get_queue_profile(self, queue: str) -> QueueProfile | None:
+        async def operation(conn: AsyncConnection) -> QueueProfile | None:
+            rows = await self._many(
+                conn, "SELECT * FROM taskq.get_queue_profile(:queue)", {"queue": queue}
+            )
+            row = rows[0] if rows else None
+            return QueueProfile.model_validate(row) if row is not None else None
+
+        return await self._run(operation)
+
+    async def get_workflow_page(
+        self,
+        workflow_id: UUID,
+        *,
+        limit: int = 50,
+        after: UUID | None = None,
+    ) -> WorkflowPage:
+        async def operation(conn: AsyncConnection) -> WorkflowPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_workflow_page(:workflow_id, :limit, :after)",
+                {"workflow_id": workflow_id, "limit": limit, "after": after},
+            )
+            data = dict(row)
+            data["profile"] = dict(data["profile"])
+            data["counts"] = dict(data["counts"])
+            data["items"] = [dict(item) for item in data["items"]]
+            return WorkflowPage.model_validate(data)
+
+        return await self._run(operation)
+
+    async def get_queue_stats(self, queue: str | None = None) -> list[QueueStats]:
+        async def operation(conn: AsyncConnection) -> list[QueueStats]:
+            rows = await self._many(
+                conn, "SELECT * FROM taskq.get_queue_stats(:queue)", {"queue": queue}
+            )
+            return [
+                QueueStats.model_validate({**row, "stats": _json(row["stats"])}) for row in rows
+            ]
+
+        return await self._run(operation)
+
+    async def get_contract_meta(self) -> ContractMeta:
+        async def operation(conn: AsyncConnection) -> ContractMeta:
+            row = await self._one(conn, "SELECT * FROM taskq.get_contract_meta()")
+            return ContractMeta.model_validate({**row, "capabilities": _json(row["capabilities"])})
+
+        return await self._run(operation)
+
+    async def metrics(self) -> list[Metric]:
+        async def operation(conn: AsyncConnection) -> list[Metric]:
+            rows = await self._many(conn, "SELECT * FROM taskq.metrics()")
+            return [
+                Metric(
+                    name=row["name"],
+                    labels=_json(row["labels"]),
+                    value=float(
+                        row["value"] if not isinstance(row["value"], Decimal) else row["value"]
+                    ),
+                )
+                for row in rows
+            ]
+
+        return await self._run(operation)
+
+    async def ensure_queue(
+        self, name: str, profile: Mapping[str, Any] | None = None, actor: str | None = None
+    ) -> EnsureQueueResult:
+        async def operation(conn: AsyncConnection) -> EnsureQueueResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.ensure_queue(:name, CAST(:profile AS jsonb), :actor)",
+                {"name": name, "profile": _json_param(profile or {}), "actor": actor},
+            )
+            result = EnsureQueueResult.model_validate({**row, "profile": _json(row["profile"])})
+            self._validated_outcome(CommandName.ENSURE_QUEUE, result.result)
+            return result
+
+        return await self._run(operation)
+
+    async def update_queue_profile(
+        self, name: str, profile: Mapping[str, Any], actor: str, expected_version: int
+    ) -> tuple[str, QueueProfile | None, int | None]:
+        async def operation(conn: AsyncConnection) -> tuple[str, QueueProfile | None, int | None]:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.update_queue_profile(:name, CAST(:profile AS jsonb), :actor, :expected_version)",
+                {
+                    "name": name,
+                    "profile": _json_param(profile),
+                    "actor": actor,
+                    "expected_version": expected_version,
+                },
+            )
+            assert row is not None
+            profile_row = row["profile"]
+            if row["result"] is None:
+                return "missing", None, None
+            return (
+                str(row["result"]),
+                (QueueProfile.model_validate(profile_row) if profile_row else None),
+                int(row["current_version"]),
+            )
+
+        return await self._run(operation)
+
+    async def _operator_scalar(self, function_call: str, params: Mapping[str, Any]) -> Any:
+        async def operation(conn: AsyncConnection) -> Any:
+            return await self._scalar(conn, f"SELECT {function_call}", params)
+
+        return await self._run(operation)
+
+    async def pause_queue(
+        self, name: str, actor: str, reason: str | None = None
+    ) -> QueueControlOutcome:
+        return QueueControlOutcome(
+            self._validated_outcome(
+                CommandName.PAUSE_QUEUE,
+                await self._operator_scalar(
+                    "taskq.pause_queue(:name, :actor, :reason)",
+                    {"name": name, "actor": actor, "reason": reason},
+                ),
+            )
+        )
+
+    async def resume_queue(self, name: str, actor: str) -> QueueControlOutcome:
+        return QueueControlOutcome(
+            self._validated_outcome(
+                CommandName.RESUME_QUEUE,
+                await self._operator_scalar(
+                    "taskq.resume_queue(:name, :actor)", {"name": name, "actor": actor}
+                ),
+            )
+        )
+
+    async def set_concurrency_limit(
+        self, key: str, max_running: int, actor: str
+    ) -> ConfigChangeOutcome:
+        return ConfigChangeOutcome(
+            self._validated_outcome(
+                CommandName.SET_CONCURRENCY_LIMIT,
+                await self._operator_scalar(
+                    "taskq.set_concurrency_limit(:key, :max_running, :actor)",
+                    {"key": key, "max_running": max_running, "actor": actor},
+                ),
+            )
+        )
+
+    async def request_worker_shutdown(
+        self, *, worker_id: str | None, queue: str | None, actor: str
+    ) -> int:
+        return int(
+            await self._operator_scalar(
+                "taskq.request_worker_shutdown(:worker_id, :queue, :actor)",
+                {"worker_id": worker_id, "queue": queue, "actor": actor},
+            )
+        )
+
+    async def purge_queued(
+        self, queue: str, limit: int, actor: str, reason: str | None = None
+    ) -> int:
+        return int(
+            await self._operator_scalar(
+                "taskq.purge_queued(:queue, :limit, :actor, :reason)",
+                {"queue": queue, "limit": limit, "actor": actor, "reason": reason},
+            )
+        )
+
+    async def run_now(self, job_id: UUID, actor: str) -> CommandOkOutcome:
+        return CommandOkOutcome(
+            self._validated_outcome(
+                CommandName.RUN_NOW,
+                await self._operator_scalar(
+                    "taskq.run_now(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+                ),
+            )
+        )
+
+    async def reprioritize(self, job_id: UUID, priority: int, actor: str) -> CommandOkOutcome:
+        return CommandOkOutcome(
+            self._validated_outcome(
+                CommandName.REPRIORITIZE,
+                await self._operator_scalar(
+                    "taskq.reprioritize(:job_id, :priority, :actor)",
+                    {"job_id": job_id, "priority": priority, "actor": actor},
+                ),
+            )
+        )
+
+    async def cancel(self, job_id: UUID, actor: str, reason: str | None = None) -> CancelResult:
+        async def operation(conn: AsyncConnection) -> CancelResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.cancel_job(:job_id, :actor, :reason)",
+                {"job_id": job_id, "actor": actor, "reason": reason},
+            )
+            result = CancelResult.model_validate(row)
+            self._validated_outcome(CommandName.CANCEL, result.result)
+            return result
+
+        return await self._run(operation)
+
+    async def cancel_workflow(
+        self, workflow_id: UUID, actor: str, reason: str | None = None
+    ) -> WorkflowResult:
+        async def operation(conn: AsyncConnection) -> WorkflowResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.cancel_workflow(:workflow_id,:actor,:reason)",
+                {"workflow_id": workflow_id, "actor": actor, "reason": reason},
+            )
+            result = WorkflowResult.model_validate(row)
+            self._validated_outcome(CommandName.CANCEL_WORKFLOW, result.outcome)
+            return result
+
+        return await self._run(operation)
+
+    async def put_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        actor: str,
+        *,
+        expected_version: int | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.put_schedule("
+                ":name,CAST(:definition AS jsonb),:actor,:expected_version)",
+                {
+                    "name": name,
+                    "definition": _json_param(request.model_dump(mode="json", exclude_none=True)),
+                    "actor": actor,
+                    "expected_version": expected_version,
+                },
+            )
+            result = ScheduleWriteResult(
+                outcome=str(row["outcome"]),
+                profile=_schedule_profile(row["profile"]),
+            )
+            self._validated_outcome(CommandName.PUT_SCHEDULE, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _schedule_conflict(error) from error
+
+    async def get_schedule(
+        self, name: str, *, connection: AsyncConnection | None = None
+    ) -> ScheduleProfile:
+        async def operation(conn: AsyncConnection) -> ScheduleProfile:
+            row = await self._one(conn, "SELECT * FROM taskq.get_schedule(:name)", {"name": name})
+            return _schedule_profile(row)
+
+        return await self._run(operation, connection=connection)
+
+    async def retire_schedule(
+        self,
+        name: str,
+        expected_version: int,
+        actor: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.retire_schedule(:name,:expected_version,:actor)",
+                {
+                    "name": name,
+                    "expected_version": expected_version,
+                    "actor": actor,
+                },
+            )
+            result = ScheduleWriteResult(
+                outcome=str(row["outcome"]),
+                profile=_schedule_profile(row["profile"]),
+            )
+            self._validated_outcome(CommandName.RETIRE_SCHEDULE, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection)
+        except TaskqConflictError as error:
+            raise _schedule_conflict(error) from error
+
+    async def get_schedule_authorization_projection(
+        self, name: str, *, connection: AsyncConnection | None = None
+    ) -> ScheduleAuthorizationProjection:
+        async def operation(conn: AsyncConnection) -> ScheduleAuthorizationProjection:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.get_schedule_authorization_projection(:name)",
+                {"name": name},
+            )
+            return ScheduleAuthorizationProjection.model_validate(row)
+
+        return await self._run(operation, connection=connection)
+
+    async def redrive(self, job_id: UUID, actor: str, reset_progress: bool = False) -> bool:
+        return bool(
+            await self._operator_scalar(
+                "taskq.redrive_job(:job_id, :actor, :reset_progress)",
+                {"job_id": job_id, "actor": actor, "reset_progress": reset_progress},
+            )
+        )
+
+    async def redrive_failed(self, queue: str, limit: int, actor: str) -> RedriveFailedResult:
+        async def operation(conn: AsyncConnection) -> RedriveFailedResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.redrive_failed(:queue, :limit, :actor)",
+                {"queue": queue, "limit": limit, "actor": actor},
+            )
+            return RedriveFailedResult.model_validate(row)
+
+        return await self._run(operation)
+
+    async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome:
+        return ExpireJobOutcome(
+            self._validated_outcome(
+                CommandName.EXPIRE_JOB,
+                await self._operator_scalar(
+                    "taskq.expire_job(:job_id, :actor)", {"job_id": job_id, "actor": actor}
+                ),
+            )
+        )
+
+    async def expire_worker_leases(self, worker_id: str, actor: str) -> ExpireWorkerLeasesResult:
+        value = await self._operator_scalar(
+            "taskq.expire_worker_leases(:worker_id, :actor)",
+            {"worker_id": worker_id, "actor": actor},
+        )
+        return ExpireWorkerLeasesResult.model_validate(_json(value))
+
+    async def tick(self, reap_limit: int = 100) -> dict[str, Any]:
+        return dict(
+            _json(
+                await self._operator_scalar("taskq.tick(:reap_limit)", {"reap_limit": reap_limit})
+            )
+        )
+
+    async def janitor(self) -> dict[str, Any]:
+        return dict(_json(await self._operator_scalar("taskq.janitor()", {})))
+
+    async def claim_schedules(
+        self,
+        worker_id: str,
+        *,
+        limit: int = 10,
+        lease_seconds: int = 60,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleClaimResult:
+        async def operation(conn: AsyncConnection) -> ScheduleClaimResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.claim_schedules(:worker_id,:limit,:lease_seconds)",
+                {
+                    "worker_id": worker_id,
+                    "limit": limit,
+                    "lease_seconds": lease_seconds,
+                },
+            )
+            schedules = []
+            for value in row["schedules"]:
+                data = _nested_mapping(value, _SCHEDULE_CLAIM_FIELDS)
+                data["target"] = _json(data["target"])
+                data["recurrence"] = _json(data["recurrence"])
+                schedules.append(ScheduleClaim.model_validate(data))
+            result = ScheduleClaimResult(state=str(row["state"]), schedules=tuple(schedules))
+            self._validated_outcome(CommandName.CLAIM_SCHEDULES, result.state)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def fire_schedule(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        occurrences: Sequence[datetime],
+        next_fire_at: datetime,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleActionResult:
+        async def operation(conn: AsyncConnection) -> ScheduleActionResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.fire_schedule("
+                ":schedule_id,:token,:definition_version,:occurrences,:next_fire_at)",
+                {
+                    "schedule_id": schedule_id,
+                    "token": token,
+                    "definition_version": definition_version,
+                    "occurrences": list(occurrences),
+                    "next_fire_at": next_fire_at,
+                },
+            )
+            result = ScheduleActionResult.model_validate(row)
+            self._validated_outcome(CommandName.FIRE_SCHEDULE, result.outcome)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+    async def schedule_error(
+        self,
+        schedule_id: UUID,
+        token: UUID,
+        definition_version: int,
+        error: str,
+        *,
+        retry_seconds: int = 30,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleActionResult:
+        async def operation(conn: AsyncConnection) -> ScheduleActionResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.schedule_error("
+                ":schedule_id,:token,:definition_version,:error,:retry_seconds)",
+                {
+                    "schedule_id": schedule_id,
+                    "token": token,
+                    "definition_version": definition_version,
+                    "error": error,
+                    "retry_seconds": retry_seconds,
+                },
+            )
+            result = ScheduleActionResult.model_validate(row)
+            self._validated_outcome(CommandName.SCHEDULE_ERROR, result.outcome)
+            return result
+
+        return await self._run(operation, connection=connection)
+
+
+__all__ = ["METHOD_FUNCTIONS", "SqlTaskqTransport"]
