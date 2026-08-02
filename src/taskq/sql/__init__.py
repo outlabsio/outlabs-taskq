@@ -22,6 +22,8 @@ Design notes
   applied in filename order. A file is immutable once shipped: its sha256
   checksum (over the raw file bytes, BEFORE any placeholder substitution) is
   recorded in ``taskq.schema_migrations`` and re-verified by :func:`verify`.
+  A closed compatibility ledger accepts only explicitly recorded checksums
+  from released, executable-equivalent migration artifacts.
 - The literal ``{{CHECKSUM}}`` inside a migration is replaced with that
   migration's own checksum before execution, so a migration can self-record
   ledger/meta rows that stay consistent with the runner's accounting.
@@ -106,6 +108,18 @@ PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 _LEDGER = f"{SCHEMA}.schema_migrations"
 _DOLLAR_TAG = re.compile(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$")
 _TXN_CONTROL = frozenset({"begin", "commit", "rollback", "start", "end", "savepoint", "release"})
+
+# 0.1.0a18 sanitized a comment in 0001 after 0.1.0a17 had shipped. The SQL
+# statements are byte-for-byte equivalent after comments are removed, but the
+# raw-file checksum changed. Keep this exception closed and migration-specific:
+# arbitrary historical checksums must continue to fail verification.
+_RELEASED_EQUIVALENT_CHECKSUMS: dict[str, frozenset[str]] = {
+    "0001_initial": frozenset(
+        {
+            "6d5b8196c091bbf08a2ea5ddec99eb5d386a018c462761caee15dad54f0571e3",
+        }
+    ),
+}
 
 
 # ---------------------------------------------------------------------------
@@ -600,7 +614,11 @@ def _check_ledger(conn: Connection, migrations: Sequence[Migration]) -> VerifyCh
         packaged = by_id.get(row_id)
         if packaged is None:
             details.append(f"ledger row '{row_id}' has no packaged migration file")
-        elif recorded is not None and recorded != packaged.checksum:
+        elif (
+            recorded is not None
+            and recorded != packaged.checksum
+            and recorded not in _RELEASED_EQUIVALENT_CHECKSUMS.get(row_id, ())
+        ):
             details.append(
                 f"checksum mismatch for '{row_id}': ledger {recorded[:12]}… "
                 f"!= package {packaged.checksum[:12]}… (immutable-history violation)"

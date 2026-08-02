@@ -14,6 +14,7 @@ from taskq import cli as cli_module
 from taskq.cli import _load_registry, main
 from taskq.errors import TaskqConfigError
 from taskq.settings import WorkerSettings
+from taskq.sql import VerifyReport
 from tests.test_s2_worker_service_poll import _claim, _registry, _spin_until
 from tests.worker_support import ManualClock, ScriptedTransport
 from taskq.protocol import ClaimResult, ClaimState
@@ -177,7 +178,61 @@ def test_production_refusal_happens_before_registry_import_or_database_open(
         )
     assert exc_info.value.code == 2
     assert not imported and not opened
-    assert "cli-secret" not in capsys.readouterr().err
+    error = capsys.readouterr().err
+    assert "TASKQ_DSN" in error
+    assert "cli-secret" not in error
+
+
+def test_migrate_and_verify_use_environment_dsn_when_argument_is_omitted(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    dsn = "postgresql://db.example.test/taskq"
+    seen: list[tuple[str, str]] = []
+    monkeypatch.setenv("TASKQ_DSN", dsn)
+    monkeypatch.setattr(
+        cli_module, "_run_migrate", lambda value: seen.append(("migrate", value)) or []
+    )
+    monkeypatch.setattr(
+        cli_module,
+        "_run_verify",
+        lambda value: seen.append(("verify", value)) or VerifyReport.from_checks([]),
+    )
+
+    main(["migrate"])
+    main(["verify"])
+
+    captured = capsys.readouterr()
+    assert seen == [("migrate", dsn), ("verify", dsn)]
+    assert "warning:" not in captured.err
+
+
+def test_missing_migrate_dsn_is_a_safe_parser_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        main(["migrate"])
+    assert exc_info.value.code == 2
+    error = capsys.readouterr().err
+    assert "TASKQ_DSN" in error
+    assert "user:pass" not in error
+
+
+def test_cli_credential_warnings_never_repeat_secret_values(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli_module, "_run_migrate", lambda _dsn: [])
+    main(["migrate", "postgresql://installer:migrate-secret@db/taskq"])
+    migrate_error = capsys.readouterr().err
+    assert "TASKQ_DSN" in migrate_error
+    assert "migrate-secret" not in migrate_error
+
+    with pytest.raises(SystemExit):
+        main(["worker", "--http-bearer-token", "bearer-secret"])
+    worker_error = capsys.readouterr().err
+    assert "TASKQ_HTTP_BEARER_TOKEN" in worker_error
+    assert "bearer-secret" not in worker_error
 
 
 def test_cli_values_override_environment_without_opening_database(

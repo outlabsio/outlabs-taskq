@@ -15,6 +15,8 @@ from uuid import uuid4
 
 import asyncpg
 
+_A17_INITIAL_CHECKSUM = "6d5b8196c091bbf08a2ea5ddec99eb5d386a018c462761caee15dad54f0571e3"
+
 
 def _database_dsn(dsn: str, database: str) -> str:
     parts = urlsplit(dsn)
@@ -59,6 +61,17 @@ async def _assert_activation(dsn: str) -> None:
                 "SELECT count(*) FROM taskq.schema_migrations WHERE id='0018_trusted_effect_fence'"
             )
             == 1
+        )
+    finally:
+        await conn.close()
+
+
+async def _set_initial_checksum(dsn: str, checksum: str) -> None:
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(
+            "UPDATE taskq.schema_migrations SET checksum = $1 WHERE id = '0001_initial'",
+            checksum,
         )
     finally:
         await conn.close()
@@ -155,7 +168,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a18"
+    assert taskq.__version__ == "0.1.0a19"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -375,6 +388,7 @@ def main() -> None:
     asyncio.run(_prepare_inactive_upgrade(args.admin_dsn, upgrade_database))
     try:
         upgrade_dsn = _database_dsn(args.admin_dsn, upgrade_database)
+        asyncio.run(_set_initial_checksum(upgrade_dsn, _A17_INITIAL_CHECKSUM))
         migrated = _run([str(taskq_cli), "migrate", upgrade_dsn], cwd=Path.cwd()).stdout
         assert "applied 0017_activate_workflow_continuations" in migrated
         assert "applied 0018_trusted_effect_fence" in migrated

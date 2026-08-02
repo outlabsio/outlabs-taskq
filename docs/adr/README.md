@@ -1,8 +1,8 @@
 # taskq — Architecture Decision Records
 
-> Accepted 2026-07-18, resolving the design-review decision log (`../design-review/02-critical-findings.md`, D-01..D-12) with three carve-outs adjudicated in review: the 0.1 janitor trigger (ADR-009/010), concurrency caps kept in 0.1 (ADR-009), and schedule backfill recognized as already-specified (ADR-009).
->
-> ADRs are the decision authority. The normative specs (Unified Design Spec, extraction brief, authorization doc, harness doc, borrowed features) carry the detail and were amended in the same pass — where an older passage survives that contradicts an ADR, the ADR wins and the passage is a doc bug.
+This public distribution contains the accepted ADRs listed below. Numeric gaps mean that a record is
+not part of the public repository; they are not broken links or evidence that a decision was
+superseded. Supersession happens by writing a new ADR, never by silently editing an accepted one.
 
 | ADR | Title | Resolves |
 |---|---|---|
@@ -10,36 +10,19 @@
 | [002](./ADR-002-fixed-schema-sql-ownership.md) | Fixed `taskq` schema; SQL functions own correctness | D-09 |
 | [003](./ADR-003-fencing-typed-outcomes.md) | Attempt fencing and typed replay outcomes | reaffirmation |
 | [004](./ADR-004-migrations-canonical.md) | Ordered migrations are canonical; snapshot is generated | D-07 |
-| [005](./ADR-005-transport-parity.md) | One versioned protocol; SQL/HTTP transport parity | D-11 |
-| [006](./ADR-006-permission-grammar-authoritative-lookup.md) | outlabs-auth permission grammar + authoritative authorization lookup | D-01, D-06 |
 | [007](./ADR-007-atomic-followups-fenced-cancel.md) | Lossless atomic follow-ups; fenced handler cancel | D-04, D-05 |
-| [008](./ADR-008-fastapi-lifespan-process-model.md) | FastAPI lifespan composition and process model | D-10 |
-| [009](./ADR-009-first-release-scope.md) | First-release scope and deferred policies | D-08, D-12 |
-| [010](./ADR-010-db-roles-security-definer-maintenance.md) | Database roles, SECURITY DEFINER hardening, maintenance split | D-02, D-03 |
-| [011](./ADR-011-housekeeper-role-credentials.md) | Housekeeper role, deployment credentials, version-aware maintenance (amends 010) | R2-04, R2-05 |
 | [012](./ADR-012-null-boundaries-byte-safe-diagnostics.md) | Explicit-null boundaries and byte-safe stored diagnostics | R3 CQ-01, CQ-02 |
 | [013](./ADR-013-effective-lease-in-claim-projection.md) | Effective lease duration in the claim projection | S2-CQ-01 |
 | [014](./ADR-014-http-worker-presence.md) | Canonical HTTP worker-presence command | S3-CQ-01 |
 | [015](./ADR-015-defer-queue-profile-read.md) | Defer queue-profile read to the designed read-model slice | S3-CQ-02 |
 | [016](./ADR-016-final-http-wire-normalization.md) | Final request-id, queue-ensure, and worker-list wire normalization | S3-CQ-03 |
 | [017](./ADR-017-final-manifest-backed-wire-corrections.md) | Final manifest-backed list, enqueue, and request-id wire corrections | R5-CQ-A, R5-CQ-B, R5-09 |
-| [018](./ADR-018-operator-ui-tech-stack.md) | Operator UI tech stack: React + Vite + TanStack + Base UI | frontend stack lock-in 2026-07-20 |
 | [019](./ADR-019-safe-read-model-reactivation.md) | Safe read-model reactivation: bounded job pages and versioned queue profiles | H-08, H-11, R2-16, R5-29 |
 | [020](./ADR-020-supported-sql-contract-sets.md) | Supported SQL-contract sets for additive migrations | S5-CQ-01 |
 | [021](./ADR-021-read-model-conformance-repairs.md) | Read-model conformance repairs and release compatibility | S5-CQ-02, S5-CQ-03, S5-CQ-04 |
-| [022](./ADR-022-trusted-worker-side-effect-reporter.md) | Trusted worker side-effect reporter | S5-QD-CV-CQ-01 |
-| [023](./ADR-023-durable-two-phase-admission.md) | Durable two-phase admission | S5-QD-C6-CQ-03 |
-| [024](./ADR-024-native-followup-activation.md) | Native lossless follow-up activation | S5-QD-FR-02A |
 | [025](./ADR-025-followup-helper-return-shape.md) | Follow-up helper return shape uses existing enqueue projection | S5-QD-FR-CQ-01 |
-| [026](./ADR-026-sealed-workflow-lifecycle.md) | Sealed workflow lifecycle and native dependency activation | S5-QD-FR-CQ-03, S5-QD-FR-02B |
-| [027](./ADR-027-native-schedule-lifecycle.md) | Native recurring schedules and finite maintenance takeover | S5-QD-FR-02C |
 | [028](./ADR-028-maintenance-schedule-http-boundary.md) | Package maintenance schedules are not HTTP resources | S5-QD-FR-CQ-05 |
-| [029](./ADR-029-finite-operator-and-workflow-projections.md) | Finite operator and workflow projections | S5-QD-FR-02D |
 | [030](./ADR-030-workflow-counter-lock-order.md) | Workflow counters preserve cancellation lock order | S5-QD-FR-CQ-06 |
-| [031](./ADR-031-queue-independent-llm-provider-control.md) | Queue-independent LLM provider control | S5-QD-FR-CQ-12 |
-| [032](./ADR-032-queue-independent-search-and-proxy-control.md) | Queue-independent search and proxy control | S5-QD-FR-CQ-20 |
-| [033](./ADR-033-bounded-worker-presence-projection.md) | Bounded worker-presence projection | S5-QD-FR-CQ-32 |
-| [034](./ADR-034-restore-stable-catalog-verification.md) | Restore-stable catalog verification | S5-QD-FR-CQ-49 |
-| [035](./ADR-035-native-workflow-member-continuations.md) | Native workflow-member continuations | WFC-07B |
+| [036](./ADR-036-trusted-effect-fence.md) | Trusted host-effect fence | SQL contract 0.2.6 |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

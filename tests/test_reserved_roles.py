@@ -18,6 +18,7 @@ pytestmark = pytest.mark.taskq_sql
 @dataclass(frozen=True, slots=True)
 class UnsafeRole:
     name: str
+    target_role: str
     mutation: str
     restoration: str
     detail: str
@@ -28,42 +29,49 @@ class UnsafeRole:
 CASES = (
     UnsafeRole(
         "login",
+        "taskq_housekeeper",
         "ALTER ROLE taskq_housekeeper LOGIN",
         "ALTER ROLE taskq_housekeeper NOLOGIN",
         "prohibited LOGIN",
     ),
     UnsafeRole(
         "superuser",
+        "taskq_owner",
         "ALTER ROLE taskq_owner SUPERUSER",
         "ALTER ROLE taskq_owner NOSUPERUSER",
         "prohibited SUPERUSER",
     ),
     UnsafeRole(
         "create_role",
+        "taskq_operator",
         "ALTER ROLE taskq_operator CREATEROLE",
         "ALTER ROLE taskq_operator NOCREATEROLE",
         "prohibited CREATEROLE",
     ),
     UnsafeRole(
         "create_database",
+        "taskq_producer",
         "ALTER ROLE taskq_producer CREATEDB",
         "ALTER ROLE taskq_producer NOCREATEDB",
         "prohibited CREATEDB",
     ),
     UnsafeRole(
         "replication",
+        "taskq_runner",
         "ALTER ROLE taskq_runner REPLICATION",
         "ALTER ROLE taskq_runner NOREPLICATION",
         "prohibited REPLICATION",
     ),
     UnsafeRole(
         "bypass_rls",
+        "taskq_observer",
         "ALTER ROLE taskq_observer BYPASSRLS",
         "ALTER ROLE taskq_observer NOBYPASSRLS",
         "prohibited BYPASSRLS",
     ),
     UnsafeRole(
         "membership",
+        "taskq_observer",
         "GRANT taskq_r3_f03_parent TO taskq_observer",
         "REVOKE taskq_r3_f03_parent FROM taskq_observer",
         "member of prohibited role 'taskq_r3_f03_parent'",
@@ -88,9 +96,17 @@ async def test_unsafe_preexisting_role_is_rejected_before_fresh_install(
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     engine = None
     mutated = False
+    created_target = False
     setup_count = 0
     try:
         await admin.execute(f'CREATE DATABASE "{database}"')
+        target_exists = await admin.fetchval(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = $1)",
+            case.target_role,
+        )
+        if not target_exists:
+            await admin.execute(f'CREATE ROLE "{case.target_role}" NOLOGIN')
+            created_target = True
         for statement in case.setup:
             await admin.execute(statement)
             setup_count += 1
@@ -123,4 +139,6 @@ async def test_unsafe_preexisting_role_is_rejected_before_fresh_install(
         for statement in reversed(case.teardown[:setup_count]):
             await admin.execute(statement)
         await admin.execute(f'DROP DATABASE IF EXISTS "{database}"')
+        if created_target:
+            await admin.execute(f'DROP ROLE "{case.target_role}"')
         await admin.close()
