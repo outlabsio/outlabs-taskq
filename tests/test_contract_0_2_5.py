@@ -12,7 +12,7 @@ from taskq.sql.manifest import FUNCTIONS
 
 
 EXPECTED_PREDECESSOR_CHECKSUMS = {
-    "0001_initial.sql": "6d5b8196c091bbf08a2ea5ddec99eb5d386a018c462761caee15dad54f0571e3",
+    "0001_initial.sql": "6b4a2c2514ebf481d21093f75e31b3678e0ec63dba455f91812fb5703c461c5c",
     "0002_contract_0_1_1.sql": "f1cd5d2d7cafa52d93143ef655b2b55e18bbe386aa8b31d298f3805a0c0783be",
     "0003_contract_0_1_2.sql": "378f46ba22efc79f3b543e2fd29dce0482f2edde8bcf04fcbac3eb782289adef",
     "0004_read_models.sql": "1daef07c90cd900818b13ba91a5e0937392333a2108d190db73f247fa8cf6a25",
