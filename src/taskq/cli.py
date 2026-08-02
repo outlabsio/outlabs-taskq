@@ -1,10 +1,11 @@
-"""taskq CLI — `taskq migrate <dsn>` / `taskq verify <dsn>` (ADR-004).
+"""taskq CLI — `taskq migrate [dsn]` / `taskq verify [dsn]` (ADR-004).
 
-DSN handling: a bare ``postgresql://`` (or ``postgres://``) DSN runs on the
-bundled asyncpg driver (the CLI drives it with a private event loop, so the
-command itself is synchronous). A DSN that names an explicit synchronous
-driver — e.g. ``postgresql+psycopg2://`` — runs on a plain synchronous
-engine, provided that driver is installed in the host environment.
+Omitted migrate/verify DSNs are read from ``TASKQ_DSN`` so credentials need
+not appear in process arguments. A bare ``postgresql://`` (or ``postgres://``)
+DSN runs on the bundled asyncpg driver (the CLI drives it with a private event
+loop, so the command itself is synchronous). A DSN that names an explicit
+synchronous driver — e.g. ``postgresql+psycopg2://`` — runs on a plain
+synchronous engine, provided that driver is installed in the host environment.
 """
 
 from __future__ import annotations
@@ -35,9 +36,8 @@ from taskq.sql.transport import SqlTaskqTransport
 from taskq.worker import WorkerOptions, WorkerService, WorkerServiceOptions
 
 _DSN_HELP = (
-    "postgresql://user:pass@host:port/dbname "
-    "(bare DSNs use the bundled asyncpg driver; postgresql+psycopg2://... "
-    "selects a synchronous engine instead)"
+    "PostgreSQL DSN; omit to read TASKQ_DSN. Bare DSNs use the bundled asyncpg "
+    "driver; an explicit postgresql+<driver> DSN selects that installed driver."
 )
 
 
@@ -55,6 +55,55 @@ def _is_asyncpg_url(url: URL) -> bool:
 def _asyncpg_dsn(url: URL) -> str:
     """Render a real asyncpg DSN without SQLAlchemy's display-only redaction."""
     return url.set(drivername="postgresql+asyncpg").render_as_string(hide_password=False)
+
+
+def _dsn_contains_password(dsn: str) -> bool:
+    """Best-effort credential detection used only for a secret-free argv warning."""
+    try:
+        return _normalized_url(dsn).password is not None
+    except Exception:
+        return False
+
+
+def _warn_command_line_credentials(*environment_names: str) -> None:
+    preferred = ", ".join(environment_names)
+    print(
+        "warning: a credential supplied on the command line may be visible to other "
+        f"processes; prefer {preferred}",
+        file=sys.stderr,
+    )
+
+
+def _warn_for_argv_credentials(args: argparse.Namespace) -> None:
+    if args.command in {"migrate", "verify"}:
+        if args.dsn is not None and _dsn_contains_password(args.dsn):
+            _warn_command_line_credentials("TASKQ_DSN")
+        return
+    if args.command == "worker":
+        preferred: list[str] = []
+        if args.dsn is not None and _dsn_contains_password(args.dsn):
+            preferred.append("TASKQ_DSN")
+        if args.http_bearer_token is not None:
+            preferred.append("TASKQ_HTTP_BEARER_TOKEN")
+        if args.http_header_value is not None:
+            preferred.append("TASKQ_HTTP_HEADER_VALUE")
+        if preferred:
+            _warn_command_line_credentials(*preferred)
+        return
+    if args.command == "auth" and args.dsn is not None and _dsn_contains_password(args.dsn):
+        _warn_command_line_credentials("TASKQ_AUTH_DSN")
+
+
+def _required_dsn(
+    parser: argparse.ArgumentParser,
+    argument: str | None,
+    *,
+    command: str,
+) -> str:
+    dsn = argument or os.environ.get("TASKQ_DSN")
+    if not dsn:
+        parser.error(f"{command} DSN is required via its optional argument or TASKQ_DSN")
+    return dsn
 
 
 def _run_migrate(dsn: str) -> list[str]:
@@ -276,11 +325,17 @@ async def _run_worker(
 
 def _add_worker_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
     worker = subparsers.add_parser("worker", help="run a DB-direct task worker")
-    worker.add_argument("--dsn")
+    worker.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
     worker.add_argument("--http-base-url")
-    worker.add_argument("--http-bearer-token")
+    worker.add_argument(
+        "--http-bearer-token",
+        help="prefer TASKQ_HTTP_BEARER_TOKEN to keep the token out of process arguments",
+    )
     worker.add_argument("--http-header-name")
-    worker.add_argument("--http-header-value")
+    worker.add_argument(
+        "--http-header-value",
+        help="prefer TASKQ_HTTP_HEADER_VALUE to keep the value out of process arguments",
+    )
     worker.add_argument("--http-claim-wait-seconds", type=float)
     worker.add_argument("--registry")
     worker.add_argument("--queue", dest="queues", action="append")
@@ -302,7 +357,7 @@ def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     auth = subparsers.add_parser("auth", help="explicit OutLabs IAM provisioning")
     commands = auth.add_subparsers(dest="auth_command", required=True)
     sync = commands.add_parser("sync-permissions", help="report or apply taskq IAM rows")
-    sync.add_argument("--dsn", default=os.environ.get("TASKQ_AUTH_DSN"))
+    sync.add_argument("--dsn", help="prefer TASKQ_AUTH_DSN when the DSN contains credentials")
     sync.add_argument("--schema", default=os.environ.get("TASKQ_AUTH_SCHEMA"))
     sync.add_argument("--queues", required=True, help="comma-separated canonical queue names")
     sync.add_argument("--roles", choices=("standard", "none"), default="standard")
@@ -405,27 +460,30 @@ def main(argv: list[str] | None = None) -> None:
         "migrate",
         help="apply missing packaged migrations under an advisory lock (ADR-004)",
     )
-    p_migrate.add_argument("dsn", help=_DSN_HELP)
+    p_migrate.add_argument("dsn", nargs="?", help=_DSN_HELP)
 
     p_verify = subparsers.add_parser(
         "verify",
         help="read-only exact-manifest drift check: catalog, grants, roles, seeds, checksums",
     )
-    p_verify.add_argument("dsn", help=_DSN_HELP)
+    p_verify.add_argument("dsn", nargs="?", help=_DSN_HELP)
     _add_worker_parser(subparsers)
     _add_auth_parser(subparsers)
 
     args = parser.parse_args(argv)
+    _warn_for_argv_credentials(args)
 
     if args.command == "migrate":
-        applied = _run_migrate(args.dsn)
+        dsn = _required_dsn(parser, args.dsn, command="migrate")
+        applied = _run_migrate(dsn)
         if applied:
             for migration_id in applied:
                 print(f"applied {migration_id}")
         else:
             print("schema is up to date (no pending migrations)")
     elif args.command == "verify":
-        report = _run_verify(args.dsn)
+        dsn = _required_dsn(parser, args.dsn, command="verify")
+        report = _run_verify(dsn)
         _print_report(report)
         if not report.ok:
             raise SystemExit(1)
@@ -447,6 +505,7 @@ def main(argv: list[str] | None = None) -> None:
         if exit_code:
             raise SystemExit(exit_code)
     elif args.command == "auth":
+        args.dsn = args.dsn or os.environ.get("TASKQ_AUTH_DSN")
         try:
             report = asyncio.run(_run_auth_sync(args))
         except (TaskqConfigError, ValueError) as exc:

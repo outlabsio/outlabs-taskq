@@ -24,6 +24,7 @@ pytestmark = pytest.mark.taskq_sql
 
 _ENQUEUE = "SELECT * FROM taskq.enqueue($1, $2, '{}'::jsonb, p_idempotency_key => $3)"
 _CLAIM = "SELECT * FROM taskq.claim_jobs($1, $2)"
+_A17_INITIAL_CHECKSUM = "6d5b8196c091bbf08a2ea5ddec99eb5d386a018c462761caee15dad54f0571e3"
 
 
 async def _make_queue(operator: asyncpg.Connection, name: str) -> None:
@@ -213,6 +214,35 @@ class TestMigrateAndVerify:
             async with engine.connect() as conn:
                 report = await verify(conn)
             assert report.ok
+        finally:
+            await engine.dispose()
+
+    async def test_verify_accepts_released_a17_initial_checksum(
+        self, pg: asyncpg.Connection, sqlalchemy_dsn: str
+    ) -> None:
+        current = await pg.fetchval(
+            "SELECT checksum FROM taskq.schema_migrations WHERE id = '0001_initial'"
+        )
+        assert current is not None
+        assert current != _A17_INITIAL_CHECKSUM
+
+        engine = create_async_engine(sqlalchemy_dsn)
+        try:
+            await pg.execute(
+                "UPDATE taskq.schema_migrations SET checksum = $1 WHERE id = '0001_initial'",
+                _A17_INITIAL_CHECKSUM,
+            )
+            try:
+                async with engine.connect() as conn:
+                    report = await verify(conn)
+                assert report.ok, "\n".join(
+                    f"{check.name}: {'; '.join(check.details)}" for check in report.failures
+                )
+            finally:
+                await pg.execute(
+                    "UPDATE taskq.schema_migrations SET checksum = $1 WHERE id = '0001_initial'",
+                    current,
+                )
         finally:
             await engine.dispose()
 
