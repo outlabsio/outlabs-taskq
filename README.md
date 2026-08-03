@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — current package version **`0.1.0a20`** uses SQL contract **`0.2.6`**. The SQL kernel, typed client, worker and CLI, testing helpers, optional FastAPI facade, authorization boundary, durable admission, atomic follow-ups, workflows, schedules, projections, and worker presence are implemented.
+**Status:** alpha — current package version **`0.1.0a21`** uses SQL contract **`0.2.6`**. The SQL kernel, typed client, worker and CLI, testing helpers, optional FastAPI facade, authorization boundary, durable admission, atomic follow-ups, workflows, schedules, projections, and worker presence are implemented.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -17,6 +17,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a21.md`](docs/RELEASE-0.1.0a21.md) | 0.1.0a21 compatible OutLabs Auth prerelease range and checklist |
 | [`docs/RELEASE-0.1.0a20.md`](docs/RELEASE-0.1.0a20.md) | 0.1.0a20 OutLabs Auth a27 compatibility release and checklist |
 | [`docs/RELEASE-0.1.0a19.md`](docs/RELEASE-0.1.0a19.md) | 0.1.0a19 compatibility fix, hardening changes, and release checklist |
 
@@ -25,10 +26,10 @@ Start here:
 Install the immutable wheel from the latest prerelease:
 
 ```bash
-pip install https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a20/outlabs_taskq-0.1.0a20-py3-none-any.whl
+pip install https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl
 # extras:
-# pip install "outlabs-taskq[http] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a20/outlabs_taskq-0.1.0a20-py3-none-any.whl"
-# pip install "outlabs-taskq[outlabs] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a20/outlabs_taskq-0.1.0a20-py3-none-any.whl"
+# pip install "outlabs-taskq[http] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl"
+# pip install "outlabs-taskq[outlabs] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl"
 ```
 
 ## Credential handling
