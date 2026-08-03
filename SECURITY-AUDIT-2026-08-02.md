@@ -9,6 +9,10 @@
   OutLabs adapter dependency to `outlabs-auth>=0.1.0a27,<0.2.0`; SQL, protocol, and migrations
   remain unchanged. The lower bound is the first audited compatible release and the upper bound
   prevents an unreviewed major/minor contract change.
+- **Unpublished scheduler candidate:** `0.1.0a22` / SQL `0.3.0` adds migrations 0019–0020 and
+  database-attested target enforcement. Its independent adversarial implementation review returned
+  PASS WITH CONDITIONS with no P0 or functional P1 finding; release evidence is maintained in
+  `docs/evidence/scheduler-0.3.0-2026-08-03.md`.
 - **Contract:** SQL `0.2.6`, Protocol document `1.0.15`, migrations `0001`–`0018`
 
 ## Executive verdict

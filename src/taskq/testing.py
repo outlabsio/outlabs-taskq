@@ -914,9 +914,10 @@ class FakeTaskQClient:
         error: str,
         *,
         retry_seconds: int = 30,
+        deterministic: bool = False,
     ) -> ScheduleActionResult:
         self._ensure_open()
-        del error
+        del error, deterministic
         schedule = self._schedule_by_id(schedule_id)
         if (
             schedule.version != definition_version

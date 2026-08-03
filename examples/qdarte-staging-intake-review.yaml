@@ -1,0 +1,18 @@
+# Safe handoff candidate: keep paused until the QDarte platform-control handler
+# and queue exist in staging and the launchd rollback path is confirmed.
+version: 1
+namespace: qdarte
+source: staging-deployment
+
+schedules:
+  intake-submission-review-pull:
+    display_name: QDarte intake submission review pull
+    task: platform.intake_submission_review_pull
+    queue: qdarte_platform_control
+    interval_seconds: 900
+    catchup: skip
+    overlap: forbid
+    max_lateness_seconds: 900
+    state: paused
+    payload:
+      limit: 50

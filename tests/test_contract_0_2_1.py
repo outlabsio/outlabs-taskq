@@ -14,6 +14,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import _migrate_impl, discover_migrations, verify
+from conftest import activate_scheduler_contract
 from conftest import RoleConnect
 
 pytestmark = pytest.mark.taskq_sql
@@ -839,6 +840,7 @@ async def test_0008_to_0009_transition_is_atomic_and_capability_gated(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[17:18])
             )
             assert applied == ["0018_trusted_effect_fence"]
+            await activate_scheduler_contract(conn, migrations)
             report = await verify(conn)
             assert report.ok
     finally:

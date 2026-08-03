@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from uuid import UUID
+
 from pydantic import AliasChoices, Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -35,6 +37,7 @@ class WorkerSettings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("expected_environment", "TASKQ_EXPECTED_ENV"),
     )
+    expected_installation_id: UUID | None = None
     allow_production: bool = False
     pool_size: int | None = Field(default=None, ge=1, le=1000)
 
@@ -62,8 +65,16 @@ class WorkerSettings(BaseSettings):
             raise ValueError("batch cannot exceed concurrency")
         if self.expected_environment is not None and self.expected_environment != self.environment:
             raise ValueError("declared environment does not match expected_environment")
+        if self.expected_environment is None:
+            object.__setattr__(self, "expected_environment", self.environment)
         if self.environment == "production" and not self.allow_production:
             raise ValueError("production requires allow_production=True")
+        if (
+            self.dsn is not None
+            and self.environment == "production"
+            and self.expected_installation_id is None
+        ):
+            raise ValueError("direct-SQL production requires expected_installation_id")
         if self.dsn is not None and self.pool_size is None:
             object.__setattr__(self, "pool_size", min(self.concurrency + 2, 1000))
         return self

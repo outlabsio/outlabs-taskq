@@ -108,6 +108,39 @@ def test_cron_spring_gap_is_skipped_and_fall_fold_uses_earlier_instant_once() ->
     assert after_first_fold.next_fire_at == _utc(2025, 11, 3, 6, 30)
 
 
+@pytest.mark.parametrize("policy", ["fire_once", "fire_all"])
+def test_dst_gap_and_fold_remain_single_instants_under_firing_policies(policy: str) -> None:
+    gap = evaluate_schedule(
+        recurrence={
+            "kind": "cron",
+            "expression": "30 2 * * *",
+            "timezone": "America/New_York",
+        },
+        catchup_policy=policy,
+        max_catchup=3,
+        initialized=True,
+        next_fire_at=_utc(2025, 3, 8, 7, 30),
+        as_of=_utc(2025, 3, 10, 7),
+    )
+    assert _utc(2025, 3, 9, 7, 30) not in gap.occurrences
+    assert gap.occurrences[-1] == _utc(2025, 3, 10, 6, 30)
+
+    fold = evaluate_schedule(
+        recurrence={
+            "kind": "cron",
+            "expression": "30 1 * * *",
+            "timezone": "America/New_York",
+        },
+        catchup_policy=policy,
+        max_catchup=3,
+        initialized=True,
+        next_fire_at=_utc(2025, 11, 1, 5, 30),
+        as_of=_utc(2025, 11, 2, 7),
+    )
+    assert fold.occurrences.count(_utc(2025, 11, 2, 5, 30)) == 1
+    assert _utc(2025, 11, 2, 6, 30) not in fold.occurrences
+
+
 def test_cron_day_of_month_and_week_are_or_and_fire_once_is_latest() -> None:
     recurrence = {
         "kind": "cron",

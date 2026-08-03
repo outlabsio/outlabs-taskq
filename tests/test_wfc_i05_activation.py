@@ -11,6 +11,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import _migrate_impl, discover_migrations, verify
+from conftest import activate_scheduler_contract
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -41,7 +42,7 @@ async def _create_database(taskq_dsn: str, prefix: str) -> tuple[str, asyncpg.Co
 
 
 def test_0017_is_strictly_metadata_only() -> None:
-    migration = discover_migrations()[-2]
+    migration = discover_migrations()[16]
     assert migration.id == "0017_activate_workflow_continuations"
     statements = migration.statements()
     assert len(statements) == 2
@@ -68,13 +69,13 @@ async def test_0016_to_0017_is_fail_closed_then_activates_exactly(
     engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
     try:
         migrations = discover_migrations()
-        assert [migration.id for migration in migrations[-3:-1]] == [
+        assert [migration.id for migration in migrations[15:17]] == [
             "0016_workflow_continuations",
             "0017_activate_workflow_continuations",
         ]
         async with engine.connect() as conn:
             applied = await conn.run_sync(
-                lambda sync_conn: _migrate_impl(sync_conn, migrations[:-2])
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[:16])
             )
             assert applied[-1] == "0016_workflow_continuations"
             capabilities = (
@@ -101,7 +102,7 @@ async def test_0016_to_0017_is_fail_closed_then_activates_exactly(
             await conn.rollback()
 
             applied = await conn.run_sync(
-                lambda sync_conn: _migrate_impl(sync_conn, migrations[-2:-1])
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[16:17])
             )
             assert applied == ["0017_activate_workflow_continuations"]
             capabilities = (
@@ -120,9 +121,10 @@ async def test_0016_to_0017_is_fail_closed_then_activates_exactly(
             ).one()
             assert created.outcome == "created"
             applied = await conn.run_sync(
-                lambda sync_conn: _migrate_impl(sync_conn, migrations[-1:])
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[17:18])
             )
             assert applied == ["0018_trusted_effect_fence"]
+            await activate_scheduler_contract(conn, migrations)
             report = await verify(conn)
             assert report.ok, report
     finally:
@@ -139,7 +141,7 @@ async def test_0017_refuses_dirty_reserved_namespace_atomically(
     try:
         migrations = discover_migrations()
         async with engine.connect() as conn:
-            await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[:-2]))
+            await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[:16]))
             await conn.exec_driver_sql(
                 "SELECT * FROM taskq.ensure_queue('dirty','{}'::jsonb,'proof')"
             )
@@ -158,7 +160,7 @@ async def test_0017_refuses_dirty_reserved_namespace_atomically(
             await conn.commit()
 
             with pytest.raises(DBAPIError) as refused:
-                await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[-2:-1]))
+                await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[16:17]))
             assert getattr(refused.value, "orig", refused.value).sqlstate == "TQ422"
             await conn.rollback()
             assert (

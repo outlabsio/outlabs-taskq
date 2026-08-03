@@ -23,9 +23,13 @@ FENCE_SQL = "SELECT * FROM taskq.lock_active_effect_attempt($1,$2,$3,$4,$5)"
 
 def test_0018_follows_byte_immutable_0017() -> None:
     migrations = discover_migrations()
-    assert migrations[-1].filename == "0018_trusted_effect_fence.sql"
-    assert hashlib.sha256(migrations[-2].sql.encode()).hexdigest() == EXPECTED_0017_CHECKSUM
-    assert CONTRACT_VERSION == "0.2.6"
+    by_name = {migration.filename: migration for migration in migrations}
+    assert "0018_trusted_effect_fence.sql" in by_name
+    assert (
+        hashlib.sha256(by_name["0017_activate_workflow_continuations.sql"].sql.encode()).hexdigest()
+        == EXPECTED_0017_CHECKSUM
+    )
+    assert CONTRACT_VERSION == "0.3.0"
 
 
 def test_0_2_6_machine_surface_has_exact_effect_fence() -> None:

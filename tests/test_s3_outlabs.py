@@ -612,7 +612,9 @@ async def test_preinitialized_enterprise_system_key_binds_after_startup(
     plain_dsn = taskq_dsn.replace("postgresql+asyncpg://", "postgresql://")
     _, separator, suffix = plain_dsn.partition("://")
     engine_dsn = "postgresql+asyncpg" + separator + suffix
-    redis_url = os.environ.get("TASKQ_TEST_REDIS_URL", "redis://localhost:6379/15")
+    redis_url = os.environ.get("TASKQ_TEST_REDIS_URL")
+    if not redis_url:
+        pytest.skip("set TASKQ_TEST_REDIS_URL to run the Redis-backed OutlabsAuth integration")
     admin = await asyncpg.connect(plain_dsn)
     await admin.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
     await admin.close()

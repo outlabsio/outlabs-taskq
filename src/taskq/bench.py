@@ -28,6 +28,7 @@ from uuid import uuid4
 
 import asyncpg
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq import Task, TaskRegistry, WorkerOptions, WorkerService, WorkerServiceOptions
@@ -152,8 +153,39 @@ def _git_sha() -> str:
 async def _migrate(dsn: str) -> None:
     engine = create_async_engine(_sqlalchemy_dsn(dsn))
     try:
-        async with engine.connect() as conn:
-            await migrate(conn)
+        try:
+            async with engine.connect() as conn:
+                await migrate(conn)
+        except DBAPIError as exc:
+            original = getattr(exc, "orig", exc)
+            if getattr(original, "sqlstate", None) != "TQ422":
+                raise
+            async with engine.begin() as conn:
+                identity = (
+                    (
+                        await conn.exec_driver_sql(
+                            "SELECT contract_version, environment, installation_id, "
+                            "binding_version FROM taskq.get_target_identity()"
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                if identity["contract_version"] != "0.2.7" or identity["environment"] != "unbound":
+                    raise
+                await conn.exec_driver_sql(
+                    "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+                    (
+                        identity["installation_id"],
+                        os.environ.get("TASKQ_EXPECTED_ENV", "benchmark"),
+                        "taskq-bench",
+                        identity["binding_version"],
+                        False,
+                        None,
+                    ),
+                )
+            async with engine.connect() as conn:
+                await migrate(conn)
     finally:
         await engine.dispose()
 
@@ -162,6 +194,18 @@ async def _connect_role(dsn: str, role: str) -> asyncpg.Connection:
     conn = await asyncpg.connect(_plain_dsn(dsn))
     await conn.execute(f"SET ROLE {role}")
     return conn
+
+
+async def _attested_fetchrow(
+    conn: asyncpg.Connection, query: str, *args: object
+) -> asyncpg.Record | None:
+    async with conn.transaction():
+        identity = await conn.fetchrow("SELECT * FROM taskq.get_target_identity()")
+        assert identity is not None
+        await conn.fetchrow(
+            "SELECT * FROM taskq.attest_target($1,NULL,false)", identity["environment"]
+        )
+        return await conn.fetchrow(query, *args)
 
 
 async def _ensure_queue(operator: asyncpg.Connection, queue: str) -> None:
@@ -434,7 +478,9 @@ async def _b9_write_path_samples(
     heartbeat_latencies: list[float] = []
     for index in range(count):
         started = time.perf_counter()
-        claim = await runner.fetchrow("SELECT * FROM taskq.claim_jobs($1, $2)", queue, "bench-b9")
+        claim = await _attested_fetchrow(
+            runner, "SELECT * FROM taskq.claim_jobs($1, $2)", queue, "bench-b9"
+        )
         claim_latencies.append(time.perf_counter() - started)
         assert claim is not None and claim["state"] == "claimed"
         job = claim["jobs"][0]
@@ -604,8 +650,11 @@ async def _b3(
     await _ensure_queue(operator, warmup_queue)
     await _seed_backlog(producer, warmup_queue, f"warmup-{seed}", scale.warmup)
     for index in range(scale.warmup):
-        batch = await runner.fetchrow(
-            "SELECT * FROM taskq.claim_jobs($1, $2)", warmup_queue, f"bench-b3-warmup-{index}"
+        batch = await _attested_fetchrow(
+            runner,
+            "SELECT * FROM taskq.claim_jobs($1, $2)",
+            warmup_queue,
+            f"bench-b3-warmup-{index}",
         )
         assert batch["state"] == "claimed"
         job = batch["jobs"][0]
@@ -621,7 +670,9 @@ async def _b3(
         queue = f"bench_b3_{repetition}"
         await _ensure_queue(operator, queue)
         empty_started = time.perf_counter()
-        empty = await runner.fetchrow("SELECT * FROM taskq.claim_jobs($1, 'bench-b3-empty')", queue)
+        empty = await _attested_fetchrow(
+            runner, "SELECT * FROM taskq.claim_jobs($1, 'bench-b3-empty')", queue
+        )
         empty_latency = time.perf_counter() - empty_started
         assert empty["state"] == "empty"
         await _seed_backlog(producer, queue, f"b3-{seed}-{repetition}", scale.backlog)
@@ -632,8 +683,8 @@ async def _b3(
         started = time.perf_counter()
         for index in range(samples):
             before_claim = time.perf_counter()
-            batch = await runner.fetchrow(
-                "SELECT * FROM taskq.claim_jobs($1, $2)", queue, f"bench-b3-{index}"
+            batch = await _attested_fetchrow(
+                runner, "SELECT * FROM taskq.claim_jobs($1, $2)", queue, f"bench-b3-{index}"
             )
             after_claim = time.perf_counter()
             assert batch["state"] == "claimed"
@@ -684,8 +735,8 @@ async def _b4(
 
         for index in range(scale.warmup):
             await _enqueue_one(producers[0], queue, f"b4-warmup-{seed}-{repetition}-{index}")
-            batch = await workers[0].fetchrow(
-                "SELECT * FROM taskq.claim_jobs($1, 'bench-b4-warmup')", queue
+            batch = await _attested_fetchrow(
+                workers[0], "SELECT * FROM taskq.claim_jobs($1, 'bench-b4-warmup')", queue
             )
             assert batch["state"] == "claimed"
             job = batch["jobs"][0]
@@ -712,7 +763,9 @@ async def _b4(
             worker = f"bench-b4-{repetition}-{lane}"
             while True:
                 started = time.perf_counter()
-                batch = await conn.fetchrow("SELECT * FROM taskq.claim_jobs($1, $2)", queue, worker)
+                batch = await _attested_fetchrow(
+                    conn, "SELECT * FROM taskq.claim_jobs($1, $2)", queue, worker
+                )
                 if batch["state"] == "empty":
                     if production_done.is_set() and settled >= accepted:
                         return

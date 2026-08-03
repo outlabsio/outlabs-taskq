@@ -531,13 +531,13 @@ async def test_schedule_runtime_requires_exact_gate_and_settles_each_claim() -> 
     with pytest.raises(TaskqVersionError):
         await wrong.start()
 
-    missing = _runtime(_Transport(version="0.2.2"), options=options)
+    missing = _runtime(_Transport(version="0.3.0"), options=options)
     with pytest.raises(TaskqCapabilityError):
         await missing.start()
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     transport = _Transport(
-        version="0.2.2",
+        version="0.3.0",
         capabilities={"active": ["schedules"]},
     )
     good = ScheduleClaim(

@@ -64,10 +64,17 @@ def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     }
     direct_sql_only = {
         "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)",
+        "taskq.attest_target(text,uuid,boolean)",
+        "taskq.get_scheduler_health()",
+        "taskq.get_target_identity()",
+        "taskq.list_managed_schedules(text,text,integer,text)",
+        "taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)",
+        "taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)",
+        "taskq.set_schedule_state(text,text,bigint,text,text)",
     }
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS) - inactive_wfc - direct_sql_only
     assert len(METHOD_FUNCTIONS) == 49
-    assert len(PUBLIC_FUNCTIONS) == 53
+    assert len(PUBLIC_FUNCTIONS) == 60
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
@@ -435,7 +442,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.2.6"
+    assert meta.contract_version == "0.3.0"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -526,7 +533,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.2.6"
+    assert (await transport.get_contract_meta()).contract_version == "0.3.0"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

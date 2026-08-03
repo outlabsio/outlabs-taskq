@@ -244,10 +244,8 @@ class TestPlan:
 
 
 def test_restore_equivalent_constraint_digest_is_exactly_bounded() -> None:
-    assert sql_manifest.CONSTRAINT_EQUIVALENT_DIGESTS == {
-        "schedules": frozenset({"7c66926dfa44623d66e15c99a07b1665"})
-    }
-    assert sql_manifest.CONSTRAINTS["schedules"][1] == "ebdc41f67bf31c91d1fe215f9c59304f"
+    assert sql_manifest.CONSTRAINT_EQUIVALENT_DIGESTS == {}
+    assert sql_manifest.CONSTRAINTS["schedules"][1] == "3dcdfe858a4cc75d569883ae7a3a18e2"
 
 
 class TestVerifyReport:

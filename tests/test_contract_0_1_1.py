@@ -11,7 +11,7 @@ import pytest
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.sql import Migration, _migrate_impl, discover_migrations, migrate
+from taskq.sql import Migration, _migrate_impl, discover_migrations
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -56,7 +56,7 @@ async def _assert_tq422(conn: asyncpg.Connection, query: str, *args: object) -> 
 async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     taskq_dsn: str, mode: str
 ) -> None:
-    """Both supported paths end at the same full activated 0.2.6 posture."""
+    """Both historical paths end at the same activated 0.2.6 posture."""
     database = f"taskq_adr012_{mode}_{uuid4().hex}"
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
@@ -67,7 +67,8 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
     engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
     try:
         migrations = discover_migrations()
-        assert [migration.id for migration in migrations] == [
+        legacy_migrations = migrations[:18]
+        assert [migration.id for migration in legacy_migrations] == [
             "0001_initial",
             "0002_contract_0_1_1",
             "0003_contract_0_1_2",
@@ -89,7 +90,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
         ]
         async with engine.connect() as conn:
             if mode == "upgrade":
-                first: Migration = migrations[0]
+                first: Migration = legacy_migrations[0]
                 applied = await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, [first]))
                 assert applied == ["0001_initial"]
                 before = await conn.exec_driver_sql(
@@ -97,7 +98,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 )
                 assert before.scalar_one() == "0.1"
                 await conn.commit()
-                second: Migration = migrations[1]
+                second: Migration = legacy_migrations[1]
                 applied = await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, [second]))
                 assert applied == ["0002_contract_0_1_1"]
                 at_0_1_1 = await conn.exec_driver_sql(
@@ -105,7 +106,7 @@ async def test_contract_chain_installs_fresh_and_upgrades_from_0001(
                 )
                 assert at_0_1_1.scalar_one() == "0.1.1"
                 await conn.commit()
-            await migrate(conn)
+            await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, legacy_migrations))
             version = await conn.exec_driver_sql(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )

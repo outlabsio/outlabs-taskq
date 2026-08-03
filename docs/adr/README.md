@@ -24,5 +24,6 @@ superseded. Supersession happens by writing a new ADR, never by silently editing
 | [028](./ADR-028-maintenance-schedule-http-boundary.md) | Package maintenance schedules are not HTTP resources | S5-QD-FR-CQ-05 |
 | [030](./ADR-030-workflow-counter-lock-order.md) | Workflow counters preserve cancellation lock order | S5-QD-FR-CQ-06 |
 | [036](./ADR-036-trusted-effect-fence.md) | Trusted host-effect fence | SQL contract 0.2.6 |
+| [037](./ADR-037-standalone-scheduler-and-target-attestation.md) | Standalone scheduler and database-attested target identity | owner-approved scheduler build |
 
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

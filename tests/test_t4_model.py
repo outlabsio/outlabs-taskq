@@ -67,6 +67,20 @@ class TaskqStateMachine(RuleBasedStateMachine):
     def _run(self, awaitable: Awaitable[Any]) -> Any:
         return self.loop.run_until_complete(awaitable)
 
+    async def _attested_fetchrow(
+        self, conn: asyncpg.Connection, query: str, *args: object
+    ) -> asyncpg.Record | None:
+        async with conn.transaction():
+            await conn.fetchrow("SELECT * FROM taskq.attest_target('test',NULL,false)")
+            return await conn.fetchrow(query, *args)
+
+    async def _attested_fetchval(
+        self, conn: asyncpg.Connection, query: str, *args: object
+    ) -> object:
+        async with conn.transaction():
+            await conn.fetchrow("SELECT * FROM taskq.attest_target('test',NULL,false)")
+            return await conn.fetchval(query, *args)
+
     async def _setup(self) -> None:
         self.admin = await asyncpg.connect(self.dsn)
         self.connections.append(self.admin)
@@ -130,7 +144,8 @@ class TaskqStateMachine(RuleBasedStateMachine):
         self.worker_sequence += 1
         worker_id = f"model-worker-{self.worker_sequence}"
         batch = self._run(
-            self.runner.fetchrow(
+            self._attested_fetchrow(
+                self.runner,
                 "SELECT * FROM taskq.claim_jobs($1, $2, p_job_id => $3)",
                 "t4_model",
                 worker_id,
@@ -330,7 +345,7 @@ class TaskqStateMachine(RuleBasedStateMachine):
             )
         )
         assert rewound is True
-        tick = self._run(self.housekeeper.fetchval("SELECT taskq.tick(200)"))
+        tick = self._run(self._attested_fetchval(self.housekeeper, "SELECT taskq.tick(200)"))
         assert isinstance(tick, str)
         if model.cancel_pending:
             model.status = "cancelled"

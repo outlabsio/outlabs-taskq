@@ -41,29 +41,32 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
             return await migrate(conn)
 
     try:
+        checkpoints = await asyncio.gather(install(0), install(1), return_exceptions=True)
+        assert all(isinstance(result, Exception) for result in checkpoints)
+        assert all(
+            getattr(getattr(result, "orig", result), "sqlstate", None) == "TQ422"
+            for result in checkpoints
+        )
+        binder = await asyncpg.connect(_database_dsn(taskq_dsn, database))
+        try:
+            identity = await binder.fetchrow("SELECT * FROM taskq.get_target_identity()")
+            assert identity is not None and identity["environment"] == "unbound"
+            await binder.fetchrow(
+                "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+                identity["installation_id"],
+                "test",
+                "installer-matrix",
+                identity["binding_version"],
+                False,
+                None,
+            )
+        finally:
+            await binder.close()
+
         results = await asyncio.gather(install(0), install(1))
         assert sorted(results, key=len) == [
             [],
-            [
-                "0001_initial",
-                "0002_contract_0_1_1",
-                "0003_contract_0_1_2",
-                "0004_read_models",
-                "0005_read_model_conformance",
-                "0006_activate_ready_read_model",
-                "0007_admission_reservations",
-                "0008_followups",
-                "0009_workflows",
-                "0010_schedules",
-                "0011_finite_projections",
-                "0012_activate_finite_projections",
-                "0013_workflow_page_composite_repair",
-                "0014_worker_presence_projection",
-                "0015_activate_worker_presence",
-                "0016_workflow_continuations",
-                "0017_activate_workflow_continuations",
-                "0018_trusted_effect_fence",
-            ],
+            ["0020_standalone_scheduler"],
         ]
         async with engines[0].connect() as conn:
             report = await verify(conn)
@@ -95,11 +98,30 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
     await admin.execute(f'CREATE DATABASE "{database}"')
     dsn = _sync_sqlalchemy_dsn(taskq_dsn, database)
     try:
+        with pytest.raises(Exception) as checkpoint:
+            await asyncio.to_thread(main, ["migrate", dsn])
+        assert (
+            getattr(getattr(checkpoint.value, "orig", checkpoint.value), "sqlstate", None)
+            == "TQ422"
+        )
+        binder = await asyncpg.connect(_database_dsn(taskq_dsn, database))
+        try:
+            identity = await binder.fetchrow("SELECT * FROM taskq.get_target_identity()")
+            assert identity is not None
+            await binder.fetchrow(
+                "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+                identity["installation_id"],
+                "test",
+                "installer-matrix",
+                identity["binding_version"],
+                False,
+                None,
+            )
+        finally:
+            await binder.close()
         await asyncio.to_thread(main, ["migrate", dsn])
         output = capsys.readouterr().out
-        assert "0016_workflow_continuations" in output
-        assert "0017_activate_workflow_continuations" in output
-        assert "0018_trusted_effect_fence" in output
+        assert "0020_standalone_scheduler" in output
         await asyncio.to_thread(main, ["verify", dsn])
         assert capsys.readouterr().out.endswith("verify: ok\n")
     finally:

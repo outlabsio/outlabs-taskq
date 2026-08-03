@@ -1,6 +1,6 @@
 [project]
 name = "outlabs-taskq"
-version = "0.1.0a21"
+version = "0.1.0a22"
 description = "Postgres-native task queue: SQL-first contract, Python client, optional FastAPI facade."
 authors = [
     { name = "OUTLABS LLC", email = "contact@outlabs.io" },
@@ -37,6 +37,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.0.0",
     "asyncpg>=0.29.0",
     "croniter>=2.0.0",
+    "PyYAML>=6.0.0",
 ]
 
 [project.optional-dependencies]
@@ -80,6 +81,7 @@ include = [
     "/src",
     "/docs",
     "/tests",
+    "/examples",
     "/README.md",
     "/LICENSE",
 ]

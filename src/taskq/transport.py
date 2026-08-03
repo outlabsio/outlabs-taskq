@@ -28,6 +28,7 @@ from taskq.protocol import (
     HeartbeatResult,
     JobDetail,
     JobPage,
+    ManagedScheduleProfile,
     Metric,
     QueueControlOutcome,
     QueueStats,
@@ -40,6 +41,7 @@ from taskq.protocol import (
     ScheduleProfile,
     ScheduleWriteResult,
     SettleResult,
+    TargetIdentityProfile,
     WorkflowAuthorizationProjection,
     WorkflowKind,
     WorkflowPage,
@@ -233,6 +235,11 @@ class ObserverTransport(ClosableTransport, Protocol):
 
 
 @runtime_checkable
+class TargetIdentityTransport(ClosableTransport, Protocol):
+    async def get_target_identity(self) -> TargetIdentityProfile: ...
+
+
+@runtime_checkable
 class AuthorizationLookupTransport(ClosableTransport, Protocol):
     """Facade-internal observer projection; never an HTTP client command."""
 
@@ -313,6 +320,7 @@ class HousekeeperTransport(ClosableTransport, Protocol):
         error: str,
         *,
         retry_seconds: int = 30,
+        deterministic: bool = False,
     ) -> ScheduleActionResult: ...
 
 
@@ -336,6 +344,43 @@ class ScheduleOperatorTransport(ClosableTransport, Protocol):
     async def get_schedule_authorization_projection(
         self, name: str
     ) -> ScheduleAuthorizationProjection: ...
+
+
+@runtime_checkable
+class ScheduleManifestTransport(ClosableTransport, Protocol):
+    async def list_managed_schedules(
+        self,
+        namespace: str,
+        source: str,
+        *,
+        limit: int = 100,
+        after_name: str | None = None,
+    ) -> list[ManagedScheduleProfile]: ...
+
+    async def put_managed_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        *,
+        namespace: str,
+        source: str,
+        manifest_key: str,
+        display_name: str,
+        definition_hash: str,
+        overlap_policy: Literal["forbid", "allow"],
+        max_lateness_seconds: int | None,
+        actor: str,
+        expected_version: int | None = None,
+    ) -> ScheduleWriteResult: ...
+
+    async def set_schedule_state(
+        self,
+        name: str,
+        state: Literal["active", "paused"],
+        expected_version: int,
+        actor: str,
+        reason: str,
+    ) -> ScheduleWriteResult: ...
 
 
 @runtime_checkable
@@ -394,7 +439,9 @@ __all__ = [
     "OperatorTransport",
     "ProducerTransport",
     "RunnerTransport",
+    "ScheduleManifestTransport",
     "ScheduleOperatorTransport",
+    "TargetIdentityTransport",
     "TaskqTransport",
     "WorkflowAuthorizationLookupTransport",
     "WorkflowOperatorTransport",

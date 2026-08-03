@@ -47,20 +47,41 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.2.6"
+            == "0.3.0"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
-        assert (
-            await conn.fetchval(
-                "SELECT value->'active'->>-1 FROM taskq.meta WHERE key='capabilities'"
-            )
-            == "workflow_continuations"
-        )
+        assert await conn.fetchval("SELECT taskq.has_capability('scheduler_v2')") is True
+        assert await conn.fetchval("SELECT taskq.has_capability('target_attestation')") is True
         assert (
             await conn.fetchval(
                 "SELECT count(*) FROM taskq.schema_migrations WHERE id='0018_trusted_effect_fence'"
             )
             == 1
+        )
+        assert (
+            await conn.fetchval(
+                "SELECT count(*) FROM taskq.schema_migrations "
+                "WHERE id IN ('0019_scheduler_target_identity','0020_standalone_scheduler')"
+            )
+            == 2
+        )
+    finally:
+        await conn.close()
+
+
+async def _bind_target(dsn: str) -> None:
+    conn = await asyncpg.connect(dsn)
+    try:
+        identity = await conn.fetchrow("SELECT * FROM taskq.get_target_identity()")
+        assert identity is not None and identity["environment"] == "unbound"
+        await conn.fetchrow(
+            "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+            identity["installation_id"],
+            "test",
+            "artifact-smoke",
+            identity["binding_version"],
+            False,
+            None,
         )
     finally:
         await conn.close()
@@ -132,6 +153,7 @@ def main() -> None:
     import taskq.execution
     import taskq.protocol
     import taskq.registry
+    import taskq.scheduler
     import taskq.settings
     import taskq.sql.transport
     import taskq.testing
@@ -168,7 +190,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a21"
+    assert taskq.__version__ == "0.1.0a22"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -350,8 +372,10 @@ def main() -> None:
         "0016_workflow_continuations",
         "0017_activate_workflow_continuations",
         "0018_trusted_effect_fence",
+        "0019_scheduler_target_identity",
+        "0020_standalone_scheduler",
     ]
-    assert len(FUNCTIONS) == 71
+    assert len(FUNCTIONS) == 89
 
     if args.mode != "core":
         return
@@ -373,10 +397,15 @@ def main() -> None:
     asyncio.run(_create_database(args.admin_dsn, database))
     try:
         dsn = _database_dsn(args.admin_dsn, database)
+        try:
+            _run([str(taskq_cli), "migrate", dsn], cwd=Path.cwd())
+        except subprocess.CalledProcessError as checkpoint:
+            assert "target_unbound" in checkpoint.stderr
+        else:
+            raise AssertionError("fresh install must stop at the unbound target checkpoint")
+        asyncio.run(_bind_target(dsn))
         migrated = _run([str(taskq_cli), "migrate", dsn], cwd=Path.cwd()).stdout
-        assert "applied 0001_initial" in migrated
-        assert "applied 0002_contract_0_1_1" in migrated
-        assert "applied 0003_contract_0_1_2" in migrated
+        assert "applied 0020_standalone_scheduler" in migrated
         verified = _run([str(taskq_cli), "verify", dsn], cwd=Path.cwd()).stdout
         assert "[ok] function_catalog" in verified
         assert verified.endswith("verify: ok\n")
@@ -389,9 +418,15 @@ def main() -> None:
     try:
         upgrade_dsn = _database_dsn(args.admin_dsn, upgrade_database)
         asyncio.run(_set_initial_checksum(upgrade_dsn, _A17_INITIAL_CHECKSUM))
+        try:
+            _run([str(taskq_cli), "migrate", upgrade_dsn], cwd=Path.cwd())
+        except subprocess.CalledProcessError as checkpoint:
+            assert "target_unbound" in checkpoint.stderr
+        else:
+            raise AssertionError("upgrade must stop at the unbound target checkpoint")
+        asyncio.run(_bind_target(upgrade_dsn))
         migrated = _run([str(taskq_cli), "migrate", upgrade_dsn], cwd=Path.cwd()).stdout
-        assert "applied 0017_activate_workflow_continuations" in migrated
-        assert "applied 0018_trusted_effect_fence" in migrated
+        assert "applied 0020_standalone_scheduler" in migrated
         verified = _run([str(taskq_cli), "verify", upgrade_dsn], cwd=Path.cwd()).stdout
         assert verified.endswith("verify: ok\n")
         asyncio.run(_assert_activation(upgrade_dsn))
