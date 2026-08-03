@@ -9,6 +9,13 @@
 **Protocol wire major:** 1, unchanged
 **Migrations:** 0019–0020 (additive identity checkpoint, then activation)
 
+> **Post-release safety note:** a22/a23 `catchup: skip` advances due schedules
+> without enqueueing, including during ordinary continuous polling. Recurring
+> application manifests must explicitly use `fire_once` or `fire_all`. Do not
+> attempt a Python-only correction: `fire_schedule` enforces the released
+> policy in SQL, so corrected semantics require a new migration and stored-row
+> compatibility audit.
+
 ## What changes
 
 - `taskq scheduler`, bounded `--once`, and read-only `scheduler doctor` run

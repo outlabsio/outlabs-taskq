@@ -50,6 +50,15 @@ state: active
 payload: {}
 ```
 
+Known a22/a23 limitation: `skip` selects zero occurrences for every due claim,
+including ordinary continuous polling, then advances beyond the database
+`as_of`. It therefore must not be used for recurring application work. Every
+such source manifest must explicitly select `fire_once` (coalesce all due
+instants to the latest) or `fire_all` (oldest-first, bounded by `max_catchup`).
+Correcting `skip` to mean “fire the sole ordinarily due instant, but discard a
+multi-instant backlog” requires both a new SQL migration and a compatibility
+audit of existing stored rows; a Python-only semantic change is forbidden.
+
 An advanced definition may supply ordinary TaskQ target options, but the
 compiler emits exactly the existing `ScheduleJobTarget` shape. The scheduler
 does not import the task registry. An application-side typed compiler may
@@ -135,6 +144,18 @@ Recommended deployment:
   cadence; and
 - one logical scheduler per database/environment until active/active evidence
   passes.
+
+The scheduler is only a clock: it evaluates recurrence and durably enqueues
+ordinary TaskQ jobs. It never imports application registries or executes task
+handlers. Worker placement is therefore an independent application decision.
+One host-native or otherwise consolidated worker process may subscribe to
+multiple queues through one combined registry; TaskQ does not require a worker
+container per queue, task, or schedule. Keep workers on existing local worker
+hosts by default where that is the established operating model. Placement must
+still account for dependency access, trust boundaries, resource profile,
+failure domain, latency, availability, supervision, and operating cost.
+Consolidate only queues that can safely share secrets, resource budgets, and a
+failure boundary.
 
 ## 6. Decision and occurrence records
 

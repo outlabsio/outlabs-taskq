@@ -77,6 +77,20 @@ taskq schedule apply examples/schedules.minimal.yaml \
   --actor release-agent --expected-environment staging
 ```
 
+The scheduler is a clock, not a task executor. Run one supervised scheduler per
+database/environment, but place workers according to the application's existing
+operating model. A single host-native worker can use a combined registry and
+subscribe to multiple queues; TaskQ does not require one container per worker,
+queue, task, or schedule. Prefer existing local worker hosts unless a particular
+task has a documented cloud availability, latency, or network requirement.
+
+For a22/a23, every recurring source manifest must set `catchup: fire_once` or
+`catchup: fire_all` explicitly. Do not rely on the current `skip` default: the
+released SQL contract intentionally accepts only zero occurrences for that
+policy, so continuous polling advances without enqueueing. A corrected
+`skip_missed` semantic requires a new SQL migration and compatibility audit; it
+is not being patched only in Python.
+
 Workers read `TASKQ_DSN` for direct SQL, or `TASKQ_HTTP_BASE_URL` with exactly one of
 `TASKQ_HTTP_BEARER_TOKEN` or the `TASKQ_HTTP_HEADER_NAME`/`TASKQ_HTTP_HEADER_VALUE` pair. OutLabs IAM
 provisioning reads `TASKQ_AUTH_DSN`. Command-line credential arguments remain available for
