@@ -1,6 +1,6 @@
 [project]
 name = "outlabs-taskq"
-version = "0.1.0a19"
+version = "0.1.0a21"
 description = "Postgres-native task queue: SQL-first contract, Python client, optional FastAPI facade."
 authors = [
     { name = "OUTLABS LLC", email = "contact@outlabs.io" },
@@ -46,7 +46,7 @@ http = [
 ]
 outlabs = [
     "outlabs-taskq[http]",
-    "outlabs-auth==0.1.0a26",
+    "outlabs-auth>=0.1.0a27,<0.2.0",
 ]
 dev = [
     "hypothesis>=6.0.0",

@@ -672,7 +672,7 @@ wheels = [
 
 [[package]]
 name = "outlabs-auth"
-version = "0.1.0a26"
+version = "0.1.0a28"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
@@ -695,14 +695,14 @@ dependencies = [
     { name = "sqlmodel" },
     { name = "structlog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f8/9a/16040b17bf3b287839dccb7e8566c46cbc4beb180e2886d0fcc255c2a179/outlabs_auth-0.1.0a26.tar.gz", hash = "sha256:43528893b084e56e75dfe22b0a78d55166172c76e62683e404dfb9d5e95a0808", size = 368619, upload-time = "2026-07-30T00:32:17.793Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/eb/b2/f0f3fc747a9684b64a310c1a2ba8a118090f4aca3a0ed383cc8e1e295577/outlabs_auth-0.1.0a28.tar.gz", hash = "sha256:ba49e4a6aebed35fa022f0a4a71f0c380295e28a0bf5117e619be5c83fa52040", size = 375242, upload-time = "2026-08-03T10:14:28.436Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/b0/92/f6322c4b393d64e43411bff728849a66637caf41263a50479d2fb14f386e/outlabs_auth-0.1.0a26-py3-none-any.whl", hash = "sha256:c47e1100fe0590d0ac4b5c9808740c69b3045841ddb5e8c260030fadac63dd8f", size = 487136, upload-time = "2026-07-30T00:32:16.334Z" },
+    { url = "https://files.pythonhosted.org/packages/45/52/ed47c45192a55be8a435e3c1c9f4ae59321b9adcc2436b14cff0e39322f4/outlabs_auth-0.1.0a28-py3-none-any.whl", hash = "sha256:800630d722b31145a6c8dd8ae5bc83999414fcefa1cacfdebbcf69d598b14047", size = 495608, upload-time = "2026-08-03T10:14:26.669Z" },
 ]
 
 [[package]]
 name = "outlabs-taskq"
-version = "0.1.0a19"
+version = "0.1.0a21"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
@@ -737,7 +737,7 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'http'", specifier = ">=0.115.0" },
     { name = "httpx", marker = "extra == 'http'", specifier = ">=0.27.0" },
     { name = "hypothesis", marker = "extra == 'dev'", specifier = ">=6.0.0" },
-    { name = "outlabs-auth", marker = "extra == 'outlabs'", specifier = "==0.1.0a26" },
+    { name = "outlabs-auth", marker = "extra == 'outlabs'", specifier = ">=0.1.0a27,<0.2.0" },
     { name = "outlabs-taskq", extras = ["http"], marker = "extra == 'outlabs'" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'dev'", specifier = ">=3.2.0,<4.0" },
     { name = "pydantic", specifier = ">=2.0.0" },

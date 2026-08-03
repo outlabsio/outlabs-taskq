@@ -5,6 +5,10 @@
 - **Status:** corrected, released, and rollout-verified; this version supersedes the earlier contents of this file
 - **Public base:** `origin/main` commit `96699f2` (`0.1.0a18`)
 - **Remediated release:** `v0.1.0a19` at commit `b4ccb133b1b447f0d82638043e6455a2fc31932b`
+- **Current compatibility successor:** `v0.1.0a21` updates only package identity and the optional
+  OutLabs adapter dependency to `outlabs-auth>=0.1.0a27,<0.2.0`; SQL, protocol, and migrations
+  remain unchanged. The lower bound is the first audited compatible release and the upper bound
+  prevents an unreviewed major/minor contract change.
 - **Contract:** SQL `0.2.6`, Protocol document `1.0.15`, migrations `0001`–`0018`
 
 ## Executive verdict
