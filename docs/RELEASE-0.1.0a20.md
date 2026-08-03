@@ -1,6 +1,6 @@
 # outlabs-taskq 0.1.0a20 release notes
 
-**Status:** release candidate
+**Status:** released 2026-08-03; superseded by 0.1.0a21
 
 **Base release:** 0.1.0a19 (`b4ccb13`)
 
@@ -25,10 +25,17 @@ changes in this release.
 - [x] Package, source, tests, smoke script, README, and lockfile identify `0.1.0a20`.
 - [x] The optional `outlabs` extra pins exactly `outlabs-auth==0.1.0a27`.
 - [x] Migration files, SQL contract, protocol document, and runtime code are unchanged from 0.1.0a19.
-- [ ] Full PostgreSQL 16 and 18 suites pass from the release candidate.
-- [ ] Wheel and sdist pass installed-artifact smoke tests outside the checkout.
+- [x] Full PostgreSQL 16 and 18 suites pass from the release candidate.
+- [x] Wheel and sdist pass installed-artifact smoke tests outside the checkout.
 - [x] Locked dependency audit reports no known vulnerabilities.
-- [ ] GitHub CI passes and the immutable prerelease assets are published.
+- [x] GitHub CI passes and the immutable prerelease assets are published.
+
+## Published evidence
+
+- Release: [v0.1.0a20](https://github.com/outlabsio/outlabs-taskq/releases/tag/v0.1.0a20)
+- Main CI: [run 30803708865](https://github.com/outlabsio/outlabs-taskq/actions/runs/30803708865)
+- Wheel SHA-256: `337573db698ba22a38643e1e2447d061fda9a6eee2a3cc521bccd64ad7072ec3`
+- Source SHA-256: `01ec1a437661a57c7de4bd9112a2c159b001af604530900dddbbfc3f8d099ef3`
 
 ## Upgrade notes
 
@@ -36,3 +43,6 @@ Install 0.1.0a20 when a host needs OutLabs Auth a27. TaskQ migrations do not
 need to be rerun for this dependency-only release. Hosts still must apply the
 OutLabs Auth migrations through `20260802_0025` before starting the upgraded
 application.
+
+New consumers should use a21 so they can resolve a28 and later compatible 0.1
+patches without weakening their exact artifact lock.
