@@ -169,22 +169,23 @@ not change the protocol document or SQL contract, and no downstream incompatibil
 | Créditos del Norte API | `main`, already pinned to a19 | full application and OutlabsAuth migration chain, all 18 TaskQ migrations and verification checks, and 121 tests passed on a fresh PostgreSQL 18 database |
 | Diverse Data API | active `codex/stage6-local-taskq-cutover`, already pinned to a19 | hosted-equivalent no-source gate passed: Ruff, mypy across 282 files, 1,302 tests, six explicit unrelated PostgreSQL skips, fresh TaskQ migration/verification, and 36 targeted TaskQ tests |
 | Diverse Data workers | active `codex/stage6-local-taskq-cutover`, already pinned to a19 | Ruff, mypy across 220 files, and 549 tests passed |
-| QDarte API | active audit branch plus draft [`staging` PR #14](https://github.com/outlabsio/qdarteAPI/pull/14) and draft [`main` PR #15](https://github.com/outlabsio/qdarteAPI/pull/15) | active branch: 1,427 tests; exact staging pair: 1,481 tests; exact main pair: 1,431 tests; Ruff and runtime-source mypy passed on every target |
-| QDarte workers | active audit branch plus draft [`staging` PR #4](https://github.com/outlabsio/qdarte-workers/pull/4) and draft [`main` PR #3](https://github.com/outlabsio/qdarte-workers/pull/3) | active branch: 579 tests; exact staging pair: 590 tests; exact main pair: 571 tests; Ruff and mypy passed on every target |
+| QDarte API | active audit branch, merged [`staging` PR #14](https://github.com/outlabsio/qdarteAPI/pull/14), and draft [`main` PR #15](https://github.com/outlabsio/qdarteAPI/pull/15) | active branch: 1,427 tests; exact staging pair: 1,481 tests; exact main pair: 1,431 tests; Ruff and runtime-source mypy passed on every target |
+| QDarte workers | active audit branch, merged [`staging` PR #4](https://github.com/outlabsio/qdarte-workers/pull/4), and draft [`main` PR #3](https://github.com/outlabsio/qdarte-workers/pull/3) | active branch: 579 tests; exact staging pair: 590 tests; exact main pair: 571 tests; Ruff and mypy passed on every target |
 | QDarte Runtime | exact staging commit `041218065ec9b590b4c6fbaba6ac4f3bd8976dfa` plus draft [`main` PR #3](https://github.com/outlabsio/qdarte-runtime/pull/3) | staging: 1,081 tests; exact main pair: 1,078 tests; Ruff and mypy across 188 files passed |
 | QDarte Admin | exact `main` generated-client contract | frozen install, TypeScript build, and 116 tests passed; the a19 protocol remains compatible |
 
 Before these draft QDarte alignment PRs, QDarte staging paired an a19 API with a14 workers, while the
 default API and workers branches still referenced a11. The historical a11 release-wheel URL now
-returns 404, so fresh default-branch installs were not reproducible. The staging drafts align and
-hash-pin a19. The main drafts upgrade and hash-pin a19, repair fresh-database bootstrap and closed
-inventory drift, and were tested together with the exact Runtime main-readiness commit. An immutable
-local a11 tag rehearsal successfully applied migrations 1–15 at a11 and migrations 16–18 at a19,
-then passed all a19 verification checks.
+returns 404, so fresh default-branch installs were not reproducible. The staging PRs merged on
+2026-08-03 and align and hash-pin a19. The main drafts upgrade and hash-pin a19, repair fresh-database
+bootstrap and closed inventory drift, and were tested together with the exact Runtime main-readiness
+commit. An immutable local a11 tag rehearsal successfully applied migrations 1–15 at a11 and
+migrations 16–18 at a19, then passed all a19 verification checks.
 
-All five QDarte follow-up PRs are open, draft, mergeable, and have no configured hosted status checks.
-They are test-ready release inputs, not evidence of a merge or deployment. QDarte's protected-staging
-deployment proof remains required before production `main` promotion.
+The two QDarte staging PRs are merged. The three main follow-up PRs remain open, draft, mergeable,
+and have no configured hosted status checks. Neither the staging merge nor the locally green main
+candidates are evidence of a staging deployment. QDarte's protected-staging deployment proof remains
+required before production `main` promotion.
 
 ## Accepted observations and operator guidance
 
@@ -212,5 +213,7 @@ test-order defect has an independent clean-cluster gate. Version 0.1.0a19 is mer
 as a GitHub prerelease and hash-verified after publication. Rollout changes are integrated into each
 known consumer's current target branch. Consumers already on default `main` are integrated there;
 the Diverse changes remain on their explicitly named active cutover branches. The earlier QDarte
-cutover branches remain active, and the 2026-08-03 staging/main alignment drafts are locally green but
-not merged or deployed. QDarte's normal protected-staging proof and promotion decisions still apply.
+cutover branches remain active. The 2026-08-03 staging alignment is merged and the main alignment
+drafts are locally green, but the staging candidate has not yet produced protected deployment proof
+and the main drafts are not merged. QDarte's normal protected-staging proof and promotion decisions
+still apply.
