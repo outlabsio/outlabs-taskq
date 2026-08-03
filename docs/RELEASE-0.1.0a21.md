@@ -1,6 +1,6 @@
 # outlabs-taskq 0.1.0a21 release notes
 
-**Status:** release candidate
+**Status:** released 2026-08-03; current OutlabsAuth compatibility release
 
 **Base release:** 0.1.0a20
 
@@ -29,10 +29,17 @@ behavior changes in this release.
 - [x] Package, source, tests, smoke script, README, and lockfile identify `0.1.0a21`.
 - [x] The optional `outlabs` extra uses `outlabs-auth>=0.1.0a27,<0.2.0`.
 - [x] Migration files, SQL contract, protocol document, and runtime code are unchanged from 0.1.0a20.
-- [ ] Full PostgreSQL 16 and 18 suites pass from the release candidate.
-- [ ] Wheel and sdist pass installed-artifact smoke tests outside the checkout.
-- [ ] Locked dependency audit reports no known vulnerabilities.
-- [ ] GitHub CI passes and immutable prerelease assets are published.
+- [x] Full PostgreSQL 16 and 18 suites pass from the release candidate.
+- [x] Wheel and sdist pass installed-artifact smoke tests outside the checkout.
+- [x] Locked dependency audit reports no known vulnerabilities.
+- [x] GitHub CI passes and immutable prerelease assets are published.
+
+## Published evidence
+
+- Release: [v0.1.0a21](https://github.com/outlabsio/outlabs-taskq/releases/tag/v0.1.0a21)
+- Main CI: [run 30805158877](https://github.com/outlabsio/outlabs-taskq/actions/runs/30805158877)
+- Wheel SHA-256: `0793bff12c4973865f58db6ddeb31e790e2a35a8712de27ba69cf404a9adc81a`
+- Source SHA-256: `e32eabeea73212c2eb4524201f16fa6c9a44c2dfc8eb4b6a7a22881c58445b19`
 
 ## Upgrade notes
 
