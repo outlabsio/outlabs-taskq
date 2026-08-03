@@ -1,0 +1,9 @@
+version: 1
+namespace: example
+source: deployment
+
+schedules:
+  heartbeat:
+    task: example.heartbeat
+    queue: example
+    interval_seconds: 300

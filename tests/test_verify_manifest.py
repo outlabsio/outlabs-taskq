@@ -315,8 +315,8 @@ def _failed_check(report: object, name: str) -> object:
     return matches[0]
 
 
-def test_machine_manifest_has_closed_0_2_6_function_surface() -> None:
-    assert len(FUNCTIONS) == 71
+def test_machine_manifest_has_closed_0_3_0_function_surface() -> None:
+    assert len(FUNCTIONS) == 89
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
     assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS
     assert "taskq.reserve_admission(text,text,text,uuid,integer,integer)" in FUNCTIONS
@@ -328,6 +328,11 @@ def test_machine_manifest_has_closed_0_2_6_function_surface() -> None:
     assert "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)" in FUNCTIONS
     assert "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)" in FUNCTIONS
     assert "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)" in FUNCTIONS
+    assert "taskq.attest_target(text,uuid,boolean)" in FUNCTIONS
+    assert (
+        "taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)"
+        in FUNCTIONS
+    )
     assert all("PUBLIC" not in spec.grants for spec in FUNCTIONS.values())
 
 

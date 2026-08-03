@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
 from enum import StrEnum
 from typing import Any, Protocol
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -21,7 +22,7 @@ from taskq.errors import TaskqCapabilityError, TaskqConfigError, TaskqError, Tas
 from taskq.http.facade import TaskqFacadeTransports
 from taskq.http.hub import ClaimWaitHub
 from taskq.registry import TaskRegistry
-from taskq.schedules import evaluate_schedule
+from taskq.scheduler import SchedulerEngine
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.transport import HousekeeperTransport
@@ -47,15 +48,32 @@ SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
         "0.2.4",
         "0.2.5",
         "0.2.6",
+        "0.2.7",
+        "0.3.0",
     }
 )
 ADMISSION_SQL_CONTRACT_VERSIONS = frozenset(
-    {"0.1.5", "0.2.0", "0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6"}
+    {
+        "0.1.5",
+        "0.2.0",
+        "0.2.1",
+        "0.2.2",
+        "0.2.3",
+        "0.2.4",
+        "0.2.5",
+        "0.2.6",
+        "0.2.7",
+        "0.3.0",
+    }
 )
-WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset({"0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6"})
-WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset({"0.2.3", "0.2.4", "0.2.5", "0.2.6"})
-SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6"})
-WORKER_PRESENCE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.4", "0.2.5", "0.2.6"})
+WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset(
+    {"0.2.1", "0.2.2", "0.2.3", "0.2.4", "0.2.5", "0.2.6", "0.2.7", "0.3.0"}
+)
+WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset(
+    {"0.2.3", "0.2.4", "0.2.5", "0.2.6", "0.2.7", "0.3.0"}
+)
+SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset({"0.3.0"})
+WORKER_PRESENCE_SQL_CONTRACT_VERSIONS = frozenset({"0.2.4", "0.2.5", "0.2.6", "0.2.7", "0.3.0"})
 
 
 def _require_supported_sql_contract(
@@ -122,7 +140,11 @@ class TaskqRuntimeOptions(BaseModel):
     long_poll_listener_backoff: float = Field(default=0.25, ge=0.01, le=30)
     soft_stop_timeout: float | None = Field(default=None, ge=0)
     asgi_graceful_timeout: float | None = Field(default=None, ge=0)
-    expected_environment: str = Field(default="development", min_length=1)
+    expected_environment: str = Field(
+        default_factory=lambda: os.environ.get("TASKQ_EXPECTED_ENV", "development"),
+        min_length=1,
+    )
+    expected_installation_id: UUID | None = None
     allow_production: bool = False
 
     @property
@@ -144,6 +166,8 @@ class TaskqRuntimeOptions(BaseModel):
     def _validate_runtime(self) -> TaskqRuntimeOptions:
         if self.expected_environment == "production" and not self.allow_production:
             raise ValueError("production requires allow_production=True")
+        if self.expected_environment == "production" and self.expected_installation_id is None:
+            raise ValueError("production requires expected_installation_id")
         if self.schedule_enabled and not self.housekeeper_enabled:
             raise ValueError("schedule_enabled requires housekeeper_enabled")
         ceiling = self.database_connection_ceiling
@@ -333,7 +357,12 @@ class TaskqRuntime:
         resolved = options or TaskqRuntimeOptions()
         registry = registry or TaskRegistry()
         ordinary = SqlTaskqTransport.from_dsn(
-            dsn, pool_size=resolved.request_pool_max, max_overflow=0
+            dsn,
+            pool_size=resolved.request_pool_max,
+            max_overflow=0,
+            expected_environment=resolved.expected_environment,
+            expected_installation_id=resolved.expected_installation_id,
+            allow_production=resolved.allow_production,
         )
         hub = ClaimWaitHub()
         runtime_listener: _RuntimeNotificationListener | None = None
@@ -362,14 +391,24 @@ class TaskqRuntime:
         housekeeper: SqlTaskqTransport | None = None
         if resolved.housekeeper_enabled:
             housekeeper = SqlTaskqTransport.from_dsn(
-                dsn, pool_size=resolved.housekeeper_pool_max, max_overflow=0
+                dsn,
+                pool_size=resolved.housekeeper_pool_max,
+                max_overflow=0,
+                expected_environment=resolved.expected_environment,
+                expected_installation_id=resolved.expected_installation_id,
+                allow_production=resolved.allow_production,
             )
             owned.append(housekeeper)
         service: WorkerService | None = None
         if resolved.embedded_worker is not None:
             embedded = resolved.embedded_worker
             worker_transport = SqlTaskqTransport.from_dsn(
-                dsn, pool_size=resolved.embedded_worker_pool_max, max_overflow=0
+                dsn,
+                pool_size=resolved.embedded_worker_pool_max,
+                max_overflow=0,
+                expected_environment=resolved.expected_environment,
+                expected_installation_id=resolved.expected_installation_id,
+                allow_production=resolved.allow_production,
             )
             worker_notifications = PostgresNotificationSource(dsn) if embedded.listen else None
             service = WorkerService(
@@ -579,39 +618,14 @@ class TaskqRuntime:
 
     async def _run_schedules(self) -> None:
         assert self.housekeeper_transport is not None
-        batch = await self.housekeeper_transport.claim_schedules(
+        engine = SchedulerEngine(
+            self.housekeeper_transport,
             f"runtime:{socket.gethostname()}:{os.getpid()}",
-            limit=self.options.schedule_claim_limit,
+            claim_limit=self.options.schedule_claim_limit,
             lease_seconds=self.options.schedule_lease_seconds,
+            error_retry_seconds=self.options.schedule_error_retry_seconds,
         )
-        for claim in batch.schedules:
-            try:
-                evaluation = evaluate_schedule(
-                    recurrence=claim.recurrence,
-                    catchup_policy=claim.catchup_policy.value,
-                    max_catchup=claim.max_catchup,
-                    initialized=claim.initialized,
-                    next_fire_at=claim.next_fire_at,
-                    as_of=claim.as_of,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                await self.housekeeper_transport.schedule_error(
-                    claim.schedule_id,
-                    claim.token,
-                    claim.definition_version,
-                    f"calendar:{type(exc).__name__}",
-                    retry_seconds=self.options.schedule_error_retry_seconds,
-                )
-                continue
-            await self.housekeeper_transport.fire_schedule(
-                claim.schedule_id,
-                claim.token,
-                claim.definition_version,
-                evaluation.occurrences,
-                evaluation.next_fire_at,
-            )
+        await engine.process_batch()
 
     async def _housekeeper_loop(self) -> None:
         backoff = self.options.housekeeper_interval

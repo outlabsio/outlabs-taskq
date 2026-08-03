@@ -163,7 +163,7 @@ _READ_MODEL_PLAN_QUERIES = {
 
 _PLAN_BINDINGS = {
     "claim": PlanBinding(
-        functions=("taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",),
+        functions=("taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid)",),
         body_fragments=(
             "from taskq.jobs as j where j.queue = p_queue and j.status = 'queued'",
             "and j.scheduled_at <= now() and j.cancel_requested_at is null",
@@ -201,7 +201,7 @@ _PLAN_BINDINGS = {
         body_fragments=("from taskq.jobs j where j.queue=q.name and j.status='running'",),
     ),
     "finished_stats": PlanBinding(
-        functions=("taskq.janitor()",),
+        functions=("taskq._janitor_unattested()",),
         body_fragments=(
             "where j.queue = q.name and j.status in ('succeeded','cancelled')",
             "and j.finished_at < now() - make_interval(hours => q.retention_hours)",
@@ -224,7 +224,7 @@ _PLAN_BINDINGS = {
         ),
     ),
     "schedule_claim": PlanBinding(
-        functions=("taskq.claim_schedules(text,integer,integer)",),
+        functions=("taskq._claim_schedules_unattested(text,integer,integer)",),
         body_fragments=(
             "from taskq.schedules where state = 'active'",
             "and next_fire_at <= v_now",

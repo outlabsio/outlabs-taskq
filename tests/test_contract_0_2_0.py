@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import _migrate_impl, discover_migrations, verify
+from conftest import activate_scheduler_contract
 
 from conftest import RoleConnect
 
@@ -317,7 +318,7 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
             ).first()
             assert settled is not None and settled.result == "ok"
             applied = await conn.run_sync(
-                lambda sync_conn: _migrate_impl(sync_conn, migrations[8:])
+                lambda sync_conn: _migrate_impl(sync_conn, migrations[8:18])
             )
             assert applied == [
                 "0009_workflows",
@@ -330,6 +331,10 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0016_workflow_continuations",
                 "0017_activate_workflow_continuations",
                 "0018_trusted_effect_fence",
+            ]
+            assert await activate_scheduler_contract(conn, migrations) == [
+                "0019_scheduler_target_identity",
+                "0020_standalone_scheduler",
             ]
             report = await verify(conn)
             assert report.ok

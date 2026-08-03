@@ -1017,6 +1017,33 @@ class ContractMeta(BaseModel):
     capabilities: dict[str, Any]
 
 
+class TargetIdentityProfile(BaseModel):
+    """Safe database-attested target identity; the MAC secret is never projected."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    installation_id: UUID
+    environment: str
+    binding_version: int = Field(ge=0)
+    bound_at: datetime | None = None
+    bound_by: str | None = None
+    contract_version: str
+    capabilities: dict[str, Any]
+
+
+class SchedulerHealth(BaseModel):
+    """Read-only advancement snapshot used by ``taskq scheduler doctor``."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    database_time: datetime
+    active_schedules: int = Field(ge=0)
+    due_schedules: int = Field(ge=0)
+    oldest_due_at: datetime | None = None
+    last_decision_at: datetime | None = None
+    auto_paused_schedules: int = Field(ge=0)
+
+
 class Metric(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -1269,6 +1296,25 @@ class ScheduleProfile(BaseModel):
     version: int
 
 
+class ManagedScheduleProfile(BaseModel):
+    """Source-owned schedule projection used by manifest plan/apply."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    name: str
+    manifest_key: str
+    display_name: str
+    definition_hash: str
+    target: dict[str, Any]
+    recurrence: dict[str, Any]
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int
+    overlap_policy: Literal["forbid", "allow"]
+    max_lateness_seconds: int | None = None
+    state: ScheduleState
+    version: int
+
+
 class ScheduleWireData(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -1331,7 +1377,7 @@ class ScheduleClaimResult(BaseModel):
 class ScheduleActionResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
-    outcome: Literal["initialized", "fired", "skipped", "error_recorded", "stale"]
+    outcome: Literal["initialized", "fired", "skipped", "error_recorded", "auto_paused", "stale"]
     replayed: bool
     schedule_id: UUID
     jobs_enqueued: int
@@ -1846,7 +1892,7 @@ COMMAND_SPECS: Final = MappingProxyType(
         CommandName.SCHEDULE_ERROR: _spec(
             "taskq.schedule_error(uuid,uuid,bigint,text,integer)",
             _HOUSEKEEPER,
-            ("error_recorded", "stale"),
+            ("error_recorded", "auto_paused", "stale"),
             (TqCode.NOT_FOUND, TqCode.VALIDATION),
         ),
         CommandName.REDRIVE: _spec(
@@ -1871,7 +1917,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.expire_worker_leases(text,text)", _OPERATOR, ("ok",)
         ),
         CommandName.TICK: _spec("taskq.tick(integer)", _HOUSEKEEPER, ("ok",), (TqCode.VALIDATION,)),
-        CommandName.JANITOR: _spec("taskq.janitor()", _HOUSEKEEPER, ("ok",)),
+        CommandName.JANITOR: _spec("taskq.janitor()", _HOUSEKEEPER, ("ok",), (TqCode.VALIDATION,)),
     }
 )
 
@@ -2488,6 +2534,7 @@ __all__ = [
     "JobDetail",
     "JobStatus",
     "Metric",
+    "ManagedScheduleProfile",
     "QueueControlOutcome",
     "QueueSource",
     "QueueStats",
@@ -2508,6 +2555,7 @@ __all__ = [
     "ScheduleDefinition",
     "ScheduleIntervalRecurrence",
     "ScheduleHttpWriteResult",
+    "SchedulerHealth",
     "ScheduleJobTarget",
     "ScheduleProfile",
     "ScheduleRecurrence",
@@ -2523,6 +2571,7 @@ __all__ = [
     "SettleOutcome",
     "SettleResult",
     "SettleRetryScheduledResult",
+    "TargetIdentityProfile",
     "SettleWireData",
     "SnoozeWireRequest",
     "ShutdownRequestWireRequest",

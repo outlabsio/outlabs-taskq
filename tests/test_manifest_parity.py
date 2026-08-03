@@ -46,8 +46,15 @@ BEHAVIOR_GROUPS = {
     "schedule_operator": {
         "taskq.get_schedule(text)",
         "taskq.get_schedule_authorization_projection(text)",
+        "taskq.list_managed_schedules(text,text,integer,text)",
+        "taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)",
         "taskq.put_schedule(text,jsonb,text,bigint)",
         "taskq.retire_schedule(text,bigint,text)",
+        "taskq.set_schedule_state(text,text,bigint,text,text)",
+    },
+    "target_identity": {
+        "taskq.attest_target(text,uuid,boolean)",
+        "taskq.get_target_identity()",
     },
     "runner": {
         "taskq.cancel_running_job(uuid,uuid,text,text)",
@@ -91,8 +98,10 @@ BEHAVIOR_GROUPS = {
     "housekeeping": {
         "taskq.claim_schedules(text,integer,integer)",
         "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)",
+        "taskq.get_scheduler_health()",
         "taskq.janitor()",
         "taskq.schedule_error(uuid,uuid,bigint,text,integer)",
+        "taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)",
         "taskq.tick(integer)",
     },
 }
@@ -257,7 +266,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.2.6"
+    assert meta["contract_version"] == "0.3.0"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",
@@ -267,7 +276,9 @@ async def test_observer_projections_metrics_and_views(
             "read_model_list_ready",
             "read_model_list_running",
             "read_model_workflow",
+            "scheduler_v2",
             "schedules",
+            "target_attestation",
             "worker_presence",
             "workflow_continuations",
         ]

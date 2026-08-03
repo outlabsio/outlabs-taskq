@@ -14,6 +14,7 @@ import argparse
 import asyncio
 import importlib
 import inspect
+import json
 import logging
 import os
 import secrets
@@ -22,12 +23,19 @@ import socket
 import sys
 from collections.abc import Callable
 from typing import Any, NoReturn
+from uuid import UUID
 
 from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.engine import URL, make_url
 
-from taskq.errors import TaskqConfigError
+from taskq.errors import (
+    TaskqCapabilityError,
+    TaskqConfigError,
+    TaskqUnavailableError,
+    TaskqValidationError,
+    TaskqVersionError,
+)
 from taskq.registry import TaskRegistry
 from taskq.settings import WorkerSettings
 from taskq.sql import VerifyReport, migrate, migrate_sync, verify, verify_sync
@@ -92,6 +100,13 @@ def _warn_for_argv_credentials(args: argparse.Namespace) -> None:
         return
     if args.command == "auth" and args.dsn is not None and _dsn_contains_password(args.dsn):
         _warn_command_line_credentials("TASKQ_AUTH_DSN")
+        return
+    if args.command == "target" and args.dsn is not None and _dsn_contains_password(args.dsn):
+        _warn_command_line_credentials("TASKQ_DSN")
+        return
+    if args.command in {"scheduler", "schedule"}:
+        if args.dsn is not None and _dsn_contains_password(args.dsn):
+            _warn_command_line_credentials("TASKQ_DSN")
 
 
 def _required_dsn(
@@ -233,6 +248,9 @@ async def _run_worker(
             dsn,
             pool_size=settings.pool_size,
             max_overflow=0,
+            expected_environment=settings.expected_environment,
+            expected_installation_id=settings.expected_installation_id,
+            allow_production=settings.allow_production,
         )
         notifications = PostgresNotificationSource(dsn) if settings.listen else None
     service = WorkerService(
@@ -349,6 +367,7 @@ def _add_worker_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentP
     worker.add_argument("--presence-interval", type=float)
     worker.add_argument("--soft-stop-timeout", type=float)
     worker.add_argument("--expected-environment")
+    worker.add_argument("--expected-installation-id", type=UUID)
     worker.add_argument("--allow-production", action=argparse.BooleanOptionalAction, default=None)
     worker.add_argument("--pool-size", type=int)
 
@@ -365,6 +384,239 @@ def _add_auth_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentPar
     sync.add_argument("--apply", action="store_true")
     sync.add_argument("--reconcile", action="store_true")
     sync.add_argument("--per-queue-roles", action="store_true")
+
+
+def _add_target_parser(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
+    target = subparsers.add_parser(
+        "target", help="inspect or explicitly bind the database target identity"
+    )
+    commands = target.add_subparsers(dest="target_command", required=True)
+
+    show = commands.add_parser("show", help="show the safe target fingerprint")
+    show.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    show.add_argument("--json", action="store_true", help="emit stable machine-readable JSON")
+
+    bind = commands.add_parser(
+        "bind", help="bind an unbound target or explicitly rotate a clone identity"
+    )
+    bind.add_argument("environment")
+    bind.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    bind.add_argument("--actor", required=True)
+    bind.add_argument("--expected-installation-id", type=UUID, required=True)
+    bind.add_argument("--expected-binding-version", type=int, required=True)
+    bind.add_argument("--rotate", action="store_true")
+    bind.add_argument("--reason")
+    bind.add_argument("--allow-production", action="store_true")
+
+
+def _add_target_expectation_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--expected-environment")
+    parser.add_argument("--expected-installation-id", type=UUID)
+    parser.add_argument("--allow-production", action="store_true", default=None)
+
+
+def _add_scheduler_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    scheduler = subparsers.add_parser("scheduler", help="run the framework-neutral TaskQ scheduler")
+    scheduler.add_argument("scheduler_command", nargs="?", choices=("run", "doctor"), default="run")
+    scheduler.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    scheduler.add_argument("--once", action="store_true")
+    scheduler.add_argument("--max-batches", type=int, default=100)
+    scheduler.add_argument("--max-runtime-seconds", type=float, default=300)
+    scheduler.add_argument("--worker-id")
+    scheduler.add_argument("--poll-interval", type=float)
+    scheduler.add_argument("--jitter", type=float)
+    scheduler.add_argument("--backoff-cap", type=float)
+    scheduler.add_argument("--claim-limit", type=int)
+    scheduler.add_argument("--lease-seconds", type=int)
+    scheduler.add_argument("--error-retry-seconds", type=int)
+    scheduler.add_argument("--pool-size", type=int)
+    scheduler.add_argument("--json", action="store_true")
+    _add_target_expectation_arguments(scheduler)
+
+
+def _add_schedule_manifest_parser(
+    subparsers: argparse._SubParsersAction[argparse.ArgumentParser],
+) -> None:
+    schedule = subparsers.add_parser(
+        "schedule", help="plan, apply, or retire source-owned schedule manifests"
+    )
+    commands = schedule.add_subparsers(dest="schedule_command", required=True)
+    plan = commands.add_parser("plan", help="render a non-mutating manifest plan")
+    plan.add_argument("manifest")
+    plan.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    plan.add_argument("--json", action="store_true")
+
+    apply = commands.add_parser("apply", help="CAS-apply desired schedules without pruning")
+    apply.add_argument("manifest")
+    apply.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    apply.add_argument("--actor", required=True)
+    apply.add_argument("--json", action="store_true")
+    _add_target_expectation_arguments(apply)
+
+    retire = commands.add_parser("retire", help="explicitly retire one owned manifest key")
+    retire.add_argument("manifest")
+    retire.add_argument("key")
+    retire.add_argument("--dsn", help="prefer TASKQ_DSN when the DSN contains credentials")
+    retire.add_argument("--actor", required=True)
+    retire.add_argument("--reason", default="manifest retirement")
+    retire.add_argument("--json", action="store_true")
+    _add_target_expectation_arguments(retire)
+
+
+async def _run_target_command(args: argparse.Namespace) -> Any:
+    transport = SqlTaskqTransport.from_dsn(args.dsn)
+    try:
+        if args.target_command == "show":
+            return await transport.get_target_identity()
+        return await transport.bind_target_identity(
+            args.expected_installation_id,
+            args.environment,
+            args.actor,
+            args.expected_binding_version,
+            rotate=args.rotate,
+            reason=args.reason,
+        )
+    finally:
+        await transport.aclose()
+
+
+def _print_target(profile: Any, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(profile.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+        return
+    installation_id = str(profile.installation_id)
+    print(f"installation: {installation_id[:8]}…")
+    print(f"environment: {profile.environment}")
+    print(f"binding version: {profile.binding_version}")
+    print(f"contract: {profile.contract_version}")
+    active = profile.capabilities.get("active", [])
+    print(f"capabilities: {', '.join(str(value) for value in active)}")
+
+
+def _scheduler_overrides(args: argparse.Namespace) -> dict[str, object]:
+    names = (
+        "dsn",
+        "expected_environment",
+        "expected_installation_id",
+        "allow_production",
+        "worker_id",
+        "poll_interval",
+        "jitter",
+        "backoff_cap",
+        "claim_limit",
+        "lease_seconds",
+        "error_retry_seconds",
+        "pool_size",
+    )
+    return {name: getattr(args, name) for name in names if getattr(args, name) is not None}
+
+
+async def _run_scheduler_command(args: argparse.Namespace) -> Any:
+    from taskq.scheduler import SchedulerSettings, scheduler_doctor, scheduler_from_settings
+
+    if args.scheduler_command == "doctor":
+        dsn = args.dsn or os.environ.get("TASKQ_DSN")
+        if not dsn:
+            raise TaskqConfigError("scheduler doctor requires --dsn or TASKQ_DSN")
+        expected_environment = args.expected_environment or os.environ.get("TASKQ_EXPECTED_ENV")
+        expected_installation_id = args.expected_installation_id
+        if expected_installation_id is None:
+            configured_id = os.environ.get("TASKQ_EXPECTED_INSTALLATION_ID")
+            if configured_id:
+                try:
+                    expected_installation_id = UUID(configured_id)
+                except ValueError as exc:
+                    raise TaskqConfigError("TASKQ_EXPECTED_INSTALLATION_ID must be a UUID") from exc
+        transport = SqlTaskqTransport.from_dsn(dsn)
+        try:
+            return await scheduler_doctor(
+                transport,
+                expected_environment=expected_environment,
+                expected_installation_id=expected_installation_id,
+                allow_production=bool(args.allow_production),
+            )
+        finally:
+            await transport.aclose()
+
+    settings = SchedulerSettings(**_scheduler_overrides(args))
+    transport, service = scheduler_from_settings(settings)
+    loop = asyncio.get_running_loop()
+    installed: list[signal.Signals] = []
+    for candidate in (signal.SIGTERM, signal.SIGINT):
+        try:
+            loop.add_signal_handler(candidate, service.stop)
+        except (NotImplementedError, RuntimeError):
+            continue
+        installed.append(candidate)
+    try:
+        if args.once:
+            return await service.run_once(
+                max_batches=args.max_batches,
+                max_runtime_seconds=args.max_runtime_seconds,
+            )
+        await service.run()
+        return None
+    finally:
+        for candidate in installed:
+            loop.remove_signal_handler(candidate)
+        await transport.aclose()
+
+
+def _manifest_transport(args: argparse.Namespace, *, protected: bool) -> SqlTaskqTransport:
+    expected_environment = getattr(args, "expected_environment", None)
+    expected_installation_id = getattr(args, "expected_installation_id", None)
+    allow_production = bool(getattr(args, "allow_production", False))
+    if protected and not expected_environment:
+        raise TaskqConfigError(
+            "manifest mutation requires --expected-environment or TASKQ_EXPECTED_ENV"
+        )
+    if expected_environment == "production" and not allow_production:
+        raise TaskqConfigError("production requires --allow-production")
+    if expected_environment == "production" and expected_installation_id is None:
+        raise TaskqConfigError("production requires --expected-installation-id")
+    return SqlTaskqTransport.from_dsn(
+        args.dsn,
+        expected_environment=expected_environment,
+        expected_installation_id=expected_installation_id,
+        allow_production=allow_production,
+    )
+
+
+async def _run_schedule_manifest_command(args: argparse.Namespace) -> Any:
+    from taskq.scheduler import apply_manifest, load_manifest, plan_manifest
+
+    manifest = load_manifest(args.manifest)
+    protected = args.schedule_command in {"apply", "retire"}
+    transport = _manifest_transport(args, protected=protected)
+    try:
+        if args.schedule_command == "plan":
+            return await plan_manifest(transport, manifest)
+        if args.schedule_command == "apply":
+            return await apply_manifest(transport, manifest, actor=args.actor)
+        plan = await plan_manifest(transport, manifest)
+        entry = next((candidate for candidate in plan.entries if candidate.key == args.key), None)
+        if entry is None or entry.current_version is None:
+            raise TaskqConfigError("retire key is not owned by this manifest namespace/source")
+        return await transport.retire_schedule(entry.name, entry.current_version, args.actor)
+    finally:
+        await transport.aclose()
+
+
+def _print_manifest_result(result: Any, *, as_json: bool) -> None:
+    if as_json:
+        print(json.dumps(result.model_dump(mode="json"), sort_keys=True, separators=(",", ":")))
+        return
+    if hasattr(result, "entries"):
+        for entry in result.entries:
+            suffix = f" ({entry.reason})" if entry.reason else ""
+            print(f"{entry.action:9} {entry.name}{suffix}")
+        for warning in result.warnings:
+            print(f"warning: {warning}", file=sys.stderr)
+        return
+    for key, value in result.model_dump(mode="json").items():
+        print(f"{key}: {value}")
 
 
 def _worker_overrides(args: argparse.Namespace) -> dict[str, object]:
@@ -387,6 +639,7 @@ def _worker_overrides(args: argparse.Namespace) -> dict[str, object]:
         "presence_interval",
         "soft_stop_timeout",
         "expected_environment",
+        "expected_installation_id",
         "allow_production",
         "pool_size",
     )
@@ -469,6 +722,9 @@ def main(argv: list[str] | None = None) -> None:
     p_verify.add_argument("dsn", nargs="?", help=_DSN_HELP)
     _add_worker_parser(subparsers)
     _add_auth_parser(subparsers)
+    _add_target_parser(subparsers)
+    _add_scheduler_parser(subparsers)
+    _add_schedule_manifest_parser(subparsers)
 
     args = parser.parse_args(argv)
     _warn_for_argv_credentials(args)
@@ -516,6 +772,82 @@ def main(argv: list[str] | None = None) -> None:
         _print_auth_report(report)
         if report.conflicting:
             raise SystemExit(2)
+    elif args.command == "target":
+        args.dsn = args.dsn or os.environ.get("TASKQ_DSN")
+        if not args.dsn:
+            parser.error("target DSN is required via --dsn or TASKQ_DSN")
+        if args.target_command == "bind":
+            if args.expected_binding_version < 0:
+                parser.error("--expected-binding-version must be non-negative")
+            if args.rotate and not args.reason:
+                parser.error("--rotate requires --reason")
+            if not args.rotate and args.reason:
+                parser.error("--reason is valid only with --rotate")
+            if args.environment == "production" and not args.allow_production:
+                parser.error("binding production requires --allow-production")
+        try:
+            profile = asyncio.run(_run_target_command(args))
+        except Exception as exc:
+            print(f"taskq target failed: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(1) from None
+        _print_target(profile, as_json=bool(getattr(args, "json", False)))
+    elif args.command == "scheduler":
+        try:
+            summary = asyncio.run(_run_scheduler_command(args))
+        except (ValidationError, TaskqConfigError) as exc:
+            parser.error(_settings_error(exc) if isinstance(exc, ValidationError) else str(exc))
+        except TaskqValidationError:
+            print("taskq scheduler refused the configured target", file=sys.stderr)
+            raise SystemExit(2) from None
+        except (TaskqVersionError, TaskqCapabilityError, TaskqUnavailableError) as exc:
+            print(f"taskq scheduler unavailable: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(3) from None
+        except Exception as exc:
+            print(f"taskq scheduler failed: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(1) from None
+        if summary is not None:
+            if args.json:
+                print(
+                    json.dumps(
+                        summary.model_dump(mode="json"),
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                )
+            else:
+                for key, value in summary.model_dump(mode="json").items():
+                    print(f"{key}: {value}")
+            if getattr(summary, "outcome", None) == "budget_exhausted":
+                raise SystemExit(3)
+            if getattr(summary, "ready", True) is False:
+                raise SystemExit(2)
+    elif args.command == "schedule":
+        args.dsn = args.dsn or os.environ.get("TASKQ_DSN")
+        if not args.dsn:
+            parser.error("schedule DSN is required via --dsn or TASKQ_DSN")
+        if hasattr(args, "expected_environment") and args.expected_environment is None:
+            args.expected_environment = os.environ.get("TASKQ_EXPECTED_ENV")
+        if hasattr(args, "expected_installation_id") and args.expected_installation_id is None:
+            value = os.environ.get("TASKQ_EXPECTED_INSTALLATION_ID")
+            if value:
+                try:
+                    args.expected_installation_id = UUID(value)
+                except ValueError:
+                    parser.error("TASKQ_EXPECTED_INSTALLATION_ID must be a UUID")
+        try:
+            result = asyncio.run(_run_schedule_manifest_command(args))
+        except (ValidationError, TaskqConfigError) as exc:
+            parser.error(_settings_error(exc) if isinstance(exc, ValidationError) else str(exc))
+        except TaskqValidationError:
+            print("taskq schedule refused the configured target", file=sys.stderr)
+            raise SystemExit(2) from None
+        except (TaskqVersionError, TaskqCapabilityError, TaskqUnavailableError) as exc:
+            print(f"taskq schedule unavailable: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(3) from None
+        except Exception as exc:
+            print(f"taskq schedule failed: {type(exc).__name__}", file=sys.stderr)
+            raise SystemExit(1) from None
+        _print_manifest_result(result, as_json=args.json)
 
 
 if __name__ == "__main__":

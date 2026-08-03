@@ -9,6 +9,10 @@
   OutLabs adapter dependency to `outlabs-auth>=0.1.0a27,<0.2.0`; SQL, protocol, and migrations
   remain unchanged. The lower bound is the first audited compatible release and the upper bound
   prevents an unreviewed major/minor contract change.
+- **Unpublished scheduler candidate:** `0.1.0a22` / SQL `0.3.0` adds migrations 0019–0020 and
+  database-attested target enforcement. Its independent adversarial implementation review returned
+  PASS WITH CONDITIONS with no P0 or functional P1 finding; release evidence is maintained in
+  `docs/evidence/scheduler-0.3.0-2026-08-03.md`.
 - **Contract:** SQL `0.2.6`, Protocol document `1.0.15`, migrations `0001`–`0018`
 
 ## Executive verdict
@@ -156,6 +160,41 @@ that an active cutover branch was promoted to a repository's default branch.
 | QDarte workers | active `codex/qdarte-taskq-audit-fixes`, [`outlabsio/qdarte-workers#2`](https://github.com/outlabsio/qdarte-workers/pull/2), commit `54080d5414b269eb5c90ec9bed3668e193ffcdd0` | Ruff, mypy across 61 source files, and 579 tests passed locally; this repository has no GitHub workflow |
 | Public docs | `main`, [`outlabsio/outlabs-taskq-docs#2`](https://github.com/outlabsio/outlabs-taskq-docs/pull/2), commit `b3996f4effbaf57b57a2be9205aa1f53e25a4238` | PR and post-merge lint/typecheck CI passed |
 
+### 2026-08-03 consumer-wide revalidation
+
+A follow-up local and GitHub organization scan found six live direct package consumers: Outlabs API,
+Créditos del Norte API, Diverse Data API, Diverse Data workers, QDarte API, and QDarte workers.
+QDarte Runtime and QDarte Admin consume the queue protocol or generated contract without directly
+installing the package. Other search matches were package-source clones, documentation, archives,
+historical evidence, or old worktrees rather than additional live consumers.
+
+The a19 change from a18 is confined to migration verification compatibility and hardening. It does
+not change the protocol document or SQL contract, and no downstream incompatibility was found.
+
+| Consumer or contract peer | Revalidated target | 2026-08-03 result |
+|---|---|---|
+| Outlabs API | exact `origin/main`, already pinned to a19 and its wheel hash | frozen install, Ruff, mypy across 103 files, unit suite, fresh PostgreSQL 18 migration, and capture-only delivery integration passed |
+| Créditos del Norte API | `main`, already pinned to a19 | full application and OutlabsAuth migration chain, all 18 TaskQ migrations and verification checks, and 121 tests passed on a fresh PostgreSQL 18 database |
+| Diverse Data API | active `codex/stage6-local-taskq-cutover`, already pinned to a19 | hosted-equivalent no-source gate passed: Ruff, mypy across 282 files, 1,302 tests, six explicit unrelated PostgreSQL skips, fresh TaskQ migration/verification, and 36 targeted TaskQ tests |
+| Diverse Data workers | active `codex/stage6-local-taskq-cutover`, already pinned to a19 | Ruff, mypy across 220 files, and 549 tests passed |
+| QDarte API | active audit branch, merged [`staging` PR #14](https://github.com/outlabsio/qdarteAPI/pull/14), and draft [`main` PR #15](https://github.com/outlabsio/qdarteAPI/pull/15) | active branch: 1,427 tests; exact staging pair: 1,481 tests; exact main pair: 1,431 tests; Ruff and runtime-source mypy passed on every target |
+| QDarte workers | active audit branch, merged [`staging` PR #4](https://github.com/outlabsio/qdarte-workers/pull/4), and draft [`main` PR #3](https://github.com/outlabsio/qdarte-workers/pull/3) | active branch: 579 tests; exact staging pair: 590 tests; exact main pair: 571 tests; Ruff and mypy passed on every target |
+| QDarte Runtime | exact staging commit `041218065ec9b590b4c6fbaba6ac4f3bd8976dfa` plus draft [`main` PR #3](https://github.com/outlabsio/qdarte-runtime/pull/3) | staging: 1,081 tests; exact main pair: 1,078 tests; Ruff and mypy across 188 files passed |
+| QDarte Admin | exact `main` generated-client contract | frozen install, TypeScript build, and 116 tests passed; the a19 protocol remains compatible |
+
+Before these draft QDarte alignment PRs, QDarte staging paired an a19 API with a14 workers, while the
+default API and workers branches still referenced a11. The historical a11 release-wheel URL now
+returns 404, so fresh default-branch installs were not reproducible. The staging PRs merged on
+2026-08-03 and align and hash-pin a19. The main drafts upgrade and hash-pin a19, repair fresh-database
+bootstrap and closed inventory drift, and were tested together with the exact Runtime main-readiness
+commit. An immutable local a11 tag rehearsal successfully applied migrations 1–15 at a11 and
+migrations 16–18 at a19, then passed all a19 verification checks.
+
+The two QDarte staging PRs are merged. The three main follow-up PRs remain open, draft, mergeable,
+and have no configured hosted status checks. Neither the staging merge nor the locally green main
+candidates are evidence of a staging deployment. QDarte's protected-staging deployment proof remains
+required before production `main` promotion.
+
 ## Accepted observations and operator guidance
 
 1. **OpenAPI is public by design.** `/taskq/openapi.json` contains the public protocol, not
@@ -181,5 +220,8 @@ The a18 verifier regression is fixed without weakening arbitrary migration-tampe
 test-order defect has an independent clean-cluster gate. Version 0.1.0a19 is merged, tagged, published
 as a GitHub prerelease and hash-verified after publication. Rollout changes are integrated into each
 known consumer's current target branch. Consumers already on default `main` are integrated there;
-the Diverse and QDarte changes remain on their explicitly named active cutover branches pending those
-projects' normal promotion decisions.
+the Diverse changes remain on their explicitly named active cutover branches. The earlier QDarte
+cutover branches remain active. The 2026-08-03 staging alignment is merged and the main alignment
+drafts are locally green, but the staging candidate has not yet produced protected deployment proof
+and the main drafts are not merged. QDarte's normal protected-staging proof and promotion decisions
+still apply.

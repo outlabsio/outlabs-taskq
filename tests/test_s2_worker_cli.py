@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import sys
 from types import ModuleType
+from uuid import uuid4
 
 import pytest
 from pydantic import ValidationError
@@ -96,7 +97,14 @@ def test_settings_parse_json_queues_and_expected_env(monkeypatch: pytest.MonkeyP
 def test_environment_interlocks_refuse_unsafe_start(overrides: dict[str, object]) -> None:
     with pytest.raises(ValidationError):
         _settings(**overrides)
-    assert _settings(environment="production", allow_production=True).environment == "production"
+    assert (
+        _settings(
+            environment="production",
+            allow_production=True,
+            expected_installation_id=uuid4(),
+        ).environment
+        == "production"
+    )
 
 
 def test_registry_loader_accepts_instance_and_zero_arg_factory(

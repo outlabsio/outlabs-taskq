@@ -33,8 +33,11 @@ EXPECTED_PREDECESSOR_CHECKSUMS = {
 
 def test_0017_follows_byte_immutable_0016_definition() -> None:
     migrations = discover_migrations()
-    assert migrations[-2].filename == "0017_activate_workflow_continuations.sql"
-    for migration in migrations[:-2]:
+    by_name = {migration.filename: migration for migration in migrations}
+    assert "0017_activate_workflow_continuations.sql" in by_name
+    for migration in migrations:
+        if migration.filename not in EXPECTED_PREDECESSOR_CHECKSUMS:
+            continue
         assert (
             EXPECTED_PREDECESSOR_CHECKSUMS[migration.filename]
             == hashlib.sha256(migration.sql.encode()).hexdigest()
@@ -58,12 +61,15 @@ async def test_0017_metadata_activates_workflow_continuations(
 ) -> None:
     assert (
         await pg.fetchval("SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'")
-        == "0.2.6"
+        == "0.3.0"
     )
     assert await pg.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
     assert (
-        await pg.fetchval("SELECT value->'active'->>-1 FROM taskq.meta WHERE key='capabilities'")
-        == "workflow_continuations"
+        await pg.fetchval(
+            "SELECT (value->'active') ? 'workflow_continuations' "
+            "FROM taskq.meta WHERE key='capabilities'"
+        )
+        is True
     )
     await operator.fetchrow("SELECT * FROM taskq.ensure_queue('active_wfc','{}'::jsonb,'test')")
     created = await producer.fetchrow(
@@ -114,11 +120,11 @@ async def test_legacy_claim_body_is_null_policy_only_and_new_frontier_is_bounded
     pg: asyncpg.Connection,
 ) -> None:
     old_definition = await pg.fetchval(
-        "SELECT pg_get_functiondef('taskq.claim_jobs(text,text,integer,text[],"
+        "SELECT pg_get_functiondef('taskq._claim_jobs_unattested(text,text,integer,text[],"
         "integer,text,uuid)'::regprocedure)"
     )
     new_definition = await pg.fetchval(
-        "SELECT pg_get_functiondef('taskq.claim_jobs(text,text,integer,text[],"
+        "SELECT pg_get_functiondef('taskq._claim_jobs_unattested(text,text,integer,text[],"
         "integer,text,uuid,text[])'::regprocedure)"
     )
     assert "j.continuation_policy_hash IS NULL" in old_definition

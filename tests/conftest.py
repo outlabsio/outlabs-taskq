@@ -22,7 +22,9 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
+from typing import Any
 
 import asyncpg
 import pytest
@@ -30,9 +32,93 @@ import pytest
 from taskq.sql import TASKQ_ROLES, discover_migrations, migrate
 
 DSN_ENV = "TASKQ_TEST_DSN"
-_TRUNCATE_KEEP = frozenset({"schema_migrations", "meta"})
+if os.environ.get(DSN_ENV):
+    os.environ.setdefault("TASKQ_EXPECTED_ENV", "test")
+
+_TRUNCATE_KEEP = frozenset(
+    {"schema_migrations", "meta", "target_identity", "target_binding_events"}
+)
 
 RoleConnect = Callable[[str], Awaitable[asyncpg.Connection]]
+
+_ATTESTED_SQL = re.compile(
+    r"\btaskq\.(?:claim_jobs|put_schedule|retire_schedule|put_managed_schedule|"
+    r"set_schedule_state|tick|janitor|claim_schedules|claim_due_schedules|fire_schedule|"
+    r"schedule_error)\s*\(",
+    re.IGNORECASE,
+)
+_ATTESTED_ROLES = frozenset({"taskq_runner", "taskq_operator", "taskq_housekeeper"})
+
+
+async def activate_scheduler_contract(conn: Any, migrations: Any) -> list[str]:
+    """Apply 0019, explicitly bind a scratch target, then activate 0020."""
+    from taskq.sql import _migrate_impl
+
+    applied = await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[18:19]))
+    identity = (
+        (
+            await conn.exec_driver_sql(
+                "SELECT installation_id,binding_version FROM taskq.get_target_identity()"
+            )
+        )
+        .mappings()
+        .one()
+    )
+    await conn.exec_driver_sql(
+        "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+        (
+            identity["installation_id"],
+            "test",
+            "test-harness",
+            identity["binding_version"],
+            False,
+            None,
+        ),
+    )
+    applied.extend(
+        await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[19:20]))
+    )
+    return applied
+
+
+class _AttestedTestConnection:
+    """Give legacy raw-SQL vectors the 0.3 transaction-local attestation."""
+
+    def __init__(self, conn: asyncpg.Connection, role: str) -> None:
+        self._conn = conn
+        self._role = role
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._conn, name)
+
+    async def _call(self, method: str, query: str, *args: object, **kwargs: object) -> Any:
+        target = getattr(self._conn, method)
+        if self._role not in _ATTESTED_ROLES or not _ATTESTED_SQL.search(query):
+            return await target(query, *args, **kwargs)
+
+        async def invoke() -> Any:
+            await self._conn.fetchrow(
+                "SELECT * FROM taskq.attest_target($1,NULL,false)",
+                os.environ.get("TASKQ_EXPECTED_ENV", "test"),
+            )
+            return await target(query, *args, **kwargs)
+
+        if self._conn.is_in_transaction():
+            return await invoke()
+        async with self._conn.transaction():
+            return await invoke()
+
+    async def execute(self, query: str, *args: object, **kwargs: object) -> str:
+        return await self._call("execute", query, *args, **kwargs)
+
+    async def fetch(self, query: str, *args: object, **kwargs: object) -> Any:
+        return await self._call("fetch", query, *args, **kwargs)
+
+    async def fetchrow(self, query: str, *args: object, **kwargs: object) -> Any:
+        return await self._call("fetchrow", query, *args, **kwargs)
+
+    async def fetchval(self, query: str, *args: object, **kwargs: object) -> Any:
+        return await self._call("fetchval", query, *args, **kwargs)
 
 
 def pytest_configure(config: pytest.Config) -> None:
@@ -84,8 +170,36 @@ async def _migrate_once(dsn: str) -> None:
 
     engine = create_async_engine(_asyncpg_engine_dsn(dsn))
     try:
-        async with engine.connect() as conn:
-            await migrate(conn)
+        try:
+            async with engine.connect() as conn:
+                await migrate(conn)
+        except Exception:
+            async with engine.begin() as conn:
+                row = (
+                    (
+                        await conn.exec_driver_sql(
+                            "SELECT contract_version, environment, installation_id, "
+                            "binding_version FROM taskq.get_target_identity()"
+                        )
+                    )
+                    .mappings()
+                    .one()
+                )
+                if row["contract_version"] != "0.2.7" or row["environment"] != "unbound":
+                    raise
+                await conn.exec_driver_sql(
+                    "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+                    (
+                        row["installation_id"],
+                        "test",
+                        "test-harness",
+                        row["binding_version"],
+                        False,
+                        None,
+                    ),
+                )
+            async with engine.connect() as conn:
+                await migrate(conn)
     finally:
         await engine.dispose()
 
@@ -272,6 +386,8 @@ async def role_conn(
         conn = await asyncpg.connect(_plain_dsn(taskq_dsn))
         opened.append(conn)
         await conn.execute(f"SET ROLE {role}")  # fixed vocabulary above, never user input
+        if role in _ATTESTED_ROLES:
+            return _AttestedTestConnection(conn, role)  # type: ignore[return-value]
         return conn
 
     yield connect

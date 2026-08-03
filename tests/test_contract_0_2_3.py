@@ -11,6 +11,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.sql import _migrate_impl, discover_migrations, verify
+from conftest import activate_scheduler_contract
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -157,7 +158,7 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
     engine = create_async_engine(_database_dsn(taskq_dsn, database, sqlalchemy=True))
     try:
         migrations = discover_migrations()
-        assert migrations[-1].id == "0018_trusted_effect_fence"
+        assert migrations[17].id == "0018_trusted_effect_fence"
         async with engine.connect() as conn:
             applied = await conn.run_sync(
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[:10])
@@ -244,10 +245,11 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
                 (workflow["workflow_id"],),
             )
             assert page_size.scalar_one() == 1
+            await activate_scheduler_contract(conn, migrations)
             report = await verify(conn)
             assert report.ok, report
             meta = (await conn.exec_driver_sql("SELECT * FROM taskq.get_contract_meta()")).one()
-            assert meta.contract_version == "0.2.6"
+            assert meta.contract_version == "0.3.0"
             assert meta.capabilities["active"] == [
                 "admission_reservations",
                 "dependencies_workflows",
@@ -256,7 +258,9 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
                 "read_model_list_ready",
                 "read_model_list_running",
                 "read_model_workflow",
+                "scheduler_v2",
                 "schedules",
+                "target_attestation",
                 "worker_presence",
                 "workflow_continuations",
             ]

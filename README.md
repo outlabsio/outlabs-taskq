@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — current package version **`0.1.0a21`** uses SQL contract **`0.2.6`**. The SQL kernel, typed client, worker and CLI, testing helpers, optional FastAPI facade, authorization boundary, durable admission, atomic follow-ups, workflows, schedules, projections, and worker presence are implemented.
+**Status:** alpha — release candidate **`0.1.0a22`** uses SQL contract **`0.3.0`**. It adds the standalone scheduler, database-attested target safety, source-owned YAML manifests, durable schedule decisions, overlap/lateness policy, and deterministic-definition auto-pause. It retains the published 0.1.0a21 optional OutLabsAuth compatibility range.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -17,19 +17,21 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 scheduler release-candidate notes and rollout checklist |
+| [`docs/TaskQ Standalone Scheduler Specification.md`](docs/TaskQ%20Standalone%20Scheduler%20Specification.md) | Owner-approved standalone scheduler, target-attestation, manifest, and evidence contract |
 | [`docs/RELEASE-0.1.0a21.md`](docs/RELEASE-0.1.0a21.md) | 0.1.0a21 compatible OutLabs Auth prerelease range and checklist |
 | [`docs/RELEASE-0.1.0a20.md`](docs/RELEASE-0.1.0a20.md) | 0.1.0a20 OutLabs Auth a27 compatibility release and checklist |
 | [`docs/RELEASE-0.1.0a19.md`](docs/RELEASE-0.1.0a19.md) | 0.1.0a19 compatibility fix, hardening changes, and release checklist |
 
 ## Install
 
-Install the immutable wheel from the latest prerelease:
+The 0.1.0a22 candidate is not published yet. Install a locally built artifact
+for review; production consumers remain on the published 0.1.0a21 release
+until the release gates pass:
 
 ```bash
-pip install https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl
-# extras:
-# pip install "outlabs-taskq[http] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl"
-# pip install "outlabs-taskq[outlabs] @ https://github.com/outlabsio/outlabs-taskq/releases/download/v0.1.0a21/outlabs_taskq-0.1.0a21-py3-none-any.whl"
+uv build
+pip install dist/outlabs_taskq-0.1.0a22-py3-none-any.whl
 ```
 
 ## Credential handling
@@ -42,6 +44,32 @@ DSN from migration and verification commands:
 # TASKQ_DSN is supplied by the deployment environment.
 taskq migrate
 taskq verify
+```
+
+Migration `0019` deliberately stops at an unbound target before scheduler
+activation. Inspect and bind the safe fingerprint, then resume migration:
+
+```bash
+taskq migrate
+taskq target show --json
+taskq target bind staging --actor release-agent \
+  --expected-installation-id "$TASKQ_INSTALLATION_ID" \
+  --expected-binding-version 0
+taskq migrate
+taskq verify
+```
+
+Run the framework-neutral scheduler with static target expectations. The
+bounded mode is first-class for platform timers and scale-to-zero databases:
+
+```bash
+TASKQ_EXPECTED_ENV=staging taskq scheduler
+TASKQ_EXPECTED_ENV=staging taskq scheduler --once --json
+taskq scheduler doctor --expected-environment staging --json
+
+taskq schedule plan examples/schedules.minimal.yaml --json
+taskq schedule apply examples/schedules.minimal.yaml \
+  --actor release-agent --expected-environment staging
 ```
 
 Workers read `TASKQ_DSN` for direct SQL, or `TASKQ_HTTP_BASE_URL` with exactly one of
@@ -57,7 +85,8 @@ reachable should gate it at the host application or reverse proxy.
 
 ```
 src/taskq/
-  sql/           # migrations 0001-0018, runner/verifier, manifest, SQL transport
+  sql/           # migrations 0001-0020, runner/verifier, manifest, SQL transport
+  scheduler.py   # standalone runtime, bounded mode, doctor, YAML plan/apply
   protocol.py    # closed command/outcome/error single-source (Tier-0 parity-tested)
   continuations.py # pure policy compiler, negotiation, and derived identities
   registry.py    # typed Task[In, Out] registry
@@ -66,7 +95,7 @@ src/taskq/
   worker.py      # supervisor + fair poll/presence/shutdown service
   settings.py    # secret-safe worker environment/CLI configuration
   testing.py     # fake client, enqueue assertions, direct work, inline and drain helpers
-  cli.py         # migrate / verify / worker
+  cli.py         # migrate / verify / target / worker / scheduler / schedule
   http/          # optional clients, mounted facade, composable runtime/lifespan
 ```
 

@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from conftest import RoleConnect
 from taskq.sql import _migrate_impl, discover_migrations, verify
+from conftest import activate_scheduler_contract
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -257,6 +258,7 @@ async def test_compile_first_fire_all_occurrence_identity_and_response_replay(
     await _queue(operator, "schedule_fire_all")
     created = await _put(operator, "fire-all", _definition("schedule_fire_all"))
     schedule_id = created["profile"]["schedule_id"]
+    await pg.execute("UPDATE taskq.schedules SET overlap_policy='allow' WHERE id=$1", schedule_id)
 
     initial = await _claim_named(housekeeper, "fire-all")
     initial_next = initial["as_of"] + timedelta(hours=1)
@@ -597,6 +599,7 @@ async def test_0009_to_0010_transition_and_full_verify(taskq_dsn: str) -> None:
                 lambda sync_conn: _migrate_impl(sync_conn, migrations[17:18])
             )
             assert applied == ["0018_trusted_effect_fence"]
+            await activate_scheduler_contract(conn, migrations)
             report = await verify(conn)
             assert report.ok, report
     finally:

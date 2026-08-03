@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from datetime import datetime
 from decimal import Decimal
@@ -53,6 +54,7 @@ from taskq.protocol import (
     HeartbeatResult,
     JobDetail,
     JobPage,
+    ManagedScheduleProfile,
     Metric,
     QueueStats,
     QueueProfile,
@@ -64,9 +66,11 @@ from taskq.protocol import (
     ScheduleClaimResult,
     ScheduleDefinition,
     ScheduleProfile,
+    SchedulerHealth,
     ScheduleWriteResult,
     SettleResult,
     SETTLE_RESULT_ADAPTER,
+    TargetIdentityProfile,
     WorkflowAuthorizationProjection,
     WorkflowKind,
     WorkflowPage,
@@ -307,14 +311,40 @@ def _schedule_profile(value: Any) -> ScheduleProfile:
     return ScheduleProfile.model_validate(data)
 
 
+def _managed_schedule_profile(value: Mapping[str, Any]) -> ManagedScheduleProfile:
+    data = dict(value)
+    data["target"] = _json(data["target"])
+    data["recurrence"] = _json(data["recurrence"])
+    return ManagedScheduleProfile.model_validate(data)
+
+
 class SqlTaskqTransport:
-    def __init__(self, engine: AsyncEngine, *, owns_engine: bool = False) -> None:
+    def __init__(
+        self,
+        engine: AsyncEngine,
+        *,
+        owns_engine: bool = False,
+        expected_environment: str | None = None,
+        expected_installation_id: UUID | None = None,
+        allow_production: bool = False,
+    ) -> None:
         self._engine = engine
         self._owns_engine = owns_engine
+        self._expected_environment = expected_environment or os.environ.get("TASKQ_EXPECTED_ENV")
+        self._expected_installation_id = expected_installation_id
+        self._allow_production = allow_production
         self._closed = False
 
     @classmethod
-    def from_dsn(cls, dsn: str, **engine_options: Any) -> SqlTaskqTransport:
+    def from_dsn(
+        cls,
+        dsn: str,
+        *,
+        expected_environment: str | None = None,
+        expected_installation_id: UUID | None = None,
+        allow_production: bool = False,
+        **engine_options: Any,
+    ) -> SqlTaskqTransport:
         url = make_url(dsn)
         if url.drivername == "postgres":
             url = url.set(drivername="postgresql+asyncpg")
@@ -322,7 +352,13 @@ class SqlTaskqTransport:
             url = url.set(drivername="postgresql+asyncpg")
         elif url.drivername != "postgresql+asyncpg":
             raise TaskqConfigError("SqlTaskqTransport requires a PostgreSQL DSN")
-        return cls(create_async_engine(url, **engine_options), owns_engine=True)
+        return cls(
+            create_async_engine(url, **engine_options),
+            owns_engine=True,
+            expected_environment=expected_environment,
+            expected_installation_id=expected_installation_id,
+            allow_production=allow_production,
+        )
 
     @property
     def engine(self) -> AsyncEngine:
@@ -340,19 +376,36 @@ class SqlTaskqTransport:
         operation: Callable[[AsyncConnection], Awaitable[T]],
         *,
         connection: AsyncConnection | None = None,
+        attest: bool = False,
     ) -> T:
         if self._closed:
             raise TaskqConfigError("transport is closed")
         try:
             if connection is not None:
+                if attest:
+                    await self._attest(connection)
                 return await operation(connection)
             async with self._engine.begin() as owned_connection:
+                if attest:
+                    await self._attest(owned_connection)
                 return await operation(owned_connection)
         except asyncio.CancelledError:
+            raise
+        except TaskqConfigError:
             raise
         except Exception as exc:
             normalized = taskq_error_from_exception(exc)
             raise _continuation_reason(normalized) from exc
+
+    async def _attest(self, connection: AsyncConnection) -> TargetIdentityProfile:
+        if self._expected_environment is None:
+            raise TaskqConfigError("a protected direct-SQL operation requires expected_environment")
+        return await self.attest_target(
+            self._expected_environment,
+            expected_installation_id=self._expected_installation_id,
+            allow_production=self._allow_production,
+            connection=connection,
+        )
 
     @staticmethod
     def _validated_outcome(command: CommandName, value: Any) -> str:
@@ -736,7 +789,7 @@ class SqlTaskqTransport:
             jobs = tuple(decoded_jobs)
             return CLAIM_BATCH_ADAPTER.validate_python({"state": row["state"], "jobs": jobs})
 
-        return await self._run(operation, connection=connection)
+        return await self._run(operation, connection=connection, attest=True)
 
     async def heartbeat(
         self,
@@ -1109,6 +1162,78 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def get_target_identity(
+        self, *, connection: AsyncConnection | None = None
+    ) -> TargetIdentityProfile:
+        async def operation(conn: AsyncConnection) -> TargetIdentityProfile:
+            row = await self._one(conn, "SELECT * FROM taskq.get_target_identity()")
+            return TargetIdentityProfile.model_validate(
+                {**row, "capabilities": _json(row["capabilities"])}
+            )
+
+        return await self._run(operation, connection=connection)
+
+    async def get_scheduler_health(self) -> SchedulerHealth:
+        async def operation(conn: AsyncConnection) -> SchedulerHealth:
+            row = await self._one(conn, "SELECT * FROM taskq.get_scheduler_health()")
+            return SchedulerHealth.model_validate(row)
+
+        return await self._run(operation)
+
+    async def bind_target_identity(
+        self,
+        expected_installation_id: UUID,
+        environment: str,
+        actor: str,
+        expected_binding_version: int,
+        *,
+        rotate: bool = False,
+        reason: str | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> TargetIdentityProfile:
+        async def operation(conn: AsyncConnection) -> TargetIdentityProfile:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.bind_target_identity("
+                ":expected_installation_id,:environment,:actor,"
+                ":expected_binding_version,:rotate,:reason)",
+                {
+                    "expected_installation_id": expected_installation_id,
+                    "environment": environment,
+                    "actor": actor,
+                    "expected_binding_version": expected_binding_version,
+                    "rotate": rotate,
+                    "reason": reason,
+                },
+            )
+            return TargetIdentityProfile.model_validate(
+                {**row, "capabilities": _json(row["capabilities"])}
+            )
+
+        return await self._run(operation, connection=connection)
+
+    async def attest_target(
+        self,
+        expected_environment: str,
+        *,
+        expected_installation_id: UUID | None = None,
+        allow_production: bool = False,
+        connection: AsyncConnection,
+    ) -> TargetIdentityProfile:
+        row = await self._one(
+            connection,
+            "SELECT * FROM taskq.attest_target("
+            ":expected_environment,:expected_installation_id,:allow_production)",
+            {
+                "expected_environment": expected_environment,
+                "expected_installation_id": expected_installation_id,
+                "allow_production": allow_production,
+            },
+        )
+        return TargetIdentityProfile.model_validate(
+            {**row, "capabilities": _json(row["capabilities"])}
+        )
+
     async def metrics(self) -> list[Metric]:
         async def operation(conn: AsyncConnection) -> list[Metric]:
             rows = await self._many(conn, "SELECT * FROM taskq.metrics()")
@@ -1312,7 +1437,7 @@ class SqlTaskqTransport:
             return result
 
         try:
-            return await self._run(operation, connection=connection)
+            return await self._run(operation, connection=connection, attest=True)
         except TaskqConflictError as error:
             raise _schedule_conflict(error) from error
 
@@ -1324,6 +1449,113 @@ class SqlTaskqTransport:
             return _schedule_profile(row)
 
         return await self._run(operation, connection=connection)
+
+    async def list_managed_schedules(
+        self,
+        namespace: str,
+        source: str,
+        *,
+        limit: int = 100,
+        after_name: str | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> list[ManagedScheduleProfile]:
+        async def operation(conn: AsyncConnection) -> list[ManagedScheduleProfile]:
+            rows = await self._many(
+                conn,
+                "SELECT * FROM taskq.list_managed_schedules(:namespace,:source,:limit,:after_name)",
+                {
+                    "namespace": namespace,
+                    "source": source,
+                    "limit": limit,
+                    "after_name": after_name,
+                },
+            )
+            return [_managed_schedule_profile(row) for row in rows]
+
+        return await self._run(operation, connection=connection)
+
+    async def put_managed_schedule(
+        self,
+        name: str,
+        definition: ScheduleDefinition | Mapping[str, Any],
+        *,
+        namespace: str,
+        source: str,
+        manifest_key: str,
+        display_name: str,
+        definition_hash: str,
+        overlap_policy: Literal["forbid", "allow"],
+        max_lateness_seconds: int | None,
+        actor: str,
+        expected_version: int | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        request = (
+            definition
+            if isinstance(definition, ScheduleDefinition)
+            else ScheduleDefinition.model_validate(definition)
+        )
+
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.put_managed_schedule("
+                ":name,CAST(:definition AS jsonb),:namespace,:source,:manifest_key,"
+                ":display_name,:definition_hash,:overlap_policy,:max_lateness_seconds,"
+                ":actor,:expected_version)",
+                {
+                    "name": name,
+                    "definition": _json_param(request.model_dump(mode="json", exclude_none=True)),
+                    "namespace": namespace,
+                    "source": source,
+                    "manifest_key": manifest_key,
+                    "display_name": display_name,
+                    "definition_hash": definition_hash,
+                    "overlap_policy": overlap_policy,
+                    "max_lateness_seconds": max_lateness_seconds,
+                    "actor": actor,
+                    "expected_version": expected_version,
+                },
+            )
+            result = ScheduleWriteResult(
+                outcome=str(row["outcome"]), profile=_schedule_profile(row["profile"])
+            )
+            self._validated_outcome(CommandName.PUT_SCHEDULE, result.outcome)
+            return result
+
+        try:
+            return await self._run(operation, connection=connection, attest=True)
+        except TaskqConflictError as error:
+            raise _schedule_conflict(error) from error
+
+    async def set_schedule_state(
+        self,
+        name: str,
+        state: Literal["active", "paused"],
+        expected_version: int,
+        actor: str,
+        reason: str,
+        *,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleWriteResult:
+        async def operation(conn: AsyncConnection) -> ScheduleWriteResult:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.set_schedule_state("
+                ":name,:state,:expected_version,:actor,:reason)",
+                {
+                    "name": name,
+                    "state": state,
+                    "expected_version": expected_version,
+                    "actor": actor,
+                    "reason": reason,
+                },
+            )
+            return ScheduleWriteResult(
+                outcome=str(row["outcome"]), profile=_schedule_profile(row["profile"])
+            )
+
+        return await self._run(operation, connection=connection, attest=True)
 
     async def retire_schedule(
         self,
@@ -1351,7 +1583,7 @@ class SqlTaskqTransport:
             return result
 
         try:
-            return await self._run(operation, connection=connection)
+            return await self._run(operation, connection=connection, attest=True)
         except TaskqConflictError as error:
             raise _schedule_conflict(error) from error
 
@@ -1405,14 +1637,19 @@ class SqlTaskqTransport:
         return ExpireWorkerLeasesResult.model_validate(_json(value))
 
     async def tick(self, reap_limit: int = 100) -> dict[str, Any]:
-        return dict(
-            _json(
-                await self._operator_scalar("taskq.tick(:reap_limit)", {"reap_limit": reap_limit})
+        async def operation(conn: AsyncConnection) -> dict[str, Any]:
+            value = await self._scalar(
+                conn, "SELECT taskq.tick(:reap_limit)", {"reap_limit": reap_limit}
             )
-        )
+            return dict(_json(value))
+
+        return await self._run(operation, attest=True)
 
     async def janitor(self) -> dict[str, Any]:
-        return dict(_json(await self._operator_scalar("taskq.janitor()", {})))
+        async def operation(conn: AsyncConnection) -> dict[str, Any]:
+            return dict(_json(await self._scalar(conn, "SELECT taskq.janitor()")))
+
+        return await self._run(operation, attest=True)
 
     async def claim_schedules(
         self,
@@ -1442,7 +1679,7 @@ class SqlTaskqTransport:
             self._validated_outcome(CommandName.CLAIM_SCHEDULES, result.state)
             return result
 
-        return await self._run(operation, connection=connection)
+        return await self._run(operation, connection=connection, attest=True)
 
     async def fire_schedule(
         self,
@@ -1471,7 +1708,7 @@ class SqlTaskqTransport:
             self._validated_outcome(CommandName.FIRE_SCHEDULE, result.outcome)
             return result
 
-        return await self._run(operation, connection=connection)
+        return await self._run(operation, connection=connection, attest=True)
 
     async def schedule_error(
         self,
@@ -1481,26 +1718,28 @@ class SqlTaskqTransport:
         error: str,
         *,
         retry_seconds: int = 30,
+        deterministic: bool = False,
         connection: AsyncConnection | None = None,
     ) -> ScheduleActionResult:
         async def operation(conn: AsyncConnection) -> ScheduleActionResult:
             row = await self._one(
                 conn,
                 "SELECT * FROM taskq.schedule_error("
-                ":schedule_id,:token,:definition_version,:error,:retry_seconds)",
+                ":schedule_id,:token,:definition_version,:error,:retry_seconds,:deterministic)",
                 {
                     "schedule_id": schedule_id,
                     "token": token,
                     "definition_version": definition_version,
                     "error": error,
                     "retry_seconds": retry_seconds,
+                    "deterministic": deterministic,
                 },
             )
             result = ScheduleActionResult.model_validate(row)
             self._validated_outcome(CommandName.SCHEDULE_ERROR, result.outcome)
             return result
 
-        return await self._run(operation, connection=connection)
+        return await self._run(operation, connection=connection, attest=True)
 
 
 __all__ = ["METHOD_FUNCTIONS", "SqlTaskqTransport"]
