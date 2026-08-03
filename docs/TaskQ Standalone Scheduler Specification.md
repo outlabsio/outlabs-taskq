@@ -50,6 +50,18 @@ state: active
 payload: {}
 ```
 
+Catch-up policy is evaluated against the database clock:
+
+- `skip` fires one ordinarily due occurrence when no later occurrence is also
+  due. If two or more occurrences accumulated while the clock was unavailable,
+  it discards that backlog and advances to the next future instant.
+- `fire_once` fires the latest due occurrence, whether one or many accumulated.
+- `fire_all` fires due occurrences in order, bounded by `max_catchup`.
+
+The distinction matters for continuous clocks: polling a few milliseconds after
+an instant is normal operation, not catch-up. Consequently the default `skip`
+policy must still emit an ordinary recurring run; it is not a mute schedule.
+
 An advanced definition may supply ordinary TaskQ target options, but the
 compiler emits exactly the existing `ScheduleJobTarget` shape. The scheduler
 does not import the task registry. An application-side typed compiler may
@@ -135,6 +147,16 @@ Recommended deployment:
   cadence; and
 - one logical scheduler per database/environment until active/active evidence
   passes.
+
+The scheduler is only a clock: it evaluates recurrence and durably enqueues
+ordinary TaskQ jobs. It never imports application registries or executes task
+handlers. Worker placement is therefore an independent application decision.
+One host-native or otherwise consolidated worker process may subscribe to
+multiple queues through one combined registry; TaskQ does not require a worker
+container per queue, task, or schedule. Keep workers on existing local worker
+hosts by default. Add a cloud worker only when the task has an explicit
+availability, latency, or private-network requirement that a local worker
+cannot meet.
 
 ## 6. Decision and occurrence records
 

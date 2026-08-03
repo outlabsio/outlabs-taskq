@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a23`** uses SQL contract **`0.3.0`**. It adds managed-PostgreSQL owner installation support to the standalone scheduler, database-attested target safety, source-owned YAML manifests, durable schedule decisions, overlap/lateness policy, and deterministic-definition auto-pause. It retains the published 0.1.0a21 optional OutLabsAuth compatibility range.
+**Status:** alpha — **`0.1.0a24`** uses SQL contract **`0.3.0`**. It fixes ordinary `skip` scheduling, clarifies clock/worker deployment topology, and retains a23's managed-PostgreSQL owner installation support plus the published 0.1.0a21 optional OutLabsAuth compatibility range.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -17,6 +17,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a24.md`](docs/RELEASE-0.1.0a24.md) | 0.1.0a24 `skip` semantics fix and worker-topology guidance |
 | [`docs/RELEASE-0.1.0a23.md`](docs/RELEASE-0.1.0a23.md) | 0.1.0a23 managed-PostgreSQL installer fix and rollout checklist |
 | [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 standalone scheduler release notes and rollout checklist |
 | [`docs/TaskQ Standalone Scheduler Specification.md`](docs/TaskQ%20Standalone%20Scheduler%20Specification.md) | Owner-approved standalone scheduler, target-attestation, manifest, and evidence contract |
@@ -29,7 +30,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a23
+pip install outlabs-taskq==0.1.0a24
 ```
 
 ## Credential handling
@@ -76,6 +77,13 @@ taskq schedule plan examples/schedules.minimal.yaml --json
 taskq schedule apply examples/schedules.minimal.yaml \
   --actor release-agent --expected-environment staging
 ```
+
+The scheduler is a clock, not a task executor. Run one supervised scheduler per
+database/environment, but place workers according to the application's existing
+operating model. A single host-native worker can use a combined registry and
+subscribe to multiple queues; TaskQ does not require one container per worker,
+queue, task, or schedule. Prefer existing local worker hosts unless a particular
+task has a documented cloud availability, latency, or network requirement.
 
 Workers read `TASKQ_DSN` for direct SQL, or `TASKQ_HTTP_BASE_URL` with exactly one of
 `TASKQ_HTTP_BEARER_TOKEN` or the `TASKQ_HTTP_HEADER_NAME`/`TASKQ_HTTP_HEADER_VALUE` pair. OutLabs IAM

@@ -15,7 +15,7 @@ def _utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> dat
     return datetime(year, month, day, hour, minute, tzinfo=UTC)
 
 
-def test_interval_compile_first_skip_and_bounded_fire_all() -> None:
+def test_interval_initialization_skip_backlog_and_bounded_fire_all() -> None:
     recurrence = {"kind": "interval", "interval_seconds": 60}
     initial = evaluate_schedule(
         recurrence=recurrence,
@@ -37,6 +37,18 @@ def test_interval_compile_first_skip_and_bounded_fire_all() -> None:
         as_of=_utc(2026, 1, 1, 0, 10),
     )
     assert skipped == initial
+
+    current_due = _utc(2026, 1, 1, 0, 10)
+    current = evaluate_schedule(
+        recurrence=recurrence,
+        catchup_policy="skip",
+        max_catchup=3,
+        initialized=True,
+        next_fire_at=current_due,
+        as_of=current_due + timedelta(seconds=5),
+    )
+    assert current.occurrences == (current_due,)
+    assert current.next_fire_at == _utc(2026, 1, 1, 0, 11)
 
     fired = evaluate_schedule(
         recurrence=recurrence,
@@ -81,6 +93,7 @@ def test_cron_spring_gap_is_skipped_and_fall_fold_uses_earlier_instant_once() ->
         next_fire_at=_utc(2025, 3, 8, 7, 30),
         as_of=_utc(2025, 3, 8, 8),
     )
+    assert gap.occurrences == (_utc(2025, 3, 8, 7, 30),)
     assert gap.next_fire_at == _utc(2025, 3, 10, 6, 30)
 
     folded = {
@@ -96,6 +109,7 @@ def test_cron_spring_gap_is_skipped_and_fall_fold_uses_earlier_instant_once() ->
         next_fire_at=_utc(2025, 11, 1, 5, 30),
         as_of=_utc(2025, 11, 1, 6),
     )
+    assert first.occurrences == (_utc(2025, 11, 1, 5, 30),)
     assert first.next_fire_at == _utc(2025, 11, 2, 5, 30)
     after_first_fold = evaluate_schedule(
         recurrence=folded,
@@ -105,6 +119,7 @@ def test_cron_spring_gap_is_skipped_and_fall_fold_uses_earlier_instant_once() ->
         next_fire_at=first.next_fire_at,
         as_of=first.next_fire_at,
     )
+    assert after_first_fold.occurrences == (_utc(2025, 11, 2, 5, 30),)
     assert after_first_fold.next_fire_at == _utc(2025, 11, 3, 6, 30)
 
 

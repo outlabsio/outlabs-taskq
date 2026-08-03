@@ -128,9 +128,14 @@ def evaluate_schedule(
     cutoff = _aware_utc(as_of, "as_of")
     if due > cutoff or not 1 <= max_catchup <= 100:
         raise TaskqValidationError(details={"field": "schedule_claim"})
-    if not initialized or catchup_policy == "skip":
+    if not initialized:
         cursor = cutoff
         return ScheduleEvaluation(occurrences=(), next_fire_at=_next(recurrence, cursor))
+    if catchup_policy == "skip":
+        following = _next(recurrence, due)
+        if following <= cutoff:
+            return ScheduleEvaluation(occurrences=(), next_fire_at=_next(recurrence, cutoff))
+        return ScheduleEvaluation(occurrences=(due,), next_fire_at=following)
     if catchup_policy == "fire_once":
         if recurrence.get("kind") == "interval":
             seconds = recurrence.get("interval_seconds")
