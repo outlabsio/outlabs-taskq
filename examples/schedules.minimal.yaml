@@ -7,3 +7,4 @@ schedules:
     task: example.heartbeat
     queue: example
     interval_seconds: 300
+    catchup: fire_once
