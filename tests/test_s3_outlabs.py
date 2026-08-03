@@ -331,7 +331,9 @@ async def test_adapter_sanitizes_real_dependency_http_failures(status: int, reas
 
 
 def test_catalog_is_sorted_exact_validated_and_rejects_noncanonical_queue() -> None:
-    assert importlib.metadata.version("outlabs-auth") == "0.1.0a27"
+    # The release lock verifies one exact compatible artifact even though the
+    # public optional dependency permits independently released 0.1 patches.
+    assert importlib.metadata.version("outlabs-auth") == "0.1.0a28"
     catalog = taskq_permission_catalog(["tools", "emails", "emails"])
     names = tuple(item.name for item in catalog)
     assert len(names) == 15
