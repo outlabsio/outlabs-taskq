@@ -346,6 +346,43 @@ def _execute_migration_statement(conn: Connection, statement: str) -> None:
     conn.exec_driver_sql(statement)
 
 
+def _ensure_installer_owner_membership(conn: Connection) -> None:
+    """Make a managed-Postgres migration role able to own TaskQ objects.
+
+    PostgreSQL 18 gives a ``CREATEROLE`` role administrative control over a
+    role it creates, but not the ``SET`` option required by ``ALTER ... OWNER
+    TO``.  Superusers already pass this check.  A managed database owner can
+    bootstrap a fresh installation by creating ``taskq_owner`` and granting
+    itself membership; keeping that membership also permits later owner-only
+    target binding and package migrations without exposing the credential to
+    an application runtime.
+
+    This runs inside the migration transaction.  A failed first migration
+    therefore leaves neither the reserved role nor the membership behind.
+    """
+
+    role_exists = conn.execute(
+        text("SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'taskq_owner'")
+    ).scalar()
+    if role_exists is None:
+        conn.exec_driver_sql("CREATE ROLE taskq_owner NOLOGIN")
+
+    can_set_owner = conn.execute(
+        text("SELECT pg_catalog.pg_has_role(current_user, 'taskq_owner', 'SET')")
+    ).scalar_one()
+    if not can_set_owner:
+        conn.exec_driver_sql("GRANT taskq_owner TO CURRENT_USER")
+
+    can_set_owner = conn.execute(
+        text("SELECT pg_catalog.pg_has_role(current_user, 'taskq_owner', 'SET')")
+    ).scalar_one()
+    if not can_set_owner:  # pragma: no cover - PostgreSQL should reject GRANT first
+        raise RuntimeError(
+            "TaskQ installer role cannot SET ROLE taskq_owner; use a superuser "
+            "or a CREATEROLE database owner with administrative control of taskq_owner"
+        )
+
+
 def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = None) -> list[str]:
     if migrations is None:
         migrations = discover_migrations()
@@ -360,6 +397,7 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
         applied: list[str] = []
         for migration in pending:
             try:
+                _ensure_installer_owner_membership(conn)
                 for statement in migration.statements():
                     _execute_migration_statement(conn, statement)
                 _record_applied(conn, migration)
