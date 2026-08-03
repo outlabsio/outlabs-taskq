@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — release candidate **`0.1.0a22`** uses SQL contract **`0.3.0`**. It adds the standalone scheduler, database-attested target safety, source-owned YAML manifests, durable schedule decisions, overlap/lateness policy, and deterministic-definition auto-pause. It retains the published 0.1.0a21 optional OutLabsAuth compatibility range.
+**Status:** alpha — **`0.1.0a23`** uses SQL contract **`0.3.0`**. It adds managed-PostgreSQL owner installation support to the standalone scheduler, database-attested target safety, source-owned YAML manifests, durable schedule decisions, overlap/lateness policy, and deterministic-definition auto-pause. It retains the published 0.1.0a21 optional OutLabsAuth compatibility range.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -17,7 +17,8 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
-| [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 scheduler release-candidate notes and rollout checklist |
+| [`docs/RELEASE-0.1.0a23.md`](docs/RELEASE-0.1.0a23.md) | 0.1.0a23 managed-PostgreSQL installer fix and rollout checklist |
+| [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 standalone scheduler release notes and rollout checklist |
 | [`docs/TaskQ Standalone Scheduler Specification.md`](docs/TaskQ%20Standalone%20Scheduler%20Specification.md) | Owner-approved standalone scheduler, target-attestation, manifest, and evidence contract |
 | [`docs/RELEASE-0.1.0a21.md`](docs/RELEASE-0.1.0a21.md) | 0.1.0a21 compatible OutLabs Auth prerelease range and checklist |
 | [`docs/RELEASE-0.1.0a20.md`](docs/RELEASE-0.1.0a20.md) | 0.1.0a20 OutLabs Auth a27 compatibility release and checklist |
@@ -25,13 +26,10 @@ Start here:
 
 ## Install
 
-The 0.1.0a22 candidate is not published yet. Install a locally built artifact
-for review; production consumers remain on the published 0.1.0a21 release
-until the release gates pass:
+Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-uv build
-pip install dist/outlabs_taskq-0.1.0a22-py3-none-any.whl
+pip install outlabs-taskq==0.1.0a23
 ```
 
 ## Credential handling
@@ -45,6 +43,13 @@ DSN from migration and verification commands:
 taskq migrate
 taskq verify
 ```
+
+`taskq migrate` requires a superuser or a managed database-owner role with
+`CREATEROLE`. On PostgreSQL 16/18, the installer bootstraps `taskq_owner` and
+retains owner membership on that migration role so later owner-only binding
+and upgrades work. This must be a dedicated owner/migration credential: never
+give it to an API, worker, or scheduler. Runtime logins receive only the
+required TaskQ capability roles.
 
 Migration `0019` deliberately stops at an unbound target before scheduler
 activation. Inspect and bind the safe fingerprint, then resume migration:

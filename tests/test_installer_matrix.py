@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from urllib.parse import quote
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
@@ -11,7 +12,7 @@ import pytest
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from taskq.cli import main
-from taskq.sql import migrate, verify
+from taskq.sql import TASKQ_ROLES, migrate, verify
 
 pytestmark = pytest.mark.taskq_sql
 
@@ -75,6 +76,89 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
         for engine in engines:
             await engine.dispose()
         await admin.execute(f'DROP DATABASE "{database}"')
+        await admin.close()
+
+
+async def test_managed_owner_bootstraps_and_retains_owner_membership(
+    taskq_dsn: str,
+) -> None:
+    """Managed CREATEROLE owners can install, bind, and upgrade without superuser."""
+
+    role = f"taskq_managed_owner_{uuid4().hex}"
+    database = f"taskq_managed_install_{uuid4().hex}"
+    password = uuid4().hex
+    admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
+    server_version = int(await admin.fetchval("SHOW server_version_num"))
+
+    engine = None
+    database_created = False
+    role_created = False
+    try:
+        await admin.execute(
+            f"CREATE ROLE \"{role}\" LOGIN PASSWORD '{password}' CREATEROLE CREATEDB BYPASSRLS"
+        )
+        role_created = True
+        existing_roles = await admin.fetch(
+            "SELECT rolname FROM pg_catalog.pg_roles WHERE rolname = ANY($1::text[])",
+            list(TASKQ_ROLES),
+        )
+        for existing_role in existing_roles:
+            grant_options = (
+                "WITH ADMIN TRUE, SET FALSE, INHERIT FALSE"
+                if server_version >= 180000
+                else "WITH ADMIN OPTION"
+            )
+            await admin.execute(f'GRANT "{existing_role["rolname"]}" TO "{role}" {grant_options}')
+        await admin.execute(f'CREATE DATABASE "{database}" OWNER "{role}"')
+        database_created = True
+
+        parts = urlsplit(taskq_dsn)
+        netloc = f"{quote(role)}:{quote(password)}@{parts.hostname}"
+        if parts.port is not None:
+            netloc += f":{parts.port}"
+        dsn = urlunsplit(
+            ("postgresql+asyncpg", netloc, f"/{database}", parts.query, parts.fragment)
+        )
+        engine = create_async_engine(dsn)
+        async with engine.connect() as conn:
+            with pytest.raises(Exception) as checkpoint:
+                await migrate(conn)
+            assert (
+                getattr(getattr(checkpoint.value, "orig", checkpoint.value), "sqlstate", None)
+                == "TQ422"
+            )
+            assert (
+                await conn.exec_driver_sql(
+                    "SELECT pg_catalog.pg_has_role(current_user, 'taskq_owner', 'SET')"
+                )
+            ).scalar_one() is True
+            identity = (
+                (await conn.exec_driver_sql("SELECT * FROM taskq.get_target_identity()"))
+                .mappings()
+                .one()
+            )
+            await conn.exec_driver_sql(
+                "SELECT * FROM taskq.bind_target_identity($1,$2,$3,$4,$5,$6)",
+                (
+                    identity["installation_id"],
+                    "staging",
+                    "managed-installer-matrix",
+                    identity["binding_version"],
+                    False,
+                    None,
+                ),
+            )
+            await conn.commit()
+            assert await migrate(conn) == ["0020_standalone_scheduler"]
+            report = await verify(conn)
+            assert report.ok
+    finally:
+        if engine is not None:
+            await engine.dispose()
+        if database_created:
+            await admin.execute(f'DROP DATABASE "{database}" WITH (FORCE)')
+        if role_created:
+            await admin.execute(f'DROP ROLE "{role}"')
         await admin.close()
 
 

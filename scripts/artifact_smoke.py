@@ -190,7 +190,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a22"
+    assert taskq.__version__ == "0.1.0a23"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
