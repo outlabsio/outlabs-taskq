@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import importlib.metadata
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -47,11 +48,17 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.3.0"
+            == "0.3.1"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('scheduler_v2')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('target_attestation')") is True
+        assert await conn.fetchval("SELECT taskq.has_capability('read_model_job_views_v2')") is True
+        assert await conn.fetchval("SELECT taskq.has_capability('read_model_job_events')") is True
+        assert (
+            await conn.fetchval("SELECT taskq.has_capability('read_model_workflow_list')") is True
+        )
+        assert await conn.fetchval("SELECT taskq.has_capability('operator_schedule_list')") is True
         assert (
             await conn.fetchval(
                 "SELECT count(*) FROM taskq.schema_migrations WHERE id='0018_trusted_effect_fence'"
@@ -61,9 +68,11 @@ async def _assert_activation(dsn: str) -> None:
         assert (
             await conn.fetchval(
                 "SELECT count(*) FROM taskq.schema_migrations "
-                "WHERE id IN ('0019_scheduler_target_identity','0020_standalone_scheduler')"
+                "WHERE id IN "
+                "('0019_scheduler_target_identity','0020_standalone_scheduler',"
+                "'0021_cli_read_model')"
             )
-            == 2
+            == 3
         )
     finally:
         await conn.close()
@@ -140,6 +149,61 @@ def _run(command: list[str], *, cwd: Path) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_json(command: list[str], *, cwd: Path) -> dict[str, object]:
+    return json.loads(_run(command, cwd=cwd).stdout)
+
+
+def _migration_plan(taskq_cli: Path, dsn: str, *, cwd: Path) -> str:
+    envelope = _run_json(
+        [
+            str(taskq_cli),
+            "--dsn",
+            dsn,
+            "--actor",
+            "artifact-smoke",
+            "db",
+            "plan",
+            "-o",
+            "json",
+        ],
+        cwd=cwd,
+    )
+    data = envelope["data"]
+    assert isinstance(data, dict)
+    digest = data["plan_digest"]
+    assert isinstance(digest, str)
+    return digest
+
+
+def _migrate(taskq_cli: Path, dsn: str, digest: str, *, cwd: Path) -> dict[str, object]:
+    return _run_json(
+        [
+            str(taskq_cli),
+            "--dsn",
+            dsn,
+            "--actor",
+            "artifact-smoke",
+            "--expected-environment",
+            "test",
+            "--yes",
+            "db",
+            "migrate",
+            "--plan-digest",
+            digest,
+            "-o",
+            "json",
+        ],
+        cwd=cwd,
+    )
+
+
+def _verify(taskq_cli: Path, dsn: str, *, cwd: Path) -> dict[str, object]:
+    return _run_json(
+        [str(taskq_cli), "--dsn", dsn, "db", "verify", "-o", "json"],
+        cwd=cwd,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=("core", "http", "outlabs", "all"), required=True)
@@ -190,7 +254,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a23"
+    assert taskq.__version__ == "0.1.0a25"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -229,7 +293,7 @@ def main() -> None:
         "payload": {},
         "headers": {},
     }
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.15"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
 
     class ArtifactInput(BaseModel):
         value: int
@@ -374,8 +438,9 @@ def main() -> None:
         "0018_trusted_effect_fence",
         "0019_scheduler_target_identity",
         "0020_standalone_scheduler",
+        "0021_cli_read_model",
     ]
-    assert len(FUNCTIONS) == 89
+    assert len(FUNCTIONS) == 92
 
     if args.mode != "core":
         return
@@ -387,9 +452,9 @@ def main() -> None:
     bin_dir = Path(sys.executable).parent
     taskq_cli = bin_dir / "taskq"
     bench_cli = bin_dir / "taskq-bench"
-    assert "usage: taskq" in _run([str(taskq_cli), "--help"], cwd=Path.cwd()).stdout
+    assert "Usage: taskq" in _run([str(taskq_cli), "--help"], cwd=Path.cwd()).stdout
     assert (
-        "usage: taskq worker" in _run([str(taskq_cli), "worker", "--help"], cwd=Path.cwd()).stdout
+        "Usage: taskq worker" in _run([str(taskq_cli), "worker", "--help"], cwd=Path.cwd()).stdout
     )
     assert "usage: taskq-bench" in _run([str(bench_cli), "--help"], cwd=Path.cwd()).stdout
 
@@ -397,18 +462,18 @@ def main() -> None:
     asyncio.run(_create_database(args.admin_dsn, database))
     try:
         dsn = _database_dsn(args.admin_dsn, database)
+        digest = _migration_plan(taskq_cli, dsn, cwd=Path.cwd())
         try:
-            _run([str(taskq_cli), "migrate", dsn], cwd=Path.cwd())
+            _migrate(taskq_cli, dsn, digest, cwd=Path.cwd())
         except subprocess.CalledProcessError as checkpoint:
-            assert "target_unbound" in checkpoint.stderr
+            assert checkpoint.stderr
         else:
             raise AssertionError("fresh install must stop at the unbound target checkpoint")
         asyncio.run(_bind_target(dsn))
-        migrated = _run([str(taskq_cli), "migrate", dsn], cwd=Path.cwd()).stdout
-        assert "applied 0020_standalone_scheduler" in migrated
-        verified = _run([str(taskq_cli), "verify", dsn], cwd=Path.cwd()).stdout
-        assert "[ok] function_catalog" in verified
-        assert verified.endswith("verify: ok\n")
+        digest = _migration_plan(taskq_cli, dsn, cwd=Path.cwd())
+        migrated = _migrate(taskq_cli, dsn, digest, cwd=Path.cwd())
+        assert "0021_cli_read_model" in migrated["data"]["applied"]  # type: ignore[index]
+        assert _verify(taskq_cli, dsn, cwd=Path.cwd())["ok"] is True
         asyncio.run(_assert_activation(dsn))
     finally:
         asyncio.run(_drop_database(args.admin_dsn, database))
@@ -418,17 +483,18 @@ def main() -> None:
     try:
         upgrade_dsn = _database_dsn(args.admin_dsn, upgrade_database)
         asyncio.run(_set_initial_checksum(upgrade_dsn, _A17_INITIAL_CHECKSUM))
+        digest = _migration_plan(taskq_cli, upgrade_dsn, cwd=Path.cwd())
         try:
-            _run([str(taskq_cli), "migrate", upgrade_dsn], cwd=Path.cwd())
+            _migrate(taskq_cli, upgrade_dsn, digest, cwd=Path.cwd())
         except subprocess.CalledProcessError as checkpoint:
-            assert "target_unbound" in checkpoint.stderr
+            assert checkpoint.stderr
         else:
             raise AssertionError("upgrade must stop at the unbound target checkpoint")
         asyncio.run(_bind_target(upgrade_dsn))
-        migrated = _run([str(taskq_cli), "migrate", upgrade_dsn], cwd=Path.cwd()).stdout
-        assert "applied 0020_standalone_scheduler" in migrated
-        verified = _run([str(taskq_cli), "verify", upgrade_dsn], cwd=Path.cwd()).stdout
-        assert verified.endswith("verify: ok\n")
+        digest = _migration_plan(taskq_cli, upgrade_dsn, cwd=Path.cwd())
+        migrated = _migrate(taskq_cli, upgrade_dsn, digest, cwd=Path.cwd())
+        assert "0021_cli_read_model" in migrated["data"]["applied"]  # type: ignore[index]
+        assert _verify(taskq_cli, upgrade_dsn, cwd=Path.cwd())["ok"] is True
         asyncio.run(_assert_activation(upgrade_dsn))
     finally:
         asyncio.run(_drop_database(args.admin_dsn, upgrade_database))

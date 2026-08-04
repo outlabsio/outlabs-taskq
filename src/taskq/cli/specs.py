@@ -1,0 +1,308 @@
+"""Single command catalog used by help, agent discovery, and parity tests."""
+
+from __future__ import annotations
+
+from taskq.protocol import EnqueueCommand
+
+from .models import (
+    CliCommandSpec,
+    CliDataOutput,
+    CliEmptyInput,
+    CliQueueProfileInput,
+    CliWorkflowCreateInput,
+)
+
+
+def _s(
+    path: str,
+    summary: str,
+    transports: tuple[str, ...] = (),
+    *,
+    capability: str | None = None,
+    role: str | None = None,
+    mutates: bool = False,
+    destructive: bool = False,
+    input_model: object = CliEmptyInput,
+    output_model: object = CliDataOutput,
+    examples: tuple[str, ...] = (),
+) -> CliCommandSpec:
+    return CliCommandSpec(
+        path=path,
+        summary=summary,
+        transports=transports,  # type: ignore[arg-type]
+        capability=capability,
+        role=role,
+        mutates=mutates,
+        destructive=destructive,
+        input_model=input_model,  # type: ignore[arg-type]
+        output_model=output_model,  # type: ignore[arg-type]
+        examples=examples,
+    )
+
+
+_BOTH = ("sql", "http")
+_SQL = ("sql",)
+
+COMMAND_SPECS = {
+    item.path: item
+    for item in (
+        _s("version", "Show client and optional remote contract versions", _BOTH),
+        _s("doctor", "Run safe connectivity, target, contract, and scheduler checks", _BOTH),
+        _s("capabilities", "Show server capabilities and available CLI commands", _BOTH),
+        _s("commands", "Emit the stable command catalog"),
+        _s("schema", "Emit one command's machine-readable schema"),
+        _s("completion", "Generate shell completion source"),
+        _s("context.list", "List configured connection contexts"),
+        _s("context.show", "Show one redacted context"),
+        _s("context.validate", "Validate the secret-free context file"),
+        _s("db.plan", "Plan packaged schema migrations", _SQL, role="taskq_owner"),
+        _s(
+            "db.migrate",
+            "Apply a reviewed migration plan",
+            _SQL,
+            role="taskq_owner",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("db.verify", "Verify exact TaskQ catalog and migration drift", _SQL),
+        _s("target.show", "Show the safe target fingerprint", _BOTH, role="taskq_observer"),
+        _s(
+            "target.bind",
+            "Bind or rotate a database target identity",
+            _SQL,
+            role="taskq_owner",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("queue.list", "List queue statistics", _BOTH, role="taskq_observer"),
+        _s("queue.show", "Show a queue profile", _BOTH, role="taskq_observer"),
+        _s(
+            "queue.ensure",
+            "Create or reconcile a queue profile",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            input_model=CliQueueProfileInput,
+        ),
+        _s(
+            "queue.update",
+            "CAS-update an existing queue profile",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            input_model=CliQueueProfileInput,
+        ),
+        _s("queue.pause", "Pause queue claims", _BOTH, role="taskq_operator", mutates=True),
+        _s("queue.resume", "Resume queue claims", _BOTH, role="taskq_operator", mutates=True),
+        _s(
+            "queue.purge",
+            "Boundedly purge queued jobs",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s(
+            "queue.redrive-failed",
+            "Boundedly redrive failed jobs",
+            _SQL,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("job.list", "List a finite queue-scoped job view", _BOTH, role="taskq_observer"),
+        _s("job.show", "Show bounded job detail", _BOTH, role="taskq_observer"),
+        _s(
+            "job.events",
+            "List a job's bounded event timeline",
+            _BOTH,
+            capability="read_model_job_events",
+            role="taskq_observer",
+        ),
+        _s(
+            "job.enqueue",
+            "Enqueue one validated job",
+            _BOTH,
+            role="taskq_producer",
+            mutates=True,
+            input_model=EnqueueCommand,
+        ),
+        _s(
+            "job.enqueue-many",
+            "Enqueue a validated keyed batch",
+            _BOTH,
+            role="taskq_producer",
+            mutates=True,
+        ),
+        _s("job.cancel", "Cancel one job", _BOTH, role="taskq_operator", mutates=True),
+        _s("job.redrive", "Redrive one failed job", _BOTH, role="taskq_operator", mutates=True),
+        _s(
+            "job.run-now",
+            "Move one queued job to now",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
+            "job.reprioritize",
+            "CAS-safe reprioritize one job",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
+            "job.expire",
+            "Expire one running lease",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("job.watch", "Stream job state changes", _BOTH, role="taskq_observer"),
+        _s("job.wait", "Wait for a finite job status", _BOTH, role="taskq_observer"),
+        _s(
+            "worker.run",
+            "Run a supervised SQL or HTTP worker",
+            _BOTH,
+            role="taskq_runner",
+            mutates=True,
+        ),
+        _s("worker.list", "List bounded worker presence", _BOTH, role="taskq_observer"),
+        _s(
+            "worker.shutdown",
+            "Request worker shutdown",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
+            "worker.expire-leases",
+            "Expire a worker's active leases",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s(
+            "workflow.list",
+            "List bounded workflow summaries",
+            _BOTH,
+            capability="read_model_workflow_list",
+            role="taskq_observer",
+        ),
+        _s("workflow.show", "Show workflow state and members", _BOTH, role="taskq_observer"),
+        _s(
+            "workflow.create",
+            "Create an idempotent workflow",
+            _BOTH,
+            role="taskq_producer",
+            mutates=True,
+            input_model=CliWorkflowCreateInput,
+        ),
+        _s(
+            "workflow.seal",
+            "Seal a workflow",
+            _BOTH,
+            role="taskq_producer",
+            mutates=True,
+        ),
+        _s(
+            "workflow.cancel",
+            "Request cascading workflow cancellation",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("workflow.watch", "Stream workflow state changes", _BOTH, role="taskq_observer"),
+        _s("workflow.wait", "Wait for a finite workflow status", _BOTH, role="taskq_observer"),
+        _s(
+            "schedule.list",
+            "List bounded schedule summaries",
+            _BOTH,
+            capability="operator_schedule_list",
+            role="taskq_operator",
+        ),
+        _s("schedule.show", "Show one schedule", _BOTH, role="taskq_operator"),
+        _s(
+            "schedule.pause",
+            "CAS-pause one schedule",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
+            "schedule.resume",
+            "CAS-resume one schedule",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
+            "schedule.retire",
+            "CAS-retire one schedule",
+            _BOTH,
+            role="taskq_operator",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("schedule.watch", "Stream schedule state changes", _BOTH, role="taskq_operator"),
+        _s("schedule.wait", "Wait for a finite schedule state", _BOTH, role="taskq_operator"),
+        _s("schedule.manifest.plan", "Plan a source-owned schedule manifest", _SQL),
+        _s("schedule.manifest.apply", "Apply a reviewed manifest plan", _SQL, mutates=True),
+        _s(
+            "schedule.manifest.retire",
+            "Retire one source-owned manifest key",
+            _SQL,
+            mutates=True,
+            destructive=True,
+        ),
+        _s(
+            "scheduler.run",
+            "Run the standalone scheduler",
+            _SQL,
+            role="taskq_housekeeper",
+            mutates=True,
+        ),
+        _s(
+            "scheduler.once",
+            "Run a bounded scheduler pass",
+            _SQL,
+            role="taskq_housekeeper",
+            mutates=True,
+        ),
+        _s(
+            "scheduler.doctor",
+            "Inspect scheduler target and advancement",
+            _BOTH,
+            role="taskq_observer",
+        ),
+        _s(
+            "maintenance.tick",
+            "Run one bounded housekeeper tick",
+            _SQL,
+            role="taskq_housekeeper",
+            mutates=True,
+        ),
+        _s(
+            "maintenance.janitor",
+            "Run retention janitor passes",
+            _SQL,
+            role="taskq_housekeeper",
+            mutates=True,
+            destructive=True,
+        ),
+        _s("auth.plan", "Plan OutLabs IAM permission changes", _SQL),
+        _s(
+            "auth.apply",
+            "Apply reviewed OutLabs IAM permission changes",
+            _SQL,
+            mutates=True,
+            destructive=True,
+        ),
+        _s("metrics", "Render TaskQ metrics", _BOTH, role="taskq_observer"),
+    )
+}
+
+
+__all__ = ["COMMAND_SPECS"]

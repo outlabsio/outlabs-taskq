@@ -66,20 +66,26 @@ from taskq.protocol import (
     HttpCommandSpec,
     HttpSurface,
     JobDetail,
+    JobEventPageWireData,
+    JobPageWireData,
     PROTOCOL_MAJOR,
     RetryClass,
     QueueControlOutcome,
     QueueStatsWireData,
     ScheduleDefinition,
     ScheduleHttpWriteResult,
+    ScheduleListPageWireData,
     ScheduleWireData,
+    SchedulerHealth,
     SettleResult,
     SettleWireData,
     TqCode,
     TQ_ERROR_REGISTRY,
+    TargetIdentityProfile,
     WorkerPresenceWireData,
     WorkflowCancelWireRequest,
     WorkflowKind,
+    WorkflowListPageWireData,
     WorkflowResult,
     WorkflowWireData,
     WorkflowPageWireData,
@@ -481,6 +487,14 @@ class AsyncTaskqHttpClient:
             raise taskq_error_from_code(TqCode.VERSION, details={"protocol": PROTOCOL_MAJOR})
         return ContractMeta.model_validate(data)
 
+    async def get_target_identity(self) -> TargetIdentityProfile:
+        outcome, data, _ = await self._request(HttpCommandName.TARGET)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.TARGET], outcome, data)
+
+    async def get_scheduler_health(self) -> SchedulerHealth:
+        outcome, data, _ = await self._request(HttpCommandName.SCHEDULER_HEALTH)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.SCHEDULER_HEALTH], outcome, data)
+
     async def reserve_admission(
         self,
         queue: str,
@@ -590,12 +604,72 @@ class AsyncTaskqHttpClient:
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_WORKFLOW_PAGE], outcome, data)
 
+    async def list_workflows(
+        self, view: Literal["running", "finished"], *, limit: int = 50, cursor: str | None = None
+    ) -> WorkflowListPageWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.LIST_WORKFLOWS,
+            query={"view": view, "limit": limit, **({"cursor": cursor} if cursor else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_WORKFLOWS], outcome, data)
+
+    async def list_job_events(
+        self,
+        job_id: UUID,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+        include_details: bool = False,
+    ) -> JobEventPageWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.LIST_JOB_EVENTS,
+            path_params={"job_id": job_id},
+            query={
+                "limit": limit,
+                "include_details": include_details,
+                **({"cursor": cursor} if cursor else {}),
+            },
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_JOB_EVENTS], outcome, data)
+
+    async def list_jobs(
+        self,
+        queue: str,
+        view: str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> JobPageWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.LIST_JOBS,
+            query={
+                "queue": queue,
+                "view": view,
+                "limit": limit,
+                **({"cursor": cursor} if cursor else {}),
+            },
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_JOBS], outcome, data)
+
     async def get_schedule(self, name: str) -> ScheduleWireData:
         outcome, data, _ = await self._request(
             HttpCommandName.GET_SCHEDULE,
             path_params={"name": name},
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_SCHEDULE], outcome, data)
+
+    async def list_schedules(
+        self,
+        view: Literal["active", "paused", "retired"],
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> ScheduleListPageWireData:
+        outcome, data, _ = await self._request(
+            HttpCommandName.LIST_SCHEDULES,
+            query={"view": view, "limit": limit, **({"cursor": cursor} if cursor else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_SCHEDULES], outcome, data)
 
     async def put_schedule(
         self,
@@ -1081,6 +1155,14 @@ class TaskqHttpClient:
             raise taskq_error_from_code(TqCode.VERSION, details={"protocol": PROTOCOL_MAJOR})
         return ContractMeta.model_validate(data)
 
+    def get_target_identity(self) -> TargetIdentityProfile:
+        outcome, data, _ = self._request(HttpCommandName.TARGET)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.TARGET], outcome, data)
+
+    def get_scheduler_health(self) -> SchedulerHealth:
+        outcome, data, _ = self._request(HttpCommandName.SCHEDULER_HEALTH)
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.SCHEDULER_HEALTH], outcome, data)
+
     def reserve_admission(
         self,
         queue: str,
@@ -1190,12 +1272,72 @@ class TaskqHttpClient:
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_WORKFLOW_PAGE], outcome, data)
 
+    def list_workflows(
+        self, view: Literal["running", "finished"], *, limit: int = 50, cursor: str | None = None
+    ) -> WorkflowListPageWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.LIST_WORKFLOWS,
+            query={"view": view, "limit": limit, **({"cursor": cursor} if cursor else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_WORKFLOWS], outcome, data)
+
+    def list_job_events(
+        self,
+        job_id: UUID,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+        include_details: bool = False,
+    ) -> JobEventPageWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.LIST_JOB_EVENTS,
+            path_params={"job_id": job_id},
+            query={
+                "limit": limit,
+                "include_details": include_details,
+                **({"cursor": cursor} if cursor else {}),
+            },
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_JOB_EVENTS], outcome, data)
+
+    def list_jobs(
+        self,
+        queue: str,
+        view: str,
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> JobPageWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.LIST_JOBS,
+            query={
+                "queue": queue,
+                "view": view,
+                "limit": limit,
+                **({"cursor": cursor} if cursor else {}),
+            },
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_JOBS], outcome, data)
+
     def get_schedule(self, name: str) -> ScheduleWireData:
         outcome, data, _ = self._request(
             HttpCommandName.GET_SCHEDULE,
             path_params={"name": name},
         )
         return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.GET_SCHEDULE], outcome, data)
+
+    def list_schedules(
+        self,
+        view: Literal["active", "paused", "retired"],
+        *,
+        limit: int = 50,
+        cursor: str | None = None,
+    ) -> ScheduleListPageWireData:
+        outcome, data, _ = self._request(
+            HttpCommandName.LIST_SCHEDULES,
+            query={"view": view, "limit": limit, **({"cursor": cursor} if cursor else {})},
+        )
+        return _decode_domain(HTTP_COMMAND_SPECS[HttpCommandName.LIST_SCHEDULES], outcome, data)
 
     def put_schedule(
         self,

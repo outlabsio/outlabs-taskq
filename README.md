@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a23`** uses SQL contract **`0.3.0`**. It adds managed-PostgreSQL owner installation support to the standalone scheduler, database-attested target safety, source-owned YAML manifests, durable schedule decisions, overlap/lateness policy, and deterministic-definition auto-pause. It retains the published 0.1.0a21 optional OutLabsAuth compatibility range.
+**Status:** alpha — **`0.1.0a25`** uses SQL contract **`0.3.1`** and Protocol revision **`1.0.16`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migration `0021` adds bounded job-event, workflow, schedule, and missing job-view projections.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -12,12 +12,15 @@ Start here:
 
 | Doc | What it is |
 |---|---|
+| [`docs/CLI.md`](docs/CLI.md) | Operator/agent CLI contract, contexts, output, safety, and command catalog |
+| [`docs/CLI-MIGRATION.md`](docs/CLI-MIGRATION.md) | Intentional alpha grammar migration; there are no compatibility aliases |
 | [`docs/adr/`](docs/adr/README.md) | Accepted reusable architecture decisions |
 | [`docs/Task Queue 0.1 Function Manifest.md`](docs/Task%20Queue%200.1%20Function%20Manifest.md) | **Canonical 0.1 SQL surface** — migration 0001 derives from this |
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
-| [`docs/RELEASE-0.1.0a23.md`](docs/RELEASE-0.1.0a23.md) | 0.1.0a23 managed-PostgreSQL installer fix and rollout checklist |
+| [`docs/RELEASE-0.1.0a25.md`](docs/RELEASE-0.1.0a25.md) | 0.1.0a25 complete operator read model and rollout checklist |
+| [`docs/RELEASE-0.1.0a24.md`](docs/RELEASE-0.1.0a24.md) | 0.1.0a24 CLI foundation and migration guide |
 | [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 standalone scheduler release notes and rollout checklist |
 | [`docs/TaskQ Standalone Scheduler Specification.md`](docs/TaskQ%20Standalone%20Scheduler%20Specification.md) | Owner-approved standalone scheduler, target-attestation, manifest, and evidence contract |
 | [`docs/RELEASE-0.1.0a21.md`](docs/RELEASE-0.1.0a21.md) | 0.1.0a21 compatible OutLabs Auth prerelease range and checklist |
@@ -29,22 +32,22 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a23
+pip install outlabs-taskq==0.1.0a25
 ```
 
 ## Credential handling
 
 Keep DSNs and HTTP credentials out of shell history and process arguments. Supply them through the
 process environment using a secret manager, container secret, or service supervisor, then omit the
-DSN from migration and verification commands:
+DSN from commands. A context stores only the environment-variable name:
 
 ```bash
-# TASKQ_DSN is supplied by the deployment environment.
-taskq migrate
-taskq verify
+# TASKQ_STAGING_DSN is supplied by the deployment environment.
+taskq --context staging db plan -o json
+taskq --context staging db verify
 ```
 
-`taskq migrate` requires a superuser or a managed database-owner role with
+`taskq db migrate` requires a superuser or a managed database-owner role with
 `CREATEROLE`. On PostgreSQL 16/18, the installer bootstraps `taskq_owner` and
 retains owner membership on that migration role so later owner-only binding
 and upgrades work. This must be a dedicated owner/migration credential: never
@@ -55,26 +58,29 @@ Migration `0019` deliberately stops at an unbound target before scheduler
 activation. Inspect and bind the safe fingerprint, then resume migration:
 
 ```bash
-taskq migrate
-taskq target show --json
-taskq target bind staging --actor release-agent \
+PLAN=$(taskq --context staging db plan -o json)
+# Review PLAN and extract data.plan_digest.
+taskq --context staging --yes db migrate --plan-digest "$PLAN_DIGEST"
+taskq --context staging target show -o json
+taskq --context staging --yes target bind staging \
   --expected-installation-id "$TASKQ_INSTALLATION_ID" \
   --expected-binding-version 0
-taskq migrate
-taskq verify
+taskq --context staging db plan -o json
+taskq --context staging --yes db migrate --plan-digest "$PLAN_DIGEST"
+taskq --context staging db verify
 ```
 
 Run the framework-neutral scheduler with static target expectations. The
 bounded mode is first-class for platform timers and scale-to-zero databases:
 
 ```bash
-TASKQ_EXPECTED_ENV=staging taskq scheduler
-TASKQ_EXPECTED_ENV=staging taskq scheduler --once --json
-taskq scheduler doctor --expected-environment staging --json
+taskq --context staging scheduler run
+taskq --context staging scheduler once -o json
+taskq --context staging scheduler doctor -o json
 
-taskq schedule plan examples/schedules.minimal.yaml --json
-taskq schedule apply examples/schedules.minimal.yaml \
-  --actor release-agent --expected-environment staging
+taskq --context staging schedule manifest plan examples/schedules.minimal.yaml -o json
+taskq --context staging schedule manifest apply examples/schedules.minimal.yaml \
+  --plan-digest "$PLAN_DIGEST"
 ```
 
 Activating or resuming an interval schedule is `from now`: the first scheduler
@@ -90,17 +96,17 @@ subscribe to multiple queues; TaskQ does not require one container per worker,
 queue, task, or schedule. Prefer existing local worker hosts unless a particular
 task has a documented cloud availability, latency, or network requirement.
 
-For a22/a23, every recurring source manifest must set `catchup: fire_once` or
+Every recurring source manifest must set `catchup: fire_once` or
 `catchup: fire_all` explicitly. Do not rely on the current `skip` default: the
 released SQL contract intentionally accepts only zero occurrences for that
 policy, so continuous polling advances without enqueueing. A corrected
 `skip_missed` semantic requires a new SQL migration and compatibility audit; it
 is not being patched only in Python.
 
-Workers read `TASKQ_DSN` for direct SQL, or `TASKQ_HTTP_BASE_URL` with exactly one of
-`TASKQ_HTTP_BEARER_TOKEN` or the `TASKQ_HTTP_HEADER_NAME`/`TASKQ_HTTP_HEADER_VALUE` pair. OutLabs IAM
-provisioning reads `TASKQ_AUTH_DSN`. Command-line credential arguments remain available for
-compatibility, but password-bearing DSNs and explicit token/value flags emit a secret-free warning.
+Worker services may still use their runtime settings. Operator CLI commands require an explicit
+context or complete connection flags; they never infer a current context or endpoint. HTTP contexts
+store a bearer-token environment-variable name, never a literal token or arbitrary header value.
+OutLabs IAM provisioning reads `TASKQ_AUTH_DSN`.
 
 Use `https://` for traffic that leaves a protected private network. The mounted facade intentionally
 publishes its public wire contract at `/taskq/openapi.json`; deployments that do not want that route
@@ -110,7 +116,7 @@ reachable should gate it at the host application or reverse proxy.
 
 ```
 src/taskq/
-  sql/           # migrations 0001-0020, runner/verifier, manifest, SQL transport
+  sql/           # migrations 0001-0021, runner/verifier, manifest, SQL transport
   scheduler.py   # standalone runtime, bounded mode, doctor, YAML plan/apply
   protocol.py    # closed command/outcome/error single-source (Tier-0 parity-tested)
   continuations.py # pure policy compiler, negotiation, and derived identities
@@ -120,7 +126,7 @@ src/taskq/
   worker.py      # supervisor + fair poll/presence/shutdown service
   settings.py    # secret-safe worker environment/CLI configuration
   testing.py     # fake client, enqueue assertions, direct work, inline and drain helpers
-  cli.py         # migrate / verify / target / worker / scheduler / schedule
+  cli/            # Click registry, contexts, transports, safety, output, errors
   http/          # optional clients, mounted facade, composable runtime/lifespan
 ```
 

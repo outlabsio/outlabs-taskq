@@ -53,6 +53,7 @@ from taskq.protocol import (
     Followup,
     HeartbeatResult,
     JobDetail,
+    JobEventPage,
     JobPage,
     ManagedScheduleProfile,
     Metric,
@@ -65,6 +66,7 @@ from taskq.protocol import (
     ScheduleClaim,
     ScheduleClaimResult,
     ScheduleDefinition,
+    ScheduleListPage,
     ScheduleProfile,
     SchedulerHealth,
     ScheduleWriteResult,
@@ -73,6 +75,7 @@ from taskq.protocol import (
     TargetIdentityProfile,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowListPage,
     WorkflowPage,
     WorkflowResult,
     WorkerPresencePage,
@@ -143,6 +146,27 @@ _SCHEDULE_CLAIM_FIELDS = (
     "token",
     "lease_seconds",
 )
+_JOB_EVENT_FIELDS = (
+    "event_id",
+    "event_type",
+    "actor",
+    "created_at",
+    "message",
+    "data",
+)
+_WORKFLOW_LIST_FIELDS = (
+    "workflow_id",
+    "workflow_key",
+    "kind",
+    "status",
+    "sealed",
+    "cancel_requested",
+    "declared_queues",
+    "created_at",
+    "updated_at",
+    "finished_at",
+)
+_SCHEDULE_LIST_FIELDS = _SCHEDULE_PROFILE_FIELDS
 
 METHOD_FUNCTIONS = MappingProxyType(
     {command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()}
@@ -1089,6 +1113,60 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def list_job_events(
+        self,
+        job_id: UUID,
+        *,
+        limit: int = 50,
+        after: int | None = None,
+        include_details: bool = False,
+    ) -> JobEventPage:
+        async def operation(conn: AsyncConnection) -> JobEventPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_job_events(:job_id, :limit, :after, :include_details)",
+                {
+                    "job_id": job_id,
+                    "limit": limit,
+                    "after": after,
+                    "include_details": include_details,
+                },
+            )
+            data = dict(row)
+            items: list[dict[str, Any]] = []
+            for value in data["items"]:
+                item = _nested_mapping(value, _JOB_EVENT_FIELDS)
+                item["data"] = _json(item["data"])
+                items.append(item)
+            data["items"] = items
+            return JobEventPage.model_validate(data)
+
+        return await self._run(operation)
+
+    async def list_workflows(
+        self,
+        view: Literal["running", "finished"],
+        *,
+        limit: int = 50,
+        after: Mapping[str, Any] | None = None,
+    ) -> WorkflowListPage:
+        async def operation(conn: AsyncConnection) -> WorkflowListPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_workflows(:view, :limit, CAST(:after AS jsonb))",
+                {
+                    "view": view,
+                    "limit": limit,
+                    "after": _json_param(after) if after else None,
+                },
+            )
+            data = dict(row)
+            data["items"] = [_nested_mapping(item, _WORKFLOW_LIST_FIELDS) for item in data["items"]]
+            data["next_after"] = _json(data["next_after"])
+            return WorkflowListPage.model_validate(data)
+
+        return await self._run(operation)
+
     async def list_worker_presence(
         self,
         *,
@@ -1119,6 +1197,8 @@ class SqlTaskqTransport:
                 conn, "SELECT * FROM taskq.get_queue_profile(:queue)", {"queue": queue}
             )
             row = rows[0] if rows else None
+            if row is not None and row["name"] is None:
+                return None
             return QueueProfile.model_validate(row) if row is not None else None
 
         return await self._run(operation)
@@ -1447,6 +1527,32 @@ class SqlTaskqTransport:
         async def operation(conn: AsyncConnection) -> ScheduleProfile:
             row = await self._one(conn, "SELECT * FROM taskq.get_schedule(:name)", {"name": name})
             return _schedule_profile(row)
+
+        return await self._run(operation, connection=connection)
+
+    async def list_schedules(
+        self,
+        view: Literal["active", "paused", "retired"],
+        *,
+        limit: int = 50,
+        after: str | None = None,
+        connection: AsyncConnection | None = None,
+    ) -> ScheduleListPage:
+        async def operation(conn: AsyncConnection) -> ScheduleListPage:
+            row = await self._one(
+                conn,
+                "SELECT * FROM taskq.list_schedules(:view, :limit, :after)",
+                {"view": view, "limit": limit, "after": after},
+            )
+            data = dict(row)
+            items = []
+            for value in data["items"]:
+                item = _nested_mapping(value, _SCHEDULE_LIST_FIELDS)
+                item["target"] = _json(item["target"])
+                item["recurrence"] = _json(item["recurrence"])
+                items.append(item)
+            data["items"] = items
+            return ScheduleListPage.model_validate(data)
 
         return await self._run(operation, connection=connection)
 

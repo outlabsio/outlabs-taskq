@@ -53,6 +53,7 @@ from pydantic import BaseModel
 from sqlalchemy import bindparam, text
 
 from taskq import __version__
+from taskq.errors import TaskqConfigError
 from taskq.sql import manifest as _manifest
 from taskq.sql.effects import (
     ActiveEffectAttempt,
@@ -383,7 +384,12 @@ def _ensure_installer_owner_membership(conn: Connection) -> None:
         )
 
 
-def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = None) -> list[str]:
+def _migrate_impl(
+    conn: Connection,
+    migrations: Sequence[Migration] | None = None,
+    *,
+    expected_pending: Sequence[tuple[str, str]] | None = None,
+) -> list[str]:
     if migrations is None:
         migrations = discover_migrations()
     owns_txn = not conn.in_transaction()
@@ -392,6 +398,10 @@ def _migrate_impl(conn: Connection, migrations: Sequence[Migration] | None = Non
     try:
         _validate_reserved_roles(conn)
         pending = plan_pending(migrations, _applied_ids(conn))
+        if expected_pending is not None and tuple(
+            (migration.id, migration.checksum) for migration in pending
+        ) != tuple(expected_pending):
+            raise TaskqConfigError("migration plan drifted while holding the migration lock")
         if owns_txn:
             conn.commit()  # close the probe txn; each migration gets its own
         applied: list[str] = []

@@ -27,6 +27,7 @@ from taskq.protocol import (
     Followup,
     HeartbeatResult,
     JobDetail,
+    JobEventPage,
     JobPage,
     ManagedScheduleProfile,
     Metric,
@@ -38,12 +39,15 @@ from taskq.protocol import (
     ScheduleAuthorizationProjection,
     ScheduleClaimResult,
     ScheduleDefinition,
+    ScheduleListPage,
     ScheduleProfile,
+    SchedulerHealth,
     ScheduleWriteResult,
     SettleResult,
     TargetIdentityProfile,
     WorkflowAuthorizationProjection,
     WorkflowKind,
+    WorkflowListPage,
     WorkflowPage,
     WorkflowResult,
     WorkerPresencePage,
@@ -199,6 +203,10 @@ class RunnerTransport(ClosableTransport, Protocol):
 
 @runtime_checkable
 class ObserverTransport(ClosableTransport, Protocol):
+    async def get_target_identity(self) -> TargetIdentityProfile: ...
+
+    async def get_scheduler_health(self) -> SchedulerHealth: ...
+
     async def list_worker_presence(
         self,
         *,
@@ -210,6 +218,23 @@ class ObserverTransport(ClosableTransport, Protocol):
     async def list_jobs(
         self, queue: str, view: str, *, limit: int = 50, after: Mapping[str, Any] | None = None
     ) -> JobPage: ...
+
+    async def list_job_events(
+        self,
+        job_id: UUID,
+        *,
+        limit: int = 50,
+        after: int | None = None,
+        include_details: bool = False,
+    ) -> JobEventPage: ...
+
+    async def list_workflows(
+        self,
+        view: Literal["running", "finished"],
+        *,
+        limit: int = 50,
+        after: Mapping[str, Any] | None = None,
+    ) -> WorkflowListPage: ...
 
     async def get_queue_profile(self, queue: str) -> QueueProfile | None: ...
 
@@ -326,6 +351,13 @@ class HousekeeperTransport(ClosableTransport, Protocol):
 
 @runtime_checkable
 class ScheduleOperatorTransport(ClosableTransport, Protocol):
+    async def list_schedules(
+        self,
+        view: Literal["active", "paused", "retired"],
+        *,
+        limit: int = 50,
+        after: str | None = None,
+    ) -> ScheduleListPage: ...
     async def put_schedule(
         self,
         name: str,

@@ -68,21 +68,30 @@ def test_manifest_loader_rejects_duplicate_keys_and_unknown_configuration(tmp_pa
 class _ManifestTransport:
     def __init__(self) -> None:
         self.puts = 0
+        self.connections: list[object | None] = []
 
     async def list_managed_schedules(self, *_args: object, **_kwargs: object) -> list[object]:
+        self.connections.append(_kwargs.get("connection"))
         return []
 
     async def put_managed_schedule(self, *_args: object, **_kwargs: object) -> object:
         self.puts += 1
+        self.connections.append(_kwargs.get("connection"))
         return SimpleNamespace(outcome="created")
 
 
 async def test_manifest_plan_and_apply_are_create_only_without_implicit_pruning() -> None:
     transport = _ManifestTransport()
-    plan = await plan_manifest(transport, _manifest())  # type: ignore[arg-type]
+    connection = object()
+    plan = await plan_manifest(  # type: ignore[arg-type]
+        transport, _manifest(), connection=connection
+    )
     assert [(entry.key, entry.action) for entry in plan.entries] == [("cleanup", "create")]
-    result = await apply_manifest(transport, _manifest(), actor="test")  # type: ignore[arg-type]
+    result = await apply_manifest(  # type: ignore[arg-type]
+        transport, _manifest(), actor="test", connection=connection
+    )
     assert (result.created, result.updated, result.drift, transport.puts) == (1, 0, 0, 1)
+    assert transport.connections == [connection, connection, connection]
 
 
 class _EmptyHousekeeper:

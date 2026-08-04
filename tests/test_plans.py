@@ -148,6 +148,27 @@ _READ_MODEL_PLAN_QUERIES = {
          ORDER BY j.finished_at DESC, j.id DESC
          LIMIT 101
     """,
+    "scheduled": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.status = 'queued'
+           AND j.cancel_requested_at IS NULL AND j.scheduled_at > now()
+         ORDER BY j.scheduled_at, j.id
+         LIMIT 101
+    """,
+    "blocked": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.status = 'blocked'
+           AND j.cancel_requested_at IS NULL
+         ORDER BY j.created_at, j.id
+         LIMIT 101
+    """,
+    "cancel_requested": """
+        SELECT j.id FROM taskq.jobs j
+         WHERE j.queue = 'plan_a' AND j.cancel_requested_at IS NOT NULL
+           AND j.status IN ('blocked', 'queued', 'running')
+         ORDER BY j.cancel_requested_at DESC, j.id DESC
+         LIMIT 101
+    """,
     "workflow_members": """
         SELECT j.id FROM taskq.jobs j
          WHERE j.workflow_id = md5('workflow-plan:0')::uuid
@@ -159,6 +180,95 @@ _READ_MODEL_PLAN_QUERIES = {
           FROM taskq.workflow_member_counts
          WHERE workflow_id = md5('workflow-plan:0')::uuid
     """,
+    "workflows_running": """
+        SELECT w.id FROM taskq.workflows w
+         WHERE w.status = 'running'
+         ORDER BY w.updated_at DESC, w.id DESC
+         LIMIT 101
+    """,
+    "workflows_finished": """
+        SELECT w.id FROM taskq.workflows w
+         WHERE w.status <> 'running'
+         ORDER BY w.finished_at DESC, w.id DESC
+         LIMIT 101
+    """,
+    "schedules_active": """
+        SELECT s.id FROM taskq.schedules s
+         WHERE s.state = 'active' AND s.target->>'kind' = 'job'
+         ORDER BY s.name
+         LIMIT 101
+    """,
+    "schedules_paused": """
+        SELECT s.id FROM taskq.schedules s
+         WHERE s.state = 'paused' AND s.target->>'kind' = 'job'
+         ORDER BY s.name
+         LIMIT 101
+    """,
+    "schedules_retired": """
+        SELECT s.id FROM taskq.schedules s
+         WHERE s.state = 'retired' AND s.target->>'kind' = 'job'
+         ORDER BY s.name
+         LIMIT 101
+    """,
+}
+
+_READ_MODEL_PLAN_BINDINGS = {
+    "scheduled": PlanBinding(
+        functions=("taskq.list_jobs(text,text,integer,jsonb)",),
+        body_fragments=(
+            "j.status = 'queued' and j.cancel_requested_at is null and j.scheduled_at > v_as_of",
+            "order by j.scheduled_at,j.id limit p_limit + 1",
+        ),
+    ),
+    "blocked": PlanBinding(
+        functions=("taskq.list_jobs(text,text,integer,jsonb)",),
+        body_fragments=(
+            "j.status = 'blocked' and j.cancel_requested_at is null",
+            "order by j.created_at,j.id limit p_limit + 1",
+        ),
+    ),
+    "cancel_requested": PlanBinding(
+        functions=("taskq.list_jobs(text,text,integer,jsonb)",),
+        body_fragments=(
+            "j.cancel_requested_at is not null and j.status in ('blocked','queued','running')",
+            "order by j.cancel_requested_at desc,j.id desc limit p_limit + 1",
+        ),
+    ),
+    "workflows_running": PlanBinding(
+        functions=("taskq.list_workflows(text,integer,jsonb)",),
+        body_fragments=(
+            "where w.status = 'running'",
+            "order by w.updated_at desc,w.id desc limit p_limit + 1",
+        ),
+    ),
+    "workflows_finished": PlanBinding(
+        functions=("taskq.list_workflows(text,integer,jsonb)",),
+        body_fragments=(
+            "where w.status <> 'running'",
+            "order by w.finished_at desc,w.id desc limit p_limit + 1",
+        ),
+    ),
+    "schedules_active": PlanBinding(
+        functions=("taskq.list_schedules(text,integer,text)",),
+        body_fragments=(
+            "where s.state = p_view and s.target->>'kind' = 'job'",
+            "order by s.name limit p_limit + 1",
+        ),
+    ),
+    "schedules_paused": PlanBinding(
+        functions=("taskq.list_schedules(text,integer,text)",),
+        body_fragments=(
+            "where s.state = p_view and s.target->>'kind' = 'job'",
+            "order by s.name limit p_limit + 1",
+        ),
+    ),
+    "schedules_retired": PlanBinding(
+        functions=("taskq.list_schedules(text,integer,text)",),
+        body_fragments=(
+            "where s.state = p_view and s.target->>'kind' = 'job'",
+            "order by s.name limit p_limit + 1",
+        ),
+    ),
 }
 
 _PLAN_BINDINGS = {
@@ -263,6 +373,21 @@ async def _assert_hot_path_bindings(pg: asyncpg.Connection, names: set[str] | No
                 )
 
 
+async def _assert_read_model_bindings(pg: asyncpg.Connection) -> None:
+    assert set(_READ_MODEL_PLAN_BINDINGS) <= set(_READ_MODEL_PLAN_QUERIES)
+    for name, binding in sorted(_READ_MODEL_PLAN_BINDINGS.items()):
+        for identity in binding.functions:
+            definition = await pg.fetchval(
+                "SELECT pg_catalog.pg_get_functiondef($1::regprocedure::oid)", identity
+            )
+            normalized = _normalize_sql(definition)
+            for fragment in binding.body_fragments:
+                assert _normalize_sql(fragment) in normalized, (
+                    f"read-model plan binding {name!r} drifted from {identity}: "
+                    f"missing {fragment!r}"
+                )
+
+
 def _walk_plan(node: dict[str, Any]) -> Iterator[dict[str, Any]]:
     yield node
     for child in node.get("Plans", ()):  # PostgreSQL JSON plans are recursive trees.
@@ -319,7 +444,7 @@ async def _seed_million(pg: asyncpg.Connection) -> None:
             worker_id, current_attempt_id, attempt_count, failure_count,
             expiry_streak, max_attempts, backoff_mode, backoff_base_seconds,
             backoff_cap_seconds, outcome, created_at, updated_at, started_at,
-            finished_at
+            finished_at, cancel_requested_at
         )
         SELECT md5('plan-job:' || g::text)::uuid,
                CASE WHEN g % 2 = 0 THEN 'plan_a' ELSE 'plan_b' END,
@@ -355,7 +480,8 @@ async def _seed_million(pg: asyncpg.Connection) -> None:
                CASE WHEN status IN ('running','succeeded','failed','cancelled')
                     THEN now() - interval '90 minutes' END,
                CASE WHEN status IN ('succeeded','failed','cancelled')
-                    THEN now() - interval '1 hour' END
+                    THEN now() - interval '1 hour' END,
+               CASE WHEN status = 'queued' AND g % 200 = 0 THEN now() END
           FROM seed
         """
     )
@@ -375,15 +501,19 @@ async def _seed_workflow_plan_frontiers(pg: asyncpg.Connection) -> None:
         """
         INSERT INTO taskq.workflows (
             id, workflow_key, kind, status, params, stats, created_by,
-            declared_queues, sealed_at, sealed_by, created_at, updated_at
+            declared_queues, sealed_at, sealed_by, created_at, updated_at,
+            finished_at
         )
         SELECT md5('workflow-plan:' || g::text)::uuid,
                'workflow-plan-' || g::text,
-               'dag', 'running', '{}'::jsonb, '{}'::jsonb, 'plans',
+               'dag', CASE WHEN g < 1000 THEN 'running' ELSE 'succeeded' END,
+               '{}'::jsonb, '{}'::jsonb, 'plans',
                ARRAY['plan_a'], now(), 'plans',
                now() - interval '2 hours',
-               now() - interval '1 hour' + g * interval '1 microsecond'
-          FROM generate_series(0, 999) AS g
+               now() - interval '1 hour' + g * interval '1 microsecond',
+               CASE WHEN g < 1000 THEN NULL
+                    ELSE now() - interval '30 minutes' + g * interval '1 microsecond' END
+          FROM generate_series(0, 1999) AS g
         """
     )
     await pg.execute(
@@ -428,7 +558,8 @@ async def _seed_schedule_plan_frontier(pg: asyncpg.Connection) -> None:
         """
         INSERT INTO taskq.schedules (
             id, name, target, recurrence, catchup_policy, max_catchup, state,
-            initialized, next_fire_at, version, created_by, updated_by
+            initialized, next_fire_at, version, created_by, updated_by,
+            retired_at
         )
         SELECT md5('schedule-plan:' || g::text)::uuid,
                'schedule-plan-' || g::text,
@@ -438,10 +569,12 @@ async def _seed_schedule_plan_frontier(pg: asyncpg.Connection) -> None:
                '"backoff_cap":null,"concurrency_key":null,"affinity_key":null}'::jsonb,
                '{"kind":"interval","interval_seconds":3600}'::jsonb,
                'fire_all', 10,
-               CASE WHEN g % 10 = 0 THEN 'paused' ELSE 'active' END,
+               CASE WHEN g % 10 = 0 THEN 'retired'
+                    WHEN g % 5 = 0 THEN 'paused' ELSE 'active' END,
                true,
                now() - interval '1 hour' + g * interval '1 microsecond',
-               1, 'plans', 'plans'
+               1, 'plans', 'plans',
+               CASE WHEN g % 10 = 0 THEN now() ELSE NULL END
           FROM generate_series(1, 100000) AS g
         """
     )
@@ -471,6 +604,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
         pytest.skip("set TASKQ_PLAN_CHECKS=1 to seed 1M rows and run structural EXPLAIN checks")
 
     await _assert_hot_path_bindings(pg)
+    await _assert_read_model_bindings(pg)
     await _seed_million(pg)
     await _seed_workflow_plan_frontiers(pg)
     await _seed_schedule_plan_frontier(pg)
@@ -509,7 +643,14 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
         pg,
         _PLAN_QUERIES["ready_stats"],
     )
-    _assert_index_family(ready_stats, "jobs_claim_idx")
+    ready_stats_indexes = {
+        node.get("Index Name") for node in _walk_plan(ready_stats) if node.get("Index Name")
+    }
+    assert ready_stats_indexes & {"jobs_claim_idx", "taskq_jobs_scheduled_page_idx"}
+    assert not any(
+        node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "jobs"
+        for node in _walk_plan(ready_stats)
+    )
 
     running_stats = await _explain(
         pg,
@@ -555,8 +696,8 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
 
     # B9 / ADR-019/029: each finite view has its own queue/order or workflow
     # keyset index. Exact workflow counts are a single primary-key lookup, not
-    # a request-time member scan. Capability metadata remains unchanged until
-    # the separate immutable activation migration.
+    # a request-time member scan. Migration 0021 activates only the projections
+    # whose bounded shapes are asserted below.
     ready = await _explain(pg, _READ_MODEL_PLAN_QUERIES["ready"])
     _assert_index_family(ready, "jobs_claim_idx")
     assert not _sort_nodes(ready)
@@ -572,6 +713,16 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     assert not _sort_nodes(finished)
     assert finished["Actual Rows"] <= 101
 
+    for view, index_name in {
+        "scheduled": "taskq_jobs_scheduled_page_idx",
+        "blocked": "taskq_jobs_blocked_page_idx",
+        "cancel_requested": "taskq_jobs_cancel_requested_page_idx",
+    }.items():
+        plan = await _explain(pg, _READ_MODEL_PLAN_QUERIES[view])
+        _assert_index_family(plan, index_name)
+        assert not _sort_nodes(plan)
+        assert plan["Actual Rows"] <= 101
+
     workflow_members = await _explain(pg, _READ_MODEL_PLAN_QUERIES["workflow_members"])
     _assert_index_family(workflow_members, "taskq_jobs_workflow_page_idx")
     assert not _sort_nodes(workflow_members)
@@ -580,6 +731,35 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     workflow_counts = await _explain(pg, _READ_MODEL_PLAN_QUERIES["workflow_counts"])
     _assert_index_family(workflow_counts, "workflow_member_counts_pkey")
     assert workflow_counts["Actual Rows"] <= 1
+
+    for view, index_name in {
+        "workflows_running": "taskq_workflows_running_page_idx",
+        "workflows_finished": "taskq_workflows_finished_page_idx",
+    }.items():
+        plan = await _explain(pg, _READ_MODEL_PLAN_QUERIES[view])
+        indexes = {node.get("Index Name") for node in _walk_plan(plan)}
+        assert index_name in indexes
+        assert not _sort_nodes(plan)
+        assert plan["Actual Rows"] <= 101
+        assert not any(
+            node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "workflows"
+            for node in _walk_plan(plan)
+        )
+
+    for view, index_name in {
+        "schedules_active": "taskq_schedules_active_page_idx",
+        "schedules_paused": "taskq_schedules_paused_page_idx",
+        "schedules_retired": "taskq_schedules_retired_page_idx",
+    }.items():
+        plan = await _explain(pg, _READ_MODEL_PLAN_QUERIES[view])
+        indexes = {node.get("Index Name") for node in _walk_plan(plan)}
+        assert index_name in indexes
+        assert not _sort_nodes(plan)
+        assert plan["Actual Rows"] <= 101
+        assert not any(
+            node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "schedules"
+            for node in _walk_plan(plan)
+        )
 
     worker_presence = await _explain(pg, _PLAN_QUERIES["worker_presence"])
     worker_indexes = {
@@ -600,11 +780,17 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
             "admission_reservations",
             "dependencies_workflows",
             "followups",
+            "operator_schedule_list",
+            "read_model_job_events",
+            "read_model_job_views_v2",
             "read_model_list_finished",
             "read_model_list_ready",
             "read_model_list_running",
             "read_model_workflow",
+            "read_model_workflow_list",
+            "scheduler_v2",
             "schedules",
+            "target_attestation",
             "worker_presence",
             "workflow_continuations",
         ]

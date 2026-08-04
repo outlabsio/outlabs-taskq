@@ -63,6 +63,7 @@ async def test_benchmark_scenario_records_json(
         "0018_trusted_effect_fence",
         "0019_scheduler_target_identity",
         "0020_standalone_scheduler",
+        "0021_cli_read_model",
     ]
     assert len(result["runs"]) == (6 if scenario in {"B8", "B11"} else 3)
     assert result["summary"]["median_throughput_rows_per_second"] > 0

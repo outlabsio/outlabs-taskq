@@ -65,6 +65,7 @@ from taskq.protocol import (
     HttpCommandName,
     HttpCommandSpec,
     HttpSurface,
+    JobEventPage,
     PROTOCOL_MAJOR,
     PurgeWireRequest,
     QueueProfile,
@@ -74,6 +75,7 @@ from taskq.protocol import (
     ReleaseWireRequest,
     ReprioritizeWireRequest,
     ScheduleDefinition,
+    ScheduleListPage,
     ScheduleProfile,
     ScheduleWireData,
     ShutdownRequestWireRequest,
@@ -82,6 +84,7 @@ from taskq.protocol import (
     TqCode,
     WorkerPresenceWireRequest,
     WorkflowCancelWireRequest,
+    WorkflowListPage,
     WorkflowPage,
 )
 from taskq.transport import (
@@ -114,6 +117,7 @@ _OPERATOR_COMMANDS = frozenset(
         CommandName.CANCEL,
         CommandName.CANCEL_WORKFLOW,
         CommandName.GET_SCHEDULE,
+        CommandName.LIST_SCHEDULES,
         CommandName.PUT_SCHEDULE,
         CommandName.RETIRE_SCHEDULE,
         CommandName.REDRIVE,
@@ -140,7 +144,9 @@ _WORKFLOW_COMMANDS = frozenset(
         HttpCommandName.CANCEL_WORKFLOW,
     }
 )
-_WORKFLOW_READ_COMMANDS = frozenset({HttpCommandName.GET_WORKFLOW_PAGE})
+_WORKFLOW_READ_COMMANDS = frozenset(
+    {HttpCommandName.GET_WORKFLOW_PAGE, HttpCommandName.LIST_WORKFLOWS}
+)
 _SCHEDULE_COMMANDS = frozenset(
     {
         HttpCommandName.GET_SCHEDULE,
@@ -148,6 +154,7 @@ _SCHEDULE_COMMANDS = frozenset(
         HttpCommandName.RETIRE_SCHEDULE,
     }
 )
+_SCHEDULE_LIST_COMMANDS = frozenset({HttpCommandName.LIST_SCHEDULES})
 
 
 @dataclass(frozen=True, slots=True)
@@ -414,6 +421,40 @@ def _encode_worker_presence_cursor(
     return base64.urlsafe_b64encode(raw).decode().rstrip("=")
 
 
+def _decode_resource_cursor(value: str | None, *, resource: str, identity: str) -> Any:
+    if value is None:
+        return None
+    if len(value) > 1366 or not re.fullmatch(r"[A-Za-z0-9_-]+", value):
+        raise TaskqValidationError(details={"field": "cursor"})
+    try:
+        raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+        decoded = json.loads(raw)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise TaskqValidationError(details={"field": "cursor"}, cause=exc) from exc
+    if (
+        len(raw) > 1024
+        or not isinstance(decoded, dict)
+        or set(decoded) != {"after", "identity", "resource", "v"}
+        or decoded.get("v") != 1
+        or decoded.get("resource") != resource
+        or decoded.get("identity") != identity
+    ):
+        raise TaskqValidationError(details={"field": "cursor"})
+    return decoded["after"]
+
+
+def _encode_resource_cursor(value: Any, *, resource: str, identity: str) -> str | None:
+    if value is None:
+        return None
+    raw = json.dumps(
+        {"after": value, "identity": identity, "resource": resource, "v": 1},
+        sort_keys=True,
+        separators=(",", ":"),
+        default=str,
+    ).encode()
+    return base64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+
 def _path_uuid(request: Request, name: str = "job_id") -> UUID:
     try:
         return UUID(str(request.path_params[name]))
@@ -575,8 +616,16 @@ class _FacadeDispatcher:
             if name is HttpCommandName.GET_JOB
             else {"queue", "view", "limit", "cursor"}
             if name is HttpCommandName.LIST_JOBS
+            else {"view", "limit", "cursor"}
+            if name in {HttpCommandName.LIST_WORKFLOWS, HttpCommandName.LIST_SCHEDULES}
+            else {"limit", "cursor", "include_details"}
+            if name is HttpCommandName.LIST_JOB_EVENTS
             else {"limit", "cursor"}
-            if name in {HttpCommandName.GET_WORKFLOW_PAGE, HttpCommandName.LIST_WORKERS}
+            if name
+            in {
+                HttpCommandName.GET_WORKFLOW_PAGE,
+                HttpCommandName.LIST_WORKERS,
+            }
             else set()
         )
         if set(request.query_params) - allowed or any(
@@ -895,6 +944,16 @@ class _FacadeDispatcher:
 
         if name is HttpCommandName.META:
             return _command_response(request, spec, "ok", await r.observer.get_contract_meta())
+        if name is HttpCommandName.TARGET:
+            target = await r.observer.get_target_identity()
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                target.model_dump(exclude={"bound_at", "bound_by"}),
+            )
+        if name is HttpCommandName.SCHEDULER_HEALTH:
+            return _command_response(request, spec, "ok", await r.observer.get_scheduler_health())
         if name is HttpCommandName.RESERVE_ADMISSION:
             assert queue is not None and isinstance(body, AdmissionReserveRequest)
             result = await r.producer.reserve_admission(
@@ -1089,10 +1148,43 @@ class _FacadeDispatcher:
                     ),
                 },
             )
+        if name is HttpCommandName.LIST_WORKFLOWS:
+            view = request.query_params.get("view")
+            if view not in {"running", "finished"}:
+                raise TaskqValidationError(details={"field": "view"})
+            limit = _parse_page_limit(request.query_params.get("limit"))
+            after = _decode_resource_cursor(
+                request.query_params.get("cursor"),
+                resource="workflows",
+                identity=view,
+            )
+            if after is not None and not isinstance(after, dict):
+                raise TaskqValidationError(details={"field": "cursor"})
+            page: WorkflowListPage = await r.observer.list_workflows(view, limit=limit, after=after)
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                {
+                    "as_of": page.as_of,
+                    "items": page.items,
+                    "next_cursor": _encode_resource_cursor(
+                        page.next_after, resource="workflows", identity=view
+                    ),
+                },
+            )
         if name is HttpCommandName.LIST_JOBS:
             assert queue is not None
             view = request.query_params.get("view")
-            if view not in {"ready", "running", "finished"}:
+            if view not in {
+                "ready",
+                "scheduled",
+                "blocked",
+                "running",
+                "cancel_requested",
+                "failed",
+                "finished",
+            }:
                 raise TaskqValidationError(details={"field": "view"})
             limit = _parse_page_limit(request.query_params.get("limit"))
             after = _decode_cursor(request.query_params.get("cursor"), queue=queue, view=view)
@@ -1110,6 +1202,66 @@ class _FacadeDispatcher:
                     "as_of": page.as_of,
                     "items": page.items,
                     "next_cursor": _encode_cursor(page.next_after),
+                },
+            )
+        if name is HttpCommandName.LIST_JOB_EVENTS:
+            job_id = _path_uuid(request)
+            limit = _parse_page_limit(request.query_params.get("limit"))
+            include_details = _parse_bool(request, "include_details")
+            after = _decode_resource_cursor(
+                request.query_params.get("cursor"),
+                resource="job_events",
+                identity=str(job_id),
+            )
+            if after is not None and (
+                not isinstance(after, int) or isinstance(after, bool) or after < 1
+            ):
+                raise TaskqValidationError(details={"field": "cursor"})
+            page: JobEventPage = await r.observer.list_job_events(
+                job_id,
+                limit=limit,
+                after=after,
+                include_details=include_details,
+            )
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                {
+                    "as_of": page.as_of,
+                    "items": page.items,
+                    "next_cursor": _encode_resource_cursor(
+                        page.next_after,
+                        resource="job_events",
+                        identity=str(job_id),
+                    ),
+                },
+            )
+        if name is HttpCommandName.LIST_SCHEDULES:
+            view = request.query_params.get("view")
+            if view not in {"active", "paused", "retired"}:
+                raise TaskqValidationError(details={"field": "view"})
+            limit = _parse_page_limit(request.query_params.get("limit"))
+            after = _decode_resource_cursor(
+                request.query_params.get("cursor"),
+                resource="schedules",
+                identity=view,
+            )
+            if after is not None and not isinstance(after, str):
+                raise TaskqValidationError(details={"field": "cursor"})
+            if not isinstance(operator, ScheduleOperatorTransport):
+                raise TaskqCapabilityError(details={"capability": "operator_schedule_list"})
+            page: ScheduleListPage = await operator.list_schedules(view, limit=limit, after=after)
+            return _command_response(
+                request,
+                spec,
+                "ok",
+                {
+                    "as_of": page.as_of,
+                    "items": page.items,
+                    "next_cursor": _encode_resource_cursor(
+                        page.next_after, resource="schedules", identity=view
+                    ),
                 },
             )
         if name is HttpCommandName.LIST_WORKERS:
@@ -1544,6 +1696,8 @@ def create_taskq_app(
         if name in _WORKFLOW_READ_COMMANDS and not resources.workflow_read_enabled:
             continue
         if name in _SCHEDULE_COMMANDS and not resources.schedule_enabled:
+            continue
+        if name in _SCHEDULE_LIST_COMMANDS and not resources.schedule_enabled:
             continue
         if name in _OPERATOR_COMMANDS and operator_transport is None:
             continue
