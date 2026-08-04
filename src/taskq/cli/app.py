@@ -21,7 +21,11 @@ from pydantic import TypeAdapter
 from sqlalchemy import create_engine, text
 
 from taskq import __version__
-from taskq.errors import TaskqCapabilityError, TaskqConfigError
+from taskq.errors import (
+    TaskqCapabilityError,
+    TaskqConfigError,
+    taskq_error_from_exception,
+)
 from taskq.protocol import (
     EnqueueCommand,
     EnqueueManyItem,
@@ -41,7 +45,13 @@ from taskq.sql import discover_migrations
 from . import _runtime
 from .context import default_config_path, load_context_file, redacted_context, resolve_connection
 from .cursor import decode_cursor, encode_cursor
-from .errors import CliOperationError, CliSafetyError, CliTimeoutError, normalize_error
+from .errors import (
+    CliOperationError,
+    CliSafetyError,
+    CliTargetBindingRequired,
+    CliTimeoutError,
+    normalize_error,
+)
 from .models import CliMeta, CliSuccessEnvelope, OutputFormat, ResolvedConnection
 from .output import jsonable, render_error, render_success
 from .specs import COMMAND_SPECS
@@ -192,12 +202,17 @@ def _validate_target(
     *,
     mutates: bool,
     destructive: bool,
+    allow_unbound_environment: bool = False,
 ) -> None:
     environment = target.environment
     installation_id = target.installation_id
     if mutates and connection.expected_environment is None:
         raise CliSafetyError("mutation requires an explicit expected environment")
-    if connection.expected_environment and environment != connection.expected_environment:
+    if (
+        connection.expected_environment
+        and environment != connection.expected_environment
+        and not (allow_unbound_environment and environment == "unbound")
+    ):
         raise CliSafetyError("target environment does not match the selected context")
     if (
         connection.expected_installation_id
@@ -227,6 +242,7 @@ async def _transport_operation(
     destructive: bool | None = None,
     sensitive: bool = False,
     cursor: tuple[dict[str, Any], Callable[[Any], Any]] | None = None,
+    allow_unbound_environment: bool = False,
 ) -> Any:
     state.command = command
     spec = COMMAND_SPECS[command]
@@ -246,6 +262,7 @@ async def _transport_operation(
             target,
             mutates=effective_mutation,
             destructive=spec.destructive if destructive is None else destructive,
+            allow_unbound_environment=allow_unbound_environment,
         )
         if spec.capability is not None:
             active = set((await transport.meta()).capabilities.get("active", ()))
@@ -711,7 +728,27 @@ def db_migrate_command(state: CliState, plan_digest: str) -> None:
             destructive=True,
         )
     expected_pending = tuple((str(item["id"]), str(item["checksum"])) for item in plan["pending"])
-    applied = _runtime._run_migrate(dsn, expected_pending)
+    try:
+        applied = _runtime._run_migrate(dsn, expected_pending)
+    except TaskqConfigError:
+        raise
+    except Exception as exc:
+        try:
+            current = _migration_plan(dsn)
+        except Exception:
+            raise taskq_error_from_exception(exc) from exc
+        current_target = current.get("target")
+        current_pending = current.get("pending")
+        if (
+            isinstance(current_target, dict)
+            and current_target.get("environment") == "unbound"
+            and isinstance(current_pending, list)
+            and current_pending
+            and isinstance(current_pending[0], dict)
+            and current_pending[0].get("id") == "0020_standalone_scheduler"
+        ):
+            raise CliTargetBindingRequired() from exc
+        raise taskq_error_from_exception(exc) from exc
     state.emit(
         "db.migrate",
         "MigrationResult",
@@ -741,7 +778,15 @@ def target_show_command(state: CliState) -> None:
     async def operation(transport: CliTransport) -> Any:
         return await transport.target()
 
-    _run(_transport_operation(state, "target.show", "TargetIdentity", operation))
+    _run(
+        _transport_operation(
+            state,
+            "target.show",
+            "TargetIdentity",
+            operation,
+            allow_unbound_environment=True,
+        )
+    )
 
 
 @target_group.command("bind")
