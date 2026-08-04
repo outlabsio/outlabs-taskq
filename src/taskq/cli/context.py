@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -13,6 +14,9 @@ from pydantic import SecretStr, ValidationError
 from taskq.errors import TaskqConfigError
 
 from .models import ContextDefinition, ContextFile, ResolvedConnection
+
+
+_ENVIRONMENT_VARIABLE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def default_config_path() -> Path:
@@ -53,6 +57,14 @@ def _secret_from_environment(name: str | None, *, label: str) -> SecretStr | Non
     return SecretStr(value)
 
 
+def _validated_environment_variable_name(name: str | None, *, label: str) -> str | None:
+    if name is None:
+        return None
+    if not _ENVIRONMENT_VARIABLE_NAME.fullmatch(name):
+        raise TaskqConfigError(f"{label} must be an environment-variable name")
+    return name
+
+
 def _validated_http_url(value: str) -> str:
     parsed = urlsplit(value)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
@@ -67,6 +79,7 @@ def resolve_connection(
     context_name: str | None,
     config_path: str | Path | None,
     dsn: str | None = None,
+    dsn_env: str | None = None,
     http_base_url: str | None = None,
     http_bearer_token: str | None = None,
     http_header_name: str | None = None,
@@ -75,6 +88,10 @@ def resolve_connection(
     expected_installation_id: UUID | None = None,
     actor: str | None = None,
 ) -> ResolvedConnection:
+    dsn_env = _validated_environment_variable_name(dsn_env, label="DSN environment variable")
+    if dsn is not None and dsn_env is not None:
+        raise TaskqConfigError("configure exactly one of --dsn or --dsn-env")
+
     definition: ContextDefinition | None = None
     if context_name is not None:
         context_file = load_context_file(config_path)
@@ -107,20 +124,21 @@ def resolve_connection(
     # Endpoint and target selection are always explicit. Environment variables
     # may carry credentials and the direct-SQL actor, never target constraints.
     explicit_sql = dsn
+    explicit_sql_env = dsn_env
     explicit_http = http_base_url
-    if explicit_sql and explicit_http:
-        raise TaskqConfigError("configure exactly one of SQL DSN or HTTP base URL")
+    if (explicit_sql or explicit_sql_env) and explicit_http:
+        raise TaskqConfigError("configure exactly one of SQL DSN source or HTTP base URL")
 
     if definition is not None:
-        if explicit_sql or explicit_http:
-            explicit_transport = "sql" if explicit_sql else "http"
+        if explicit_sql or explicit_sql_env or explicit_http:
+            explicit_transport = "sql" if explicit_sql or explicit_sql_env else "http"
             if explicit_transport != definition.transport:
                 raise TaskqConfigError("explicit transport conflicts with selected context")
         if definition.transport == "sql":
             resolved_dsn = (
                 SecretStr(explicit_sql)
                 if explicit_sql
-                else _secret_from_environment(definition.dsn_env, label="DSN")
+                else _secret_from_environment(explicit_sql_env or definition.dsn_env, label="DSN")
             )
             auth_dsn = (
                 _secret_from_environment(definition.auth_dsn_env, label="auth DSN")
@@ -174,10 +192,14 @@ def resolve_connection(
             actor=final_actor,
         )
 
-    if explicit_sql:
+    if explicit_sql or explicit_sql_env:
         return ResolvedConnection(
             transport="sql",
-            dsn=SecretStr(explicit_sql),
+            dsn=(
+                SecretStr(explicit_sql)
+                if explicit_sql
+                else _secret_from_environment(explicit_sql_env, label="DSN")
+            ),
             expected_environment=final_environment,
             expected_installation_id=final_installation,
             actor=final_actor,
@@ -201,7 +223,9 @@ def resolve_connection(
             expected_environment=final_environment,
             expected_installation_id=final_installation,
         )
-    raise TaskqConfigError("select --context or provide exactly one of --dsn/--http-base-url")
+    raise TaskqConfigError(
+        "select --context or provide exactly one of --dsn/--dsn-env/--http-base-url"
+    )
 
 
 __all__ = [

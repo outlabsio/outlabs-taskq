@@ -145,6 +145,37 @@ actor = "operator:test"
     assert main(["context", "validate", "--config", str(literal), "-o", "json"]) == 2
 
 
+def test_explicit_dsn_environment_name_is_secret_safe_and_validated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OUTLABS_TASKQ_DSN", "postgresql://owner:secret@db/taskq")
+    resolved = resolve_connection(
+        context_name=None,
+        config_path=None,
+        dsn_env="OUTLABS_TASKQ_DSN",
+        expected_environment="staging",
+        actor="operator:test",
+    )
+    assert resolved.transport == "sql"
+    assert resolved.dsn is not None
+    assert resolved.dsn.get_secret_value().endswith("@db/taskq")
+    assert "secret" not in repr(resolved)
+
+    with pytest.raises(ValueError, match="environment-variable name"):
+        resolve_connection(
+            context_name=None,
+            config_path=None,
+            dsn_env="OUTLABS-TASKQ-DSN",
+        )
+    with pytest.raises(ValueError, match="exactly one of --dsn or --dsn-env"):
+        resolve_connection(
+            context_name=None,
+            config_path=None,
+            dsn="postgresql://db/taskq",
+            dsn_env="OUTLABS_TASKQ_DSN",
+        )
+
+
 def test_context_identity_conflicts_and_http_actor_spoofing_are_refused(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -407,6 +438,58 @@ def test_direct_sql_mutation_requires_actor_before_database_open(
     assert code == 2 and not opened
     captured = capsys.readouterr()
     assert captured.out == "" and "secret" not in captured.err
+
+
+def test_consumer_worker_wrapper_closes_preflight_before_owned_runtime_starts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[str] = []
+    transport = _PagedTransport()
+
+    @asynccontextmanager
+    async def opened(_connection: object) -> AsyncIterator[_PagedTransport]:
+        events.append("preflight-open")
+        try:
+            yield transport
+        finally:
+            events.append("preflight-closed")
+
+    async def run_worker(settings: object, registry: object) -> int:
+        del settings, registry
+        events.append("runtime-started")
+        return 0
+
+    monkeypatch.setattr("taskq.cli.app.open_cli_transport", opened)
+    monkeypatch.setattr("taskq.cli.app._runtime._load_registry", lambda _reference: object())
+    monkeypatch.setattr(
+        "taskq.cli.app._runtime._validate_subscriptions", lambda _registry, _queues: None
+    )
+    monkeypatch.setattr("taskq.cli.app._runtime._run_worker", run_worker)
+
+    code = main(
+        [
+            "worker",
+            "run",
+            "--registry",
+            "app.tasks:registry",
+            "--queue",
+            "auth_maintenance",
+            "--environment",
+            "staging",
+            "--concurrency",
+            "1",
+            "--batch",
+            "1",
+            "--no-listen",
+            *_http_args(environment="staging"),
+            "-o",
+            "json",
+        ]
+    )
+    assert code == 0
+    assert events == ["preflight-open", "preflight-closed", "runtime-started"]
+    assert json.loads(capsys.readouterr().out)["data"]["outcome"] == "stopped"
 
 
 def test_enqueue_accepts_stdin_rejects_mixed_input_and_marks_unkeyed_explicitly(

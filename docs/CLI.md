@@ -67,6 +67,23 @@ spoofing. An explicit mutation also requires literal `--expected-environment`;
 ambient `TASKQ_EXPECTED_*` runtime settings are never treated as operator target
 constraints.
 
+For supervised processes and one-off deployment wrappers that already receive
+secrets from their environment, `--dsn-env NAME` explicitly selects the named
+variable without placing its credential-bearing value in process arguments:
+
+```bash
+taskq worker run \
+  --dsn-env TASKQ_STAGING_DSN \
+  --expected-environment staging \
+  --actor service:auth-maintenance \
+  --registry app.tasks:registry \
+  --queue auth_maintenance \
+  --environment staging
+```
+
+`--dsn`, `--dsn-env`, and `--http-base-url` are mutually exclusive. Ambient
+`TASKQ_DSN` is deliberately not an implicit endpoint selection for this CLI.
+
 ## Output contract
 
 `-o table|json|yaml|jsonl|name` is supported. `table` is always the default.
@@ -226,6 +243,7 @@ queries. SQL contract 0.3.1 activates:
 - `read_model_workflow_list`;
 - `operator_schedule_list`.
 
-Release 0.1.0a24 clients publish the dormant models but report those commands
-as unavailable against a database without the capability. Release 0.1.0a25
-activates them with migration `0021_cli_read_model.sql`.
+The unreleased a24 candidate introduced the dormant models. Release 0.1.0a25
+shipped both that CLI foundation and the activation migration
+`0021_cli_read_model.sql`; it remains compatible with contract 0.3.0 before
+the migration and contract 0.3.1 afterward.

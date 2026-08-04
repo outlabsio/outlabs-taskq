@@ -1,6 +1,6 @@
 # outlabs-taskq 0.1.0a25 release notes
 
-**Base release:** 0.1.0a24
+**Base release:** 0.1.0a23
 **SQL contract:** 0.3.1
 **Protocol document:** 1.0.16
 **Packaged migrations:** 0001–0021
@@ -27,8 +27,10 @@ filters, raw table/event access, or a reporting query language.
 
 ## Rollout
 
-1. Confirm every runtime consumer is pinned to 0.1.0a24 or newer.
-2. Install the exact 0.1.0a25 artifact.
+1. Install the exact 0.1.0a25 artifact in every runtime consumer while the
+   database remains on contract 0.3.0. The artifact supports both 0.3.0 and
+   0.3.1; there was no published 0.1.0a24 release.
+2. Replace every invocation of the old alpha CLI grammar.
 3. Run `taskq --context NAME db plan -o json` and review the target-bound
    digest and pending immutable migration.
 4. Apply with `taskq --context NAME --yes db migrate --plan-digest DIGEST`.

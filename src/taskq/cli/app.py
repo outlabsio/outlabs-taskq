@@ -83,6 +83,7 @@ def _normalize_global_options(argv: list[str]) -> list[str]:
         "--context",
         "--config",
         "--dsn",
+        "--dsn-env",
         "--http-base-url",
         "--http-bearer-token",
         "--http-header-name",
@@ -122,6 +123,7 @@ class CliState:
     context_name: str | None
     config_path: str | None
     dsn: str | None
+    dsn_env: str | None
     http_base_url: str | None
     http_bearer_token: str | None
     http_header_name: str | None
@@ -139,6 +141,7 @@ class CliState:
             context_name=self.context_name,
             config_path=self.config_path,
             dsn=self.dsn,
+            dsn_env=self.dsn_env,
             http_base_url=self.http_base_url,
             http_bearer_token=self.http_bearer_token,
             http_header_name=self.http_header_name,
@@ -279,6 +282,50 @@ async def _transport_operation(
         return result
 
 
+async def _detached_runtime_operation(
+    state: CliState,
+    command: str,
+    kind: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
+    """Preflight a runtime, close the probe transport, then start its owned transport.
+
+    Workers and schedulers construct their own long-lived transport from settings. Keeping
+    the short-lived CLI preflight open for the lifetime of either process wastes a second
+    pool/client and can exhaust small managed-Postgres connection budgets.
+    """
+
+    state.command = command
+    spec = COMMAND_SPECS[command]
+    connection = state.connection()
+    if connection.transport not in spec.transports:
+        raise TaskqCapabilityError(details={"command": command, "transport": connection.transport})
+    if connection.transport == "sql" and spec.mutates and not connection.actor:
+        raise TaskqConfigError(
+            "direct-SQL mutation requires --actor, TASKQ_ACTOR, or context actor"
+        )
+
+    async with open_cli_transport(connection) as transport:
+        target = await transport.target()
+        _validate_target(
+            state,
+            connection,
+            target,
+            mutates=spec.mutates,
+            destructive=spec.destructive,
+        )
+        if spec.capability is not None:
+            active = set((await transport.meta()).capabilities.get("active", ()))
+            if spec.capability not in active:
+                raise TaskqCapabilityError(
+                    details={"command": command, "capability": spec.capability}
+                )
+
+    result = await operation()
+    state.emit(command, kind, result, connection=connection, target=target)
+    return result
+
+
 def _run(operation: Awaitable[Any]) -> Any:
     return asyncio.run(operation)
 
@@ -302,6 +349,10 @@ def _load_input(path: str) -> Any:
 @click.option("--context", "context_name")
 @click.option("--config", "config_path", type=click.Path(dir_okay=False))
 @click.option("--dsn", help="Prefer an environment-backed context when credentials are present.")
+@click.option(
+    "--dsn-env",
+    help="Name of the environment variable containing the PostgreSQL DSN.",
+)
 @click.option("--http-base-url")
 @click.option("--http-bearer-token", hidden=True)
 @click.option("--http-header-name")
@@ -320,6 +371,7 @@ def cli(
     context_name: str | None,
     config_path: str | None,
     dsn: str | None,
+    dsn_env: str | None,
     http_base_url: str | None,
     http_bearer_token: str | None,
     http_header_name: str | None,
@@ -338,6 +390,7 @@ def cli(
         context_name=context_name,
         config_path=config_path,
         dsn=dsn,
+        dsn_env=dsn_env,
         http_base_url=http_base_url,
         http_bearer_token=http_bearer_token,
         http_header_name=http_header_name,
@@ -1396,7 +1449,7 @@ def worker_run_command(
 ) -> None:
     connection = state.connection()
 
-    async def run_worker(transport: CliTransport) -> Any:
+    async def run_worker() -> Any:
         selected_listen = connection.transport == "sql" if listen is None else listen
         settings = WorkerSettings(
             dsn=connection.dsn,
@@ -1428,7 +1481,7 @@ def worker_run_command(
             raise CliOperationError("worker supervisor reported a fatal exit")
         return {"outcome": "stopped", "worker_id": settings.worker_id}
 
-    _run(_transport_operation(state, "worker.run", "WorkerRun", run_worker, mutates=True))
+    _run(_detached_runtime_operation(state, "worker.run", "WorkerRun", run_worker))
 
 
 @worker_group.command("list")
@@ -2077,10 +2130,10 @@ def scheduler_run_command(
         pool_size=pool_size,
     )
 
-    async def operation(transport: CliTransport) -> Any:
+    async def operation() -> Any:
         return await _run_scheduler(settings, once=False, max_batches=100, max_runtime_seconds=300)
 
-    _run(_transport_operation(state, "scheduler.run", "SchedulerRun", operation, mutates=True))
+    _run(_detached_runtime_operation(state, "scheduler.run", "SchedulerRun", operation))
 
 
 @scheduler_group.command("once")
@@ -2107,7 +2160,7 @@ def scheduler_once_command(
         pool_size=pool_size,
     )
 
-    async def operation(transport: CliTransport) -> Any:
+    async def operation() -> Any:
         return await _run_scheduler(
             settings,
             once=True,
@@ -2115,7 +2168,7 @@ def scheduler_once_command(
             max_runtime_seconds=max_runtime_seconds,
         )
 
-    _run(_transport_operation(state, "scheduler.once", "SchedulerRun", operation, mutates=True))
+    _run(_detached_runtime_operation(state, "scheduler.once", "SchedulerRun", operation))
 
 
 @scheduler_group.command("doctor")
