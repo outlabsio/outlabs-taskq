@@ -335,6 +335,7 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
             assert await activate_scheduler_contract(conn, migrations) == [
                 "0019_scheduler_target_identity",
                 "0020_standalone_scheduler",
+                "0021_cli_read_model",
             ]
             report = await verify(conn)
             assert report.ok

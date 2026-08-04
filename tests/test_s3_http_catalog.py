@@ -1,4 +1,4 @@
-"""Hand-derived Protocol-v1.0.11 catalog and wire-model oracle."""
+"""Hand-derived Protocol-v1.0.16 catalog and wire-model oracle."""
 
 from __future__ import annotations
 
@@ -49,6 +49,14 @@ from taskq.http import AsyncTaskqHttpClient, TaskqHttpClient
 # Written from the Tier-0 Protocol route tables before consulting generated metadata.
 EXPECTED_HTTP_IDENTITIES = {
     "meta": ("GET", "/taskq/v1/meta", "read", "deployment_policy", "active"),
+    "target": ("GET", "/taskq/v1/target", "read", "global", "active"),
+    "scheduler_health": (
+        "GET",
+        "/taskq/v1/scheduler/health",
+        "read",
+        "global",
+        "active",
+    ),
     "ensure_queue": ("PUT", "/taskq/v1/queues/{queue}", "admin", "path", "active"),
     "enqueue": (
         "POST",
@@ -274,11 +282,28 @@ EXPECTED_HTTP_IDENTITIES = {
     "list_workers": ("GET", "/taskq/v1/workers", "read", "global", "active"),
     "get_queue": ("GET", "/taskq/v1/queues/{queue}", "read", "path", "active"),
     "list_jobs": ("GET", "/taskq/v1/jobs", "read", "query", "active"),
+    "list_job_events": (
+        "GET",
+        "/taskq/v1/jobs/{job_id}/events",
+        "read",
+        "job_lookup",
+        "active",
+    ),
+    "list_workflows": ("GET", "/taskq/v1/workflows", "read", "global", "active"),
+    "list_schedules": (
+        "GET",
+        "/taskq/v1/schedules",
+        "control",
+        "global",
+        "active",
+    ),
 }
 
 # Independently transcribed from the Tier-0 outcome tables, including negative-only rows.
 EXPECTED_HTTP_OUTCOMES = {
     "meta": {"ok": 200},
+    "target": {"ok": 200},
+    "scheduler_health": {"ok": 200},
     "ensure_queue": {"created": 201, "updated": 200, "unchanged": 200},
     "enqueue": {"created": 201, "existed": 200},
     "enqueue_many": {"ok": 200},
@@ -333,6 +358,9 @@ EXPECTED_HTTP_OUTCOMES = {
     "list_workers": {"ok": 200},
     "get_queue": {"ok": 200},
     "list_jobs": {"ok": 200},
+    "list_job_events": {"ok": 200},
+    "list_workflows": {"ok": 200},
+    "list_schedules": {"ok": 200},
 }
 
 
@@ -369,7 +397,11 @@ def test_capability_protocol_method_sets_are_exact() -> None:
         "get_queue_stats",
         "get_queue_profile",
         "get_workflow_page",
+        "get_target_identity",
+        "get_scheduler_health",
         "list_jobs",
+        "list_job_events",
+        "list_workflows",
         "list_worker_presence",
         "get_contract_meta",
         "metrics",
@@ -392,6 +424,7 @@ def test_capability_protocol_method_sets_are_exact() -> None:
         "get_schedule",
         "retire_schedule",
         "get_schedule_authorization_projection",
+        "list_schedules",
         "aclose",
     }
     assert "redrive_failed" in _method_names(OperatorTransport)
@@ -460,7 +493,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.15"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
     _assert_catalog_matches_hand_derived_oracle()
 
 
@@ -489,6 +522,9 @@ def test_http_catalog_excludes_db_only_commands_and_has_honest_gates() -> None:
         HttpCommandName.LIST_JOBS,
         HttpCommandName.GET_WORKFLOW_PAGE,
         HttpCommandName.LIST_WORKERS,
+        HttpCommandName.LIST_JOB_EVENTS,
+        HttpCommandName.LIST_WORKFLOWS,
+        HttpCommandName.LIST_SCHEDULES,
     ):
         assert HTTP_COMMAND_SPECS[name].surface is HttpSurface.ACTIVE
         assert HTTP_COMMAND_SPECS[name].outcomes == {"ok": 200}

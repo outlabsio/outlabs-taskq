@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.3.0.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.3.1.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.3.0"
+CONTRACT_VERSION = "0.3.1"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -137,10 +137,18 @@ INDEXES = {
     "jobs_idem_uq": "f98d23c969575471f8495ad15cf52e7c",
     "jobs_pkey": "b59e69add87d0884c846718de43ad608",
     "jobs_running_idx": "afaae7903e591ffc4b37aa0803909d8e",
+    "taskq_jobs_blocked_page_idx": "68331e28cf2619c4113190b63b3854f5",
+    "taskq_jobs_cancel_requested_page_idx": "52c47a56f9efe2b919ccec254d14f85d",
     "taskq_jobs_finished_page_idx": "57c29b5584e219f10a116a547cb8ca35",
     "taskq_jobs_running_page_idx": "8bccca5a06abf38572eeefbd1c1651af",
+    "taskq_jobs_scheduled_page_idx": "96a38dd9db411728ecb45920b4d10174",
     "taskq_jobs_workflow_page_idx": "087d5ee07fab975ca1dd1683087bd2bb",
     "taskq_jobs_worker_running_idx": "c914badb47275d4314b6e6e483cbfc6b",
+    "taskq_schedules_active_page_idx": "73c4500cba5185c79c554672fb21ab6f",
+    "taskq_schedules_paused_page_idx": "96c4a7c5ab77e14439088e845d75ef0b",
+    "taskq_schedules_retired_page_idx": "e481d68f7f36618a9a9d1558c3f75df0",
+    "taskq_workflows_finished_page_idx": "b914de1f07d5988037f25ffb5d002ae2",
+    "taskq_workflows_running_page_idx": "ca9143323cd280202816a1d78cf28559",
     "jobs_workflow_cancel_idx": "092a4c56bd382e8444bd4b41125eb3df",
     "jobs_workflow_state_idx": "5b4b0d89b781ae404916db187cf80ba5",
     "jobs_workflow_step_uq": "7eeaab0df8faf0900e8ed4f24fc763d4",
@@ -243,6 +251,19 @@ COMPOSITES = {
         ("items", "taskq.job_list_item[]"),
         ("next_after", "jsonb"),
     ),
+    "job_event_list_item": (
+        ("event_id", "bigint"),
+        ("event_type", "text"),
+        ("actor", "text"),
+        ("created_at", "timestamp with time zone"),
+        ("message", "text"),
+        ("data", "jsonb"),
+    ),
+    "job_event_page": (
+        ("as_of", "timestamp with time zone"),
+        ("items", "taskq.job_event_list_item[]"),
+        ("next_after", "bigint"),
+    ),
     "queue_profile": (
         ("name", "text"),
         ("profile_version", "bigint"),
@@ -303,6 +324,23 @@ COMPOSITES = {
         ("last_fire_at", "timestamp with time zone"),
         ("version", "bigint"),
     ),
+    "schedule_list_item": (
+        ("schedule_id", "uuid"),
+        ("name", "text"),
+        ("target", "jsonb"),
+        ("recurrence", "jsonb"),
+        ("catchup_policy", "text"),
+        ("max_catchup", "integer"),
+        ("state", "text"),
+        ("next_fire_at", "timestamp with time zone"),
+        ("last_fire_at", "timestamp with time zone"),
+        ("version", "bigint"),
+    ),
+    "schedule_list_page": (
+        ("as_of", "timestamp with time zone"),
+        ("items", "taskq.schedule_list_item[]"),
+        ("next_after", "text"),
+    ),
     "schedule_write_result": (
         ("outcome", "text"),
         ("profile", "taskq.schedule_profile"),
@@ -352,6 +390,23 @@ COMPOSITES = {
         ("counts", "taskq.workflow_state_counts"),
         ("items", "taskq.workflow_member_projection[]"),
         ("next_after", "uuid"),
+    ),
+    "workflow_list_item": (
+        ("workflow_id", "uuid"),
+        ("workflow_key", "text"),
+        ("kind", "text"),
+        ("status", "text"),
+        ("sealed", "boolean"),
+        ("cancel_requested", "boolean"),
+        ("declared_queues", "text[]"),
+        ("created_at", "timestamp with time zone"),
+        ("updated_at", "timestamp with time zone"),
+        ("finished_at", "timestamp with time zone"),
+    ),
+    "workflow_list_page": (
+        ("as_of", "timestamp with time zone"),
+        ("items", "taskq.workflow_list_item[]"),
+        ("next_after", "jsonb"),
     ),
     "workflow_read_profile": (
         ("workflow_id", "uuid"),
@@ -461,9 +516,12 @@ taskq.get_workflow_page(uuid,integer,uuid)|p_workflow_id uuid, p_limit integer D
 taskq.has_capability(text)|p_name text|boolean|sql|s|u|
 taskq.heartbeat(uuid,uuid,text,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_lease_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|TABLE(ok boolean, cancel_requested boolean, lease_expires_at timestamp with time zone)|plpgsql|v|u|taskq_runner
 taskq.janitor()||jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
+taskq.list_job_events(uuid,integer,bigint,boolean)|p_job_id uuid, p_limit integer DEFAULT 50, p_after bigint DEFAULT NULL::bigint, p_include_details boolean DEFAULT false|taskq.job_event_page|plpgsql|s|u|taskq_observer
 taskq.list_jobs(text,text,integer,jsonb)|p_queue text, p_view text, p_limit integer DEFAULT 50, p_after jsonb DEFAULT NULL::jsonb|taskq.job_page|plpgsql|s|u|taskq_observer
 taskq.list_managed_schedules(text,text,integer,text)|p_namespace text, p_source text, p_limit integer DEFAULT 100, p_after_name text DEFAULT NULL::text|TABLE(name text, manifest_key text, display_name text, definition_hash text, target jsonb, recurrence jsonb, catchup_policy text, max_catchup integer, overlap_policy text, max_lateness_seconds integer, state text, version bigint)|plpgsql|s|u|taskq_observer,taskq_operator
+taskq.list_schedules(text,integer,text)|p_view text, p_limit integer DEFAULT 50, p_after text DEFAULT NULL::text|taskq.schedule_list_page|plpgsql|s|u|taskq_operator
 taskq.list_worker_presence(integer,timestamp with time zone,text)|p_limit integer DEFAULT 50, p_after_last_seen_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_after_worker_id text DEFAULT NULL::text|taskq.worker_presence_page|plpgsql|s|u|taskq_observer
+taskq.list_workflows(text,integer,jsonb)|p_view text, p_limit integer DEFAULT 50, p_after jsonb DEFAULT NULL::jsonb|taskq.workflow_list_page|plpgsql|s|u|taskq_observer
 taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_queue text, p_job_type text|TABLE(payload jsonb, workflow_id uuid, workflow_counts jsonb)|plpgsql|v|u|taskq_producer
 taskq.manage_workflow_member_counts()||trigger|plpgsql|v|u|
 taskq.metrics()||TABLE(name text, labels jsonb, value numeric)|sql|s|u|taskq_observer
@@ -567,11 +625,14 @@ PUBLIC_ERRORS = {
     "taskq.get_scheduler_health()": frozenset(),
     "taskq.get_target_identity()": frozenset(),
     "taskq.janitor()": frozenset({"TQ422"}),
+    "taskq.list_job_events(uuid,integer,bigint,boolean)": frozenset({"TQ001", "TQ422", "TQ501"}),
     "taskq.list_jobs(text,text,integer,jsonb)": frozenset({"TQ001", "TQ422", "TQ501"}),
     "taskq.list_managed_schedules(text,text,integer,text)": frozenset({"TQ422"}),
+    "taskq.list_schedules(text,integer,text)": frozenset({"TQ422", "TQ501"}),
     "taskq.list_worker_presence(integer,timestamp with time zone,text)": frozenset(
         {"TQ422", "TQ501"}
     ),
+    "taskq.list_workflows(text,integer,jsonb)": frozenset({"TQ422", "TQ501"}),
     "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)": frozenset({"TQ422"}),
     "taskq.metrics()": frozenset(),
     "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
@@ -623,11 +684,13 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.3.0"',
+    "contract_version": '"0.3.1"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
-        '"followups", "read_model_list_finished", "read_model_list_ready", '
-        '"read_model_list_running", "read_model_workflow", "scheduler_v2", '
+        '"followups", "operator_schedule_list", "read_model_job_events", '
+        '"read_model_job_views_v2", "read_model_list_finished", '
+        '"read_model_list_ready", "read_model_list_running", '
+        '"read_model_workflow", "read_model_workflow_list", "scheduler_v2", '
         '"schedules", "target_attestation", "worker_presence", '
         '"workflow_continuations"]}'
     ),

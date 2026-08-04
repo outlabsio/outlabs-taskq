@@ -130,7 +130,8 @@ async def test_workflow_routes_are_absent_until_runtime_gate_and_openapi_is_exac
             "content"
         ]["application/json"]["schema"]
         assert set(cancel_schema["properties"]) == {"reason"}
-        assert "actor" not in json.dumps(schema)
+        assert "actor" not in create_schema["properties"]
+        assert "actor" not in cancel_schema["properties"]
     finally:
         await transport.aclose()
 

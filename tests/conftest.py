@@ -51,7 +51,7 @@ _ATTESTED_ROLES = frozenset({"taskq_runner", "taskq_operator", "taskq_housekeepe
 
 
 async def activate_scheduler_contract(conn: Any, migrations: Any) -> list[str]:
-    """Apply 0019, explicitly bind a scratch target, then activate 0020."""
+    """Apply 0019, bind a scratch target, then activate the current contract."""
     from taskq.sql import _migrate_impl
 
     applied = await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[18:19]))
@@ -75,9 +75,7 @@ async def activate_scheduler_contract(conn: Any, migrations: Any) -> list[str]:
             None,
         ),
     )
-    applied.extend(
-        await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[19:20]))
-    )
+    applied.extend(await conn.run_sync(lambda sync_conn: _migrate_impl(sync_conn, migrations[19:])))
     return applied
 
 

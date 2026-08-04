@@ -1,17 +1,17 @@
-"""Standalone scheduler target-identity CLI contract."""
+"""Target and scheduler commands on the resource-oriented CLI."""
 
 from __future__ import annotations
 
 import json
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from typing import Any, AsyncIterator
 from uuid import UUID
 
 import pytest
 
-from taskq import cli as cli_module
 from taskq.cli import main
-from taskq.protocol import SchedulerHealth, TargetIdentityProfile
-from taskq.scheduler import SchedulerDoctorReport
+from taskq.protocol import ContractMeta, SchedulerHealth, TargetIdentityProfile
 
 
 _INSTALLATION_ID = UUID("018f47b2-a6cd-7c64-8e19-123456789abc")
@@ -24,166 +24,159 @@ def _profile(*, environment: str = "staging", version: int = 1) -> TargetIdentit
         binding_version=version,
         bound_at=datetime(2026, 8, 3, tzinfo=UTC),
         bound_by="release-agent",
-        contract_version="0.2.7",
-        capabilities={"active": ["schedules"]},
+        contract_version="0.3.1",
+        capabilities={"active": ["scheduler_v2", "target_attestation"]},
     )
 
 
-def test_target_show_json_is_machine_readable_and_human_output_abbreviates_uuid(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    async def run(_args: object) -> TargetIdentityProfile:
+class _ReadTransport:
+    async def target(self) -> TargetIdentityProfile:
         return _profile()
 
-    monkeypatch.setattr(cli_module, "_run_target_command", run)
-    main(["target", "show", "--dsn", "postgresql://db/taskq", "--json"])
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["installation_id"] == str(_INSTALLATION_ID)
-    assert payload["environment"] == "staging"
+    async def meta(self) -> ContractMeta:
+        return ContractMeta(
+            contract_version="0.3.1",
+            capabilities={"active": ["scheduler_v2", "target_attestation"]},
+        )
 
-    main(["target", "show", "--dsn", "postgresql://db/taskq"])
-    output = capsys.readouterr().out
-    assert "018f47b2…" in output
-    assert str(_INSTALLATION_ID) not in output
+    async def scheduler_health(self) -> SchedulerHealth:
+        return SchedulerHealth(
+            database_time=datetime(2026, 8, 3, tzinfo=UTC),
+            active_schedules=2,
+            due_schedules=0,
+            oldest_due_at=None,
+            last_decision_at=None,
+            auto_paused_schedules=0,
+        )
 
 
-def test_target_bind_passes_explicit_cas_and_rotation_inputs(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.fixture
+def read_transport(monkeypatch: pytest.MonkeyPatch) -> _ReadTransport:
+    value = _ReadTransport()
+
+    @asynccontextmanager
+    async def opened(_connection: object) -> AsyncIterator[_ReadTransport]:
+        yield value
+
+    monkeypatch.setattr("taskq.cli.app.open_cli_transport", opened)
+    return value
+
+
+def _http_args() -> list[str]:
+    return [
+        "--http-base-url",
+        "https://taskq.example.test",
+        "--http-bearer-token",
+        "test-secret",
+    ]
+
+
+def test_target_show_uses_the_versioned_machine_envelope(
+    read_transport: _ReadTransport,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    captured: object | None = None
-
-    async def run(args: object) -> TargetIdentityProfile:
-        nonlocal captured
-        captured = args
-        return _profile(environment="development", version=2)
-
-    monkeypatch.setattr(cli_module, "_run_target_command", run)
-    main(
-        [
-            "target",
-            "bind",
-            "development",
-            "--dsn",
-            "postgresql://db/taskq",
-            "--actor",
-            "clone-agent",
-            "--expected-installation-id",
-            str(_INSTALLATION_ID),
-            "--expected-binding-version",
-            "1",
-            "--rotate",
-            "--reason",
-            "staging clone",
-        ]
-    )
-    assert captured is not None
-    assert getattr(captured, "environment") == "development"
-    assert getattr(captured, "rotate") is True
-    assert getattr(captured, "expected_binding_version") == 1
-    assert "environment: development" in capsys.readouterr().out
+    del read_transport
+    assert main(["target", "show", *_http_args(), "-o", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["api_version"] == "taskq.cli/v1"
+    assert payload["command"] == "target.show"
+    assert payload["data"]["installation_id"] == str(_INSTALLATION_ID)
+    assert payload["meta"]["target"]["environment"] == "staging"
 
 
-@pytest.mark.parametrize(
-    "argv,expected",
-    [
-        (
-            [
-                "target",
-                "bind",
-                "production",
-                "--actor",
-                "agent",
-                "--expected-installation-id",
-                str(_INSTALLATION_ID),
-                "--expected-binding-version",
-                "0",
-            ],
-            "--allow-production",
-        ),
-        (
-            [
-                "target",
-                "bind",
-                "staging",
-                "--actor",
-                "agent",
-                "--expected-installation-id",
-                str(_INSTALLATION_ID),
-                "--expected-binding-version",
-                "0",
-                "--rotate",
-            ],
-            "--reason",
-        ),
-    ],
-)
-def test_target_bind_refuses_unsafe_local_inputs_before_opening_database(
-    argv: list[str],
-    expected: str,
+def test_scheduler_doctor_is_a_read_only_machine_diagnostic(
+    read_transport: _ReadTransport,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    del read_transport
+    assert main(["scheduler", "doctor", *_http_args(), "-o", "json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"]["ready"] is True
+    assert payload["data"]["health"]["active_schedules"] == 2
+
+
+def test_target_bind_refuses_without_acknowledgement_before_database_open(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     opened = False
 
-    async def run(_args: object) -> TargetIdentityProfile:
+    def unexpected(*_args: Any, **_kwargs: Any) -> object:
         nonlocal opened
         opened = True
-        return _profile()
+        raise AssertionError
 
-    monkeypatch.setenv("TASKQ_DSN", "postgresql://db/taskq")
-    monkeypatch.setattr(cli_module, "_run_target_command", run)
-    with pytest.raises(SystemExit) as exc_info:
-        main(argv)
-    assert exc_info.value.code == 2
-    assert not opened
-    assert expected in capsys.readouterr().err
-
-
-def test_target_cli_password_warning_never_repeats_secret(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    async def run(_args: object) -> TargetIdentityProfile:
-        return _profile()
-
-    monkeypatch.setattr(cli_module, "_run_target_command", run)
-    main(
+    monkeypatch.setattr("taskq.sql.transport.SqlTaskqTransport.from_dsn", unexpected)
+    code = main(
         [
             "target",
-            "show",
+            "bind",
+            "staging",
             "--dsn",
             "postgresql://owner:target-secret@db/taskq",
+            "--actor",
+            "operator:test",
+            "--expected-installation-id",
+            str(_INSTALLATION_ID),
+            "--expected-binding-version",
+            "0",
+            "-o",
+            "json",
         ]
     )
-    error = capsys.readouterr().err
-    assert "TASKQ_DSN" in error
-    assert "target-secret" not in error
+    assert code == 2 and not opened
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert json.loads(captured.err)["error"]["code"] == "CLI_SAFETY"
+    assert "target-secret" not in captured.err
 
 
-def test_scheduler_doctor_is_read_only_machine_diagnostic(
+def test_production_target_bind_requires_literal_allow_production(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    async def run(args: object) -> SchedulerDoctorReport:
-        assert getattr(args, "scheduler_command") == "doctor"
-        assert getattr(args, "once") is False
-        return SchedulerDoctorReport(
-            ready=True,
-            target=_profile(),
-            health=SchedulerHealth(
-                database_time=datetime(2026, 8, 3, tzinfo=UTC),
-                active_schedules=2,
-                due_schedules=0,
-                oldest_due_at=None,
-                last_decision_at=None,
-                auto_paused_schedules=0,
-            ),
-        )
+    opened = False
 
-    monkeypatch.setattr(cli_module, "_run_scheduler_command", run)
-    main(["scheduler", "doctor", "--dsn", "postgresql://db/taskq", "--json"])
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["ready"] is True
-    assert payload["health"]["active_schedules"] == 2
+    def unexpected(*_args: Any, **_kwargs: Any) -> object:
+        nonlocal opened
+        opened = True
+        raise AssertionError
+
+    monkeypatch.setattr("taskq.sql.transport.SqlTaskqTransport.from_dsn", unexpected)
+    code = main(
+        [
+            "target",
+            "bind",
+            "production",
+            "--dsn",
+            "postgresql://db/taskq",
+            "--actor",
+            "operator:test",
+            "--expected-installation-id",
+            str(_INSTALLATION_ID),
+            "--expected-binding-version",
+            "0",
+            "--yes",
+        ]
+    )
+    assert code == 2 and not opened
+    assert "--allow-production" in capsys.readouterr().err
+
+
+def test_unhandled_transport_failure_is_redacted_and_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    @asynccontextmanager
+    async def opened(_connection: object) -> AsyncIterator[object]:
+        raise RuntimeError("postgresql://owner:do-not-print@db/taskq")
+        yield object()
+
+    monkeypatch.setattr("taskq.cli.app.open_cli_transport", opened)
+    code = main(["target", "show", *_http_args(), "--request-id", "req-42", "-o", "json"])
+    captured = capsys.readouterr()
+    assert code == 3 and captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["request_id"] == "req-42"
+    assert payload["error"]["retryable"] is True
+    assert "do-not-print" not in captured.err

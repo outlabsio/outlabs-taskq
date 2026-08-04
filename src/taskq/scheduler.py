@@ -23,6 +23,7 @@ from pydantic import (
     model_validator,
 )
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.ext.asyncio import AsyncConnection
 import yaml
 
 from taskq.errors import TaskqConfigError
@@ -285,13 +286,17 @@ def _profile_actual_hash(profile: ManagedScheduleProfile) -> str | None:
 
 
 async def _current_owned(
-    transport: SqlTaskqTransport, namespace: str, source: str
+    transport: SqlTaskqTransport,
+    namespace: str,
+    source: str,
+    *,
+    connection: AsyncConnection | None = None,
 ) -> dict[str, ManagedScheduleProfile]:
     result: dict[str, ManagedScheduleProfile] = {}
     after: str | None = None
     while True:
         page = await transport.list_managed_schedules(
-            namespace, source, limit=500, after_name=after
+            namespace, source, limit=500, after_name=after, connection=connection
         )
         for profile in page:
             result[profile.manifest_key] = profile
@@ -300,9 +305,16 @@ async def _current_owned(
         after = page[-1].name
 
 
-async def plan_manifest(transport: SqlTaskqTransport, manifest: ScheduleManifest) -> ManifestPlan:
+async def plan_manifest(
+    transport: SqlTaskqTransport,
+    manifest: ScheduleManifest,
+    *,
+    connection: AsyncConnection | None = None,
+) -> ManifestPlan:
     desired = compile_manifest(manifest)
-    current = await _current_owned(transport, manifest.namespace, manifest.source)
+    current = await _current_owned(
+        transport, manifest.namespace, manifest.source, connection=connection
+    )
     entries: list[ManifestPlanEntry] = []
     warnings: list[str] = []
     missing_by_hash = {
@@ -367,8 +379,9 @@ async def apply_manifest(
     manifest: ScheduleManifest,
     *,
     actor: str,
+    connection: AsyncConnection | None = None,
 ) -> ManifestApplyResult:
-    plan = await plan_manifest(transport, manifest)
+    plan = await plan_manifest(transport, manifest, connection=connection)
     compiled = compile_manifest(manifest)
     counts = {"created": 0, "updated": 0, "unchanged": 0}
     for entry in plan.entries:
@@ -387,6 +400,7 @@ async def apply_manifest(
             max_lateness_seconds=item.max_lateness_seconds,
             actor=actor,
             expected_version=entry.current_version,
+            connection=connection,
         )
         counts[result.outcome] += 1
     return ManifestApplyResult(

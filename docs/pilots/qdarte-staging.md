@@ -22,7 +22,7 @@ publishing media.
 2. Give its worker only the staging API/database/BFF configuration and make it
    perform the existing QDarte environment/database-identity checks before
    claiming.
-3. Upgrade qdarteAPI/worker locks to TaskQ 0.1.0a22, disable the FastAPI
+3. Upgrade qdarteAPI/worker locks to TaskQ 0.1.0a25, disable the FastAPI
    schedule loop, and keep the housekeeper pool only where non-schedule
    compatibility work still requires it.
 4. Provision a separate scheduler login with the package housekeeper grants;
@@ -34,19 +34,22 @@ publishing media.
 Using owner and runtime credentials from the staging secret manager:
 
 ```bash
-taskq migrate
-taskq target show --json
+taskq --context qdarte-staging db plan -o json
+taskq --context qdarte-staging --yes db migrate --plan-digest "$PLAN_DIGEST"
+taskq --context qdarte-staging target show -o json
 # Review the fingerprint, then bind with explicit CAS values.
-taskq target bind staging --actor qdarte-release \
+taskq --context qdarte-staging --yes target bind staging \
   --expected-installation-id "$TASKQ_INSTALLATION_ID" \
   --expected-binding-version 0
-taskq migrate
-taskq verify
+taskq --context qdarte-staging db plan -o json
+taskq --context qdarte-staging --yes db migrate --plan-digest "$PLAN_DIGEST"
+taskq --context qdarte-staging db verify
 
-TASKQ_EXPECTED_ENV=staging taskq scheduler doctor --json
-taskq schedule plan examples/qdarte-staging-intake-review.yaml --json
-taskq schedule apply examples/qdarte-staging-intake-review.yaml \
-  --actor qdarte-release --expected-environment staging
+taskq --context qdarte-staging scheduler doctor -o json
+taskq --context qdarte-staging schedule manifest plan \
+  examples/qdarte-staging-intake-review.yaml -o json
+taskq --context qdarte-staging schedule manifest apply \
+  examples/qdarte-staging-intake-review.yaml --plan-digest "$PLAN_DIGEST"
 ```
 
 The first apply must leave the schedule paused. Confirm the queue and handler,

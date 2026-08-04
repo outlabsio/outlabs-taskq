@@ -36,7 +36,7 @@ from taskq.http.outlabs import (
     provision_taskq_auth,
     taskq_permission_catalog,
 )
-from taskq.cli import _asyncpg_dsn, _print_auth_report, main
+from taskq.cli import _asyncpg_dsn, _print_auth_report
 from taskq.protocol import TaskqAction
 
 
@@ -744,25 +744,3 @@ def test_auth_cli_renders_the_real_password_for_the_owned_connection() -> None:
         "postgresql+asyncpg://installer:p%40ss%2Fword@db.example.test/taskq?ssl=require"
     )
     assert "***" not in rendered
-
-
-def test_auth_cli_dispatches_lazily_without_printing_secret(
-    monkeypatch: pytest.MonkeyPatch, capsys: Any
-) -> None:
-    monkeypatch.setenv(
-        "TASKQ_AUTH_DSN", "postgresql://installer:environment-secret@db.example.test/taskq"
-    )
-
-    async def run(args: Any) -> ProvisioningReport:
-        assert args.queues == "emails,tools"
-        assert args.dsn.endswith("@db.example.test/taskq")
-        return ProvisioningReport(mode="report", existing=("permission:taskq:read",))
-
-    monkeypatch.setattr("taskq.cli._run_auth_sync", run)
-    main(["auth", "sync-permissions", "--queues", "emails,tools"])
-    captured = capsys.readouterr()
-    output = captured.out
-    assert "mode: report" in output
-    assert "permission:taskq:read" in output
-    assert "super-secret-value" not in output
-    assert "environment-secret" not in captured.err

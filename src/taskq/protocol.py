@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.15"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.16"
 T = TypeVar("T")
 
 
@@ -844,6 +844,35 @@ class JobPageWireData(BaseModel):
     next_cursor: str | None = None
 
 
+class JobEventItem(BaseModel):
+    """Attempt-fence-free event projection for operators."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    event_id: int = Field(ge=1)
+    event_type: str = Field(min_length=1, max_length=64)
+    actor: str | None = None
+    created_at: datetime
+    message: str | None = None
+    data: dict[str, Any] | None = None
+
+
+class JobEventPage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[JobEventItem, ...]
+    next_after: int | None = Field(default=None, ge=1)
+
+
+class JobEventPageWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[JobEventItem, ...]
+    next_cursor: str | None = None
+
+
 class ReasonWireRequest(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
@@ -1199,6 +1228,37 @@ class WorkflowPageWireData(BaseModel):
     next_cursor: str | None = None
 
 
+class WorkflowListItem(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    workflow_id: UUID
+    workflow_key: str
+    kind: WorkflowKind
+    status: WorkflowStatus
+    sealed: bool
+    cancel_requested: bool
+    declared_queues: tuple[str, ...]
+    created_at: datetime
+    updated_at: datetime
+    finished_at: datetime | None = None
+
+
+class WorkflowListPage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[WorkflowListItem, ...]
+    next_after: dict[str, Any] | None = None
+
+
+class WorkflowListPageWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[WorkflowListItem, ...]
+    next_cursor: str | None = None
+
+
 class ScheduleState(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
@@ -1329,6 +1389,37 @@ class ScheduleWireData(BaseModel):
     version: int
 
 
+class ScheduleListItem(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    schedule_id: UUID
+    name: str
+    target: dict[str, Any]
+    recurrence: dict[str, Any]
+    catchup_policy: ScheduleCatchupPolicy
+    max_catchup: int
+    state: ScheduleState
+    next_fire_at: datetime
+    last_fire_at: datetime | None = None
+    version: int = Field(ge=1)
+
+
+class ScheduleListPage(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[ScheduleListItem, ...]
+    next_after: str | None = None
+
+
+class ScheduleListPageWireData(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    as_of: datetime
+    items: tuple[ScheduleListItem, ...]
+    next_cursor: str | None = None
+
+
 class ScheduleHttpWriteResult(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
@@ -1457,8 +1548,10 @@ class CommandName(StrEnum):
     GET_AUTHORIZATION_PROJECTION = "get_authorization_projection"
     GET_WORKFLOW_AUTHORIZATION_PROJECTION = "get_workflow_authorization_projection"
     GET_WORKFLOW_PAGE = "get_workflow_page"
+    LIST_WORKFLOWS = "list_workflows"
     LIST_WORKER_PRESENCE = "list_worker_presence"
     GET_JOB = "get_job"
+    LIST_JOB_EVENTS = "list_job_events"
     GET_QUEUE_STATS = "get_queue_stats"
     GET_QUEUE_PROFILE = "get_queue_profile"
     LIST_JOBS = "list_jobs"
@@ -1477,6 +1570,7 @@ class CommandName(StrEnum):
     CANCEL_WORKFLOW = "cancel_workflow"
     PUT_SCHEDULE = "put_schedule"
     GET_SCHEDULE = "get_schedule"
+    LIST_SCHEDULES = "list_schedules"
     RETIRE_SCHEDULE = "retire_schedule"
     GET_SCHEDULE_AUTHORIZATION_PROJECTION = "get_schedule_authorization_projection"
     CLAIM_SCHEDULES = "claim_schedules"
@@ -1505,6 +1599,8 @@ class ReplayRule(StrEnum):
 
 class HttpCommandName(StrEnum):
     META = "meta"
+    TARGET = "target"
+    SCHEDULER_HEALTH = "scheduler_health"
     ENSURE_QUEUE = "ensure_queue"
     ENQUEUE = "enqueue"
     ENQUEUE_MANY = "enqueue_many"
@@ -1515,7 +1611,9 @@ class HttpCommandName(StrEnum):
     SEAL_WORKFLOW = "seal_workflow"
     CANCEL_WORKFLOW = "cancel_workflow"
     GET_WORKFLOW_PAGE = "get_workflow_page"
+    LIST_WORKFLOWS = "list_workflows"
     GET_SCHEDULE = "get_schedule"
+    LIST_SCHEDULES = "list_schedules"
     PUT_SCHEDULE = "put_schedule"
     RETIRE_SCHEDULE = "retire_schedule"
     CLAIM = "claim"
@@ -1527,6 +1625,7 @@ class HttpCommandName(StrEnum):
     CANCEL_RUNNING = "cancel_running"
     WORKER_HEARTBEAT = "worker_heartbeat"
     GET_JOB = "get_job"
+    LIST_JOB_EVENTS = "list_job_events"
     GET_QUEUE_STATS = "get_queue_stats"
     LIST_QUEUE_STATS = "list_queue_stats"
     METRICS = "metrics"
@@ -1769,6 +1868,12 @@ COMMAND_SPECS: Final = MappingProxyType(
             ("ok",),
             (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.INTERNAL, TqCode.CAPABILITY),
         ),
+        CommandName.LIST_WORKFLOWS: _spec(
+            "taskq.list_workflows(text,integer,jsonb)",
+            _OBSERVER,
+            ("ok",),
+            (TqCode.VALIDATION, TqCode.CAPABILITY),
+        ),
         CommandName.LIST_WORKER_PRESENCE: _spec(
             "taskq.list_worker_presence(integer,timestamp with time zone,text)",
             _OBSERVER,
@@ -1779,6 +1884,12 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
             _OBSERVER,
             ("ok", "missing"),
+        ),
+        CommandName.LIST_JOB_EVENTS: _spec(
+            "taskq.list_job_events(uuid,integer,bigint,boolean)",
+            _OBSERVER,
+            ("ok",),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.CAPABILITY),
         ),
         CommandName.GET_QUEUE_STATS: _spec("taskq.get_queue_stats(text)", _OBSERVER, ("ok",)),
         CommandName.GET_QUEUE_PROFILE: _spec("taskq.get_queue_profile(text)", _OBSERVER, ("ok",)),
@@ -1864,6 +1975,12 @@ COMMAND_SPECS: Final = MappingProxyType(
             _OPERATOR,
             ("ok",),
             (TqCode.NOT_FOUND,),
+        ),
+        CommandName.LIST_SCHEDULES: _spec(
+            "taskq.list_schedules(text,integer,text)",
+            _OPERATOR,
+            ("ok",),
+            (TqCode.VALIDATION, TqCode.CAPABILITY),
         ),
         CommandName.RETIRE_SCHEDULE: _spec(
             "taskq.retire_schedule(text,bigint,text)",
@@ -2042,6 +2159,26 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             CommandName.GET_CONTRACT_META,
             data_model=ContractMeta,
         ),
+        HttpCommandName.TARGET: _http(
+            "GET",
+            "/taskq/v1/target",
+            _READ,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            None,
+            data_model=TargetIdentityProfile,
+        ),
+        HttpCommandName.SCHEDULER_HEALTH: _http(
+            "GET",
+            "/taskq/v1/scheduler/health",
+            _READ,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            None,
+            data_model=SchedulerHealth,
+        ),
         HttpCommandName.ENSURE_QUEUE: _http(
             "PUT",
             "/taskq/v1/queues/{queue}",
@@ -2151,6 +2288,16 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             CommandName.GET_WORKFLOW_PAGE,
             data_model=WorkflowPageWireData,
         ),
+        HttpCommandName.LIST_WORKFLOWS: _http(
+            "GET",
+            "/taskq/v1/workflows",
+            _READ,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.LIST_WORKFLOWS,
+            data_model=WorkflowListPageWireData,
+        ),
         HttpCommandName.GET_SCHEDULE: _http(
             "GET",
             "/taskq/v1/schedules/{name}",
@@ -2160,6 +2307,16 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             _SAFE,
             CommandName.GET_SCHEDULE,
             data_model=ScheduleWireData,
+        ),
+        HttpCommandName.LIST_SCHEDULES: _http(
+            "GET",
+            "/taskq/v1/schedules",
+            _CONTROL,
+            _GLOBAL,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.LIST_SCHEDULES,
+            data_model=ScheduleListPageWireData,
         ),
         HttpCommandName.PUT_SCHEDULE: _http(
             "PUT",
@@ -2281,6 +2438,16 @@ HTTP_COMMAND_SPECS: Final = MappingProxyType(
             _SAFE,
             CommandName.GET_JOB,
             data_model=JobDetail,
+        ),
+        HttpCommandName.LIST_JOB_EVENTS: _http(
+            "GET",
+            "/taskq/v1/jobs/{job_id}/events",
+            _READ,
+            _LOOKUP,
+            _status_map(ok=200),
+            _SAFE,
+            CommandName.LIST_JOB_EVENTS,
+            data_model=JobEventPageWireData,
         ),
         HttpCommandName.GET_QUEUE_STATS: _http(
             "GET",
@@ -2532,6 +2699,12 @@ __all__ = [
     "HttpCommandSpec",
     "HttpSurface",
     "JobDetail",
+    "JobEventItem",
+    "JobEventPage",
+    "JobEventPageWireData",
+    "JobListItem",
+    "JobPage",
+    "JobPageWireData",
     "JobStatus",
     "Metric",
     "ManagedScheduleProfile",
@@ -2554,6 +2727,9 @@ __all__ = [
     "ScheduleCronRecurrence",
     "ScheduleDefinition",
     "ScheduleIntervalRecurrence",
+    "ScheduleListItem",
+    "ScheduleListPage",
+    "ScheduleListPageWireData",
     "ScheduleHttpWriteResult",
     "SchedulerHealth",
     "ScheduleJobTarget",
@@ -2590,6 +2766,11 @@ __all__ = [
     "WorkerPresencePageWireData",
     "WorkerPresenceWireRequest",
     "WorkflowCancelWireRequest",
+    "WorkflowListItem",
+    "WorkflowListPage",
+    "WorkflowListPageWireData",
+    "WorkflowPage",
+    "WorkflowPageWireData",
     "WorkflowAuthorizationProjection",
     "WorkflowKind",
     "WorkflowMemberProjection",

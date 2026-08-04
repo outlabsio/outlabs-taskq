@@ -1,11 +1,9 @@
-"""taskq CLI — `taskq migrate [dsn]` / `taskq verify [dsn]` (ADR-004).
+"""Internal runtime adapters retained behind the resource-oriented Click CLI.
 
-Omitted migrate/verify DSNs are read from ``TASKQ_DSN`` so credentials need
-not appear in process arguments. A bare ``postgresql://`` (or ``postgres://``)
-DSN runs on the bundled asyncpg driver (the CLI drives it with a private event
-loop, so the command itself is synchronous). A DSN that names an explicit
-synchronous driver — e.g. ``postgresql+psycopg2://`` — runs on a plain
-synchronous engine, provided that driver is installed in the host environment.
+These helpers own process lifecycles and installer/auth adapters; public
+argument parsing, context resolution, safety, and rendering live in
+``taskq.cli.app``. A bare PostgreSQL DSN uses the bundled asyncpg driver, while
+an explicit synchronous SQLAlchemy driver uses that installed driver.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ from typing import Any, NoReturn
 from uuid import UUID
 
 from pydantic import ValidationError
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.engine import URL, make_url
 
 from taskq.errors import (
@@ -38,7 +36,7 @@ from taskq.errors import (
 )
 from taskq.registry import TaskRegistry
 from taskq.settings import WorkerSettings
-from taskq.sql import VerifyReport, migrate, migrate_sync, verify, verify_sync
+from taskq.sql import VerifyReport, _migrate_impl, verify, verify_sync
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.worker import WorkerOptions, WorkerService, WorkerServiceOptions
@@ -121,7 +119,9 @@ def _required_dsn(
     return dsn
 
 
-def _run_migrate(dsn: str) -> list[str]:
+def _run_migrate(
+    dsn: str, expected_pending: tuple[tuple[str, str], ...] | None = None
+) -> list[str]:
     url = _normalized_url(dsn)
     if _is_asyncpg_url(url):
 
@@ -131,7 +131,9 @@ def _run_migrate(dsn: str) -> list[str]:
             engine = create_async_engine(url.set(drivername="postgresql+asyncpg"))
             try:
                 async with engine.connect() as conn:
-                    return await migrate(conn)
+                    return await conn.run_sync(
+                        lambda sync: _migrate_impl(sync, expected_pending=expected_pending)
+                    )
             finally:
                 await engine.dispose()
 
@@ -139,7 +141,7 @@ def _run_migrate(dsn: str) -> list[str]:
     engine = create_engine(url)
     try:
         with engine.connect() as conn:
-            return migrate_sync(conn)
+            return _migrate_impl(conn, expected_pending=expected_pending)
     finally:
         engine.dispose()
 
@@ -687,6 +689,74 @@ async def _run_auth_sync(args: argparse.Namespace) -> Any:
             else:
                 await session.rollback()
             return report
+    finally:
+        await auth.shutdown()
+
+
+async def _run_auth_apply(
+    args: argparse.Namespace,
+    *,
+    validate_plan: Callable[[Any], None],
+) -> Any:
+    """Recompute and apply one IAM plan under an auth-database transaction lock."""
+
+    try:
+        from outlabs_auth import SimpleRBAC
+        from taskq.http.outlabs import provision_taskq_auth
+    except ModuleNotFoundError:
+        raise TaskqConfigError(
+            "taskq auth requires the OutLabs extra: install 'outlabs-taskq[outlabs]'"
+        ) from None
+
+    if not args.dsn:
+        raise TaskqConfigError("auth DSN is required via --dsn or TASKQ_AUTH_DSN")
+    queues = tuple(part.strip() for part in args.queues.split(",") if part.strip())
+    if not queues:
+        raise TaskqConfigError("--queues must contain at least one canonical queue")
+    url = _normalized_url(args.dsn)
+    if not _is_asyncpg_url(url):
+        raise TaskqConfigError("taskq auth provisioning requires an asyncpg PostgreSQL DSN")
+    auth = SimpleRBAC(
+        database_url=_asyncpg_dsn(url),
+        database_schema=args.schema,
+        secret_key=secrets.token_urlsafe(48),
+        auto_migrate=False,
+    )
+    try:
+        await auth.initialize()
+        async with auth.get_session() as session:
+            await session.execute(
+                text(
+                    "SELECT pg_catalog.pg_advisory_xact_lock("
+                    "pg_catalog.hashtextextended('taskq:cli:auth', 0))"
+                )
+            )
+            report = await provision_taskq_auth(
+                auth,
+                session,
+                queues=queues,
+                roles=None if args.roles == "none" else "standard",
+                role_prefix=args.role_prefix,
+                mode="report",
+                reconcile=args.reconcile,
+                per_queue_roles=args.per_queue_roles,
+            )
+            validate_plan(report)
+            applied = await provision_taskq_auth(
+                auth,
+                session,
+                queues=queues,
+                roles=None if args.roles == "none" else "standard",
+                role_prefix=args.role_prefix,
+                mode="apply",
+                reconcile=args.reconcile,
+                per_queue_roles=args.per_queue_roles,
+            )
+            if applied.ok:
+                await session.commit()
+            else:
+                await session.rollback()
+            return applied
     finally:
         await auth.shutdown()
 

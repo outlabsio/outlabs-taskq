@@ -51,8 +51,8 @@ class Output(BaseModel):
     value: int
 
 
-def test_wfc_i03_binds_protocol_document_revision_1_0_15() -> None:
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.15"
+def test_runtime_binds_current_protocol_document_revision() -> None:
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
 
 
 def test_policy_advertisement_wire_bounds_and_canonicalizes() -> None:

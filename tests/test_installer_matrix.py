@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from urllib.parse import quote
 from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
@@ -67,7 +68,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
         results = await asyncio.gather(install(0), install(1))
         assert sorted(results, key=len) == [
             [],
-            ["0020_standalone_scheduler"],
+            ["0020_standalone_scheduler", "0021_cli_read_model"],
         ]
         async with engines[0].connect() as conn:
             report = await verify(conn)
@@ -149,7 +150,10 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
                 ),
             )
             await conn.commit()
-            assert await migrate(conn) == ["0020_standalone_scheduler"]
+            assert await migrate(conn) == [
+                "0020_standalone_scheduler",
+                "0021_cli_read_model",
+            ]
             report = await verify(conn)
             assert report.ok
     finally:
@@ -163,14 +167,32 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
 
 
 def test_cli_migrate_and_verify_success(taskq_dsn: str, capsys: pytest.CaptureFixture[str]) -> None:
-    main(["migrate", taskq_dsn])
-    capsys.readouterr()
-    main(["migrate", taskq_dsn])
-    assert "schema is up to date" in capsys.readouterr().out
-    main(["verify", taskq_dsn])
-    output = capsys.readouterr().out
-    assert "[ok] function_catalog" in output
-    assert output.endswith("verify: ok\n")
+    assert main(["db", "plan", "--dsn", taskq_dsn, "-o", "json"]) == 0
+    plan = json.loads(capsys.readouterr().out)["data"]
+    assert plan["changes"] is False
+    assert (
+        main(
+            [
+                "db",
+                "migrate",
+                "--dsn",
+                taskq_dsn,
+                "--actor",
+                "installer-matrix",
+                "--expected-environment",
+                "test",
+                "--plan-digest",
+                plan["plan_digest"],
+                "--yes",
+                "-o",
+                "json",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["data"]["up_to_date"] is True
+    assert main(["db", "verify", "--dsn", taskq_dsn, "-o", "json"]) == 0
+    assert json.loads(capsys.readouterr().out)["data"]["ok"] is True
 
 
 async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
@@ -182,12 +204,30 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
     await admin.execute(f'CREATE DATABASE "{database}"')
     dsn = _sync_sqlalchemy_dsn(taskq_dsn, database)
     try:
-        with pytest.raises(Exception) as checkpoint:
-            await asyncio.to_thread(main, ["migrate", dsn])
+        assert await asyncio.to_thread(main, ["db", "plan", "--dsn", dsn, "-o", "json"]) == 0
+        first_plan = json.loads(capsys.readouterr().out)["data"]
         assert (
-            getattr(getattr(checkpoint.value, "orig", checkpoint.value), "sqlstate", None)
-            == "TQ422"
+            await asyncio.to_thread(
+                main,
+                [
+                    "db",
+                    "migrate",
+                    "--dsn",
+                    dsn,
+                    "--actor",
+                    "installer-matrix",
+                    "--expected-environment",
+                    "test",
+                    "--plan-digest",
+                    first_plan["plan_digest"],
+                    "--yes",
+                    "-o",
+                    "json",
+                ],
+            )
+            == 3
         )
+        assert capsys.readouterr().out == ""
         binder = await asyncpg.connect(_database_dsn(taskq_dsn, database))
         try:
             identity = await binder.fetchrow("SELECT * FROM taskq.get_target_identity()")
@@ -203,11 +243,37 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             )
         finally:
             await binder.close()
-        await asyncio.to_thread(main, ["migrate", dsn])
-        output = capsys.readouterr().out
-        assert "0020_standalone_scheduler" in output
-        await asyncio.to_thread(main, ["verify", dsn])
-        assert capsys.readouterr().out.endswith("verify: ok\n")
+        assert await asyncio.to_thread(main, ["db", "plan", "--dsn", dsn, "-o", "json"]) == 0
+        second_plan = json.loads(capsys.readouterr().out)["data"]
+        assert [item["id"] for item in second_plan["pending"]] == [
+            "0020_standalone_scheduler",
+            "0021_cli_read_model",
+        ]
+        assert (
+            await asyncio.to_thread(
+                main,
+                [
+                    "db",
+                    "migrate",
+                    "--dsn",
+                    dsn,
+                    "--actor",
+                    "installer-matrix",
+                    "--expected-environment",
+                    "test",
+                    "--plan-digest",
+                    second_plan["plan_digest"],
+                    "--yes",
+                    "-o",
+                    "json",
+                ],
+            )
+            == 0
+        )
+        migrated = json.loads(capsys.readouterr().out)["data"]
+        assert migrated["applied"] == ["0020_standalone_scheduler", "0021_cli_read_model"]
+        assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
+        assert json.loads(capsys.readouterr().out)["data"]["ok"] is True
     finally:
         await admin.execute(f'DROP DATABASE "{database}" WITH (FORCE)')
         await admin.close()
@@ -220,12 +286,15 @@ async def test_cli_verify_failure_has_exit_one_and_named_check(
     admin = await asyncpg.connect(_database_dsn(taskq_dsn, "postgres"))
     try:
         await admin.execute("ALTER ROLE taskq_housekeeper LOGIN")
-        with pytest.raises(SystemExit) as excinfo:
-            await asyncio.to_thread(main, ["verify", taskq_dsn])
-        assert excinfo.value.code == 1
-        output = capsys.readouterr().out
-        assert "[FAIL] role_manifest" in output
-        assert "rolcanlogin" in output
+        assert (
+            await asyncio.to_thread(main, ["db", "verify", "--dsn", taskq_dsn, "-o", "json"]) == 1
+        )
+        output = json.loads(capsys.readouterr().out)
+        assert output["data"]["ok"] is False
+        assert any(
+            check["name"] == "role_manifest" and check["ok"] is False
+            for check in output["data"]["checks"]
+        )
     finally:
         await admin.execute("ALTER ROLE taskq_housekeeper NOLOGIN")
         await admin.close()

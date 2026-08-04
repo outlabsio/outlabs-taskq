@@ -8,8 +8,8 @@ import pytest
 from pydantic import SecretStr, ValidationError
 
 from taskq import TaskRegistry
-from taskq import cli as cli_module
 from taskq.cli import _run_worker
+from taskq.cli import _runtime as cli_runtime
 from taskq.settings import WorkerSettings
 
 
@@ -92,7 +92,7 @@ async def test_run_worker_uses_async_http_transport_and_cancels_long_poll_on_sto
             events.append("service-close")
 
     monkeypatch.setattr("taskq.http.client.AsyncTaskqHttpClient", Client)
-    monkeypatch.setattr(cli_module, "WorkerService", Service)
+    monkeypatch.setattr(cli_runtime, "WorkerService", Service)
     result = await _run_worker(_settings(), TaskRegistry())
     assert result == 0
     assert captured["base_url"] == "https://queue.example/taskq"
