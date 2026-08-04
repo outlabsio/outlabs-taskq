@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a25`** uses SQL contract **`0.3.1`** and Protocol revision **`1.0.16`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migration `0021` adds bounded job-event, workflow, schedule, and missing job-view projections.
+**Status:** alpha — **`0.1.0a26`** uses SQL contract **`0.3.1`** and Protocol revision **`1.0.16`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migration `0021` adds bounded job-event, workflow, schedule, and missing job-view projections.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -19,8 +19,9 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
-| [`docs/RELEASE-0.1.0a25.md`](docs/RELEASE-0.1.0a25.md) | 0.1.0a25 complete operator read model and rollout checklist |
-| [`docs/RELEASE-0.1.0a24.md`](docs/RELEASE-0.1.0a24.md) | 0.1.0a24 CLI foundation and migration guide |
+| [`docs/RELEASE-0.1.0a26.md`](docs/RELEASE-0.1.0a26.md) | 0.1.0a26 production-integration closeout and rollout checklist |
+| [`docs/RELEASE-0.1.0a25.md`](docs/RELEASE-0.1.0a25.md) | 0.1.0a25 complete operator read model and CLI foundation |
+| [`docs/RELEASE-0.1.0a24.md`](docs/RELEASE-0.1.0a24.md) | Historical unreleased a24 candidate record |
 | [`docs/RELEASE-0.1.0a22.md`](docs/RELEASE-0.1.0a22.md) | 0.1.0a22 standalone scheduler release notes and rollout checklist |
 | [`docs/TaskQ Standalone Scheduler Specification.md`](docs/TaskQ%20Standalone%20Scheduler%20Specification.md) | Owner-approved standalone scheduler, target-attestation, manifest, and evidence contract |
 | [`docs/RELEASE-0.1.0a21.md`](docs/RELEASE-0.1.0a21.md) | 0.1.0a21 compatible OutLabs Auth prerelease range and checklist |
@@ -32,7 +33,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a25
+pip install outlabs-taskq==0.1.0a26
 ```
 
 ## Credential handling
@@ -45,6 +46,11 @@ DSN from commands. A context stores only the environment-variable name:
 # TASKQ_STAGING_DSN is supplied by the deployment environment.
 taskq --context staging db plan -o json
 taskq --context staging db verify
+
+# A context file is optional when the caller supplies target identity explicitly.
+taskq --dsn-env TASKQ_STAGING_DSN \
+  --expected-environment staging --actor operator:release-agent \
+  db verify -o json
 ```
 
 `taskq db migrate` requires a superuser or a managed database-owner role with

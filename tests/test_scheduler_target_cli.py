@@ -180,3 +180,52 @@ def test_unhandled_transport_failure_is_redacted_and_retryable(
     assert payload["error"]["request_id"] == "req-42"
     assert payload["error"]["retryable"] is True
     assert "do-not-print" not in captured.err
+
+
+def test_consumer_scheduler_once_closes_preflight_before_owned_runtime_starts(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    events: list[str] = []
+    transport = _ReadTransport()
+
+    @asynccontextmanager
+    async def opened(_connection: object) -> AsyncIterator[_ReadTransport]:
+        events.append("preflight-open")
+        try:
+            yield transport
+        finally:
+            events.append("preflight-closed")
+
+    async def run_scheduler(
+        settings: object,
+        *,
+        once: bool,
+        max_batches: int,
+        max_runtime_seconds: float,
+    ) -> dict[str, object]:
+        del settings, max_batches, max_runtime_seconds
+        events.append("runtime-started")
+        return {"once": once, "batches": 0}
+
+    monkeypatch.setenv("OUTLABS_TASKQ_DSN", "postgresql://owner:secret@db/taskq")
+    monkeypatch.setattr("taskq.cli.app.open_cli_transport", opened)
+    monkeypatch.setattr("taskq.cli.app._run_scheduler", run_scheduler)
+
+    code = main(
+        [
+            "scheduler",
+            "once",
+            "--dsn-env",
+            "OUTLABS_TASKQ_DSN",
+            "--expected-environment",
+            "staging",
+            "--actor",
+            "operator:test",
+            "-o",
+            "json",
+        ]
+    )
+    assert code == 0
+    assert events == ["preflight-open", "preflight-closed", "runtime-started"]
+    assert json.loads(capsys.readouterr().out)["data"] == {"batches": 0, "once": True}
