@@ -59,6 +59,14 @@ Correcting `skip` to mean “fire the sole ordinarily due instant, but discard a
 multi-instant backlog” requires both a new SQL migration and a compatibility
 audit of existing stored rows; a Python-only semantic change is forbidden.
 
+The audited pause/resume contract is `from now`. Activating or resuming an
+interval definition marks it uninitialized; the next scheduler pass anchors
+the recurrence to database time and advances `next_fire_at` by one complete
+interval without enqueueing an immediate occurrence. Consequently an attended
+pilot must remain open for at least one interval, plus deployment and polling
+allowance. Operators that require an immediate canary enqueue an explicit
+one-shot job instead of changing recurring schedule semantics.
+
 An advanced definition may supply ordinary TaskQ target options, but the
 compiler emits exactly the existing `ScheduleJobTarget` shape. The scheduler
 does not import the task registry. An application-side typed compiler may
