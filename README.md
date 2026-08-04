@@ -77,6 +77,12 @@ taskq schedule apply examples/schedules.minimal.yaml \
   --actor release-agent --expected-environment staging
 ```
 
+Activating or resuming an interval schedule is `from now`: the first scheduler
+pass initializes its recurrence and the first job becomes due after one full
+interval. Activation does not enqueue an immediate job. Size attended pilot
+windows accordingly, or use an explicit one-shot job when an immediate canary
+is required.
+
 The scheduler is a clock, not a task executor. Run one supervised scheduler per
 database/environment, but place workers according to the application's existing
 operating model. A single host-native worker can use a combined registry and
