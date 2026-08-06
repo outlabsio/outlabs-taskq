@@ -69,6 +69,13 @@ async def test_load_scenario_records_and_enforces(
         assert defects["single_nonretryable_survived"] is True
         assert defects["sustained_corruption_fails_closed"] is True
         assert metrics["claim_errors_per_nudge"] <= 0.6
+    elif scenario == "L3":
+        defects = result["defect_observations"]
+        assert defects["smeared_dealigns"] is True
+        assert defects["plain_identical"] is True
+        assert defects["deterministic"] is True
+        assert metrics["smeared_dispersion_s"] >= 0.5 * metrics["smear_seconds"]
+        assert metrics["plain_dispersion_s"] == 0.0
     elif scenario == "L7":
         defects = result["defect_observations"]
         assert defects["resume_ramp_flattens_spike"] is True

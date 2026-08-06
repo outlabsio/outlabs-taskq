@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import asyncpg
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.bench import _attested_fetchrow, _connect_role
+from taskq.bench import _attested_fetchrow, _connect_role, _sqlalchemy_dsn
 from taskq.errors import TaskqUnavailableError, TaskqValidationError
 from taskq.loadlab._chassis import (
     LoadInput,
@@ -29,8 +32,11 @@ from taskq.loadlab._chassis import (
     wait_until,
 )
 from taskq.loadlab._instruments import ClaimFaultPlan
+from taskq.scheduler import SchedulerEngine
+from taskq.schedules import smear_offset_seconds
+from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("L1", "L2", "L4", "L5", "L6", "L7", "L10")
+SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L10")
 
 
 def _check(name: str, ok: bool, **detail: Any) -> dict[str, Any]:
@@ -1276,9 +1282,152 @@ async def _l7_resume_redrive_stampede(ctx: ScenarioContext) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------- L3
+
+
+async def _l3_schedule_codue(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 2b enforcement gate (0.5 spec S4.3): a co-cron schedule population
+    de-aligns under smear — each schedule's firing lattice shifts by a
+    deterministic per-id offset — while an unsmeared population fires
+    byte-identically. The population is CRON, not interval: an interval
+    schedule's frame-shift cancels (anchor and as_of shift together), so
+    de-alignment only manifests against the absolute cron lattice, matching the
+    contract-test invariant. Drives the real SchedulerEngine.process_batch
+    firing path (claim -> evaluate-with-smear -> fire) against seeded, co-due
+    schedules and measures the resulting next_fire_at dispersion.
+    """
+
+    queue = "load_l3"
+    await ctx.ensure_queue(queue)
+    cohort = max(12, ctx.scale.storm_workers * 4)
+    smear = 1800  # 30 min, < the 3600s hourly interval so offsets never wrap
+
+    definition = {
+        "target": {"kind": "job", "queue": queue, "job_type": "load.sched"},
+        "recurrence": {"kind": "cron", "expression": "0 * * * *", "timezone": "UTC"},
+        "catchup_policy": "skip",
+        "max_catchup": 1,
+    }
+
+    async def _seed(prefix: str, with_smear: bool) -> None:
+        for i in range(cohort):
+            # put_schedule is attestation-gated (scheduler family); attest the
+            # operator connection in-transaction, unlike the ungated ensure_queue.
+            row = await _attested_fetchrow(
+                ctx.operator,
+                "SELECT * FROM taskq.put_schedule($1,$2::jsonb,$3)",
+                f"{prefix}-{ctx.seed}-{i}",
+                json.dumps(definition),
+                "loadlab",
+            )
+            assert row is not None
+        # Force the whole cohort co-due at one past instant, initialized, and
+        # (for the smeared arm) carrying the smear column directly.
+        await ctx.admin.execute(
+            "UPDATE taskq.schedules SET initialized=true,"
+            " next_fire_at = now() - interval '5 seconds', smear_seconds = $2"
+            " WHERE name LIKE $1",
+            f"{prefix}-{ctx.seed}-%",
+            smear if with_smear else None,
+        )
+
+    await _seed("l3-smear", True)
+    await _seed("l3-plain", False)
+
+    # Drive the production firing path as the housekeeper role. One claim call
+    # takes the whole due set (claim_limit exceeds it), so every schedule shares
+    # a single as_of and thus a single cron target instant — de-alignment can
+    # then come only from the per-id smear, never from claim-timing skew.
+    engine = create_async_engine(
+        _sqlalchemy_dsn(ctx.dsn),
+        connect_args={"server_settings": {"role": "taskq_housekeeper"}},
+    )
+    transport = SqlTaskqTransport(
+        engine, expected_environment=os.environ.get("TASKQ_EXPECTED_ENV", "benchmark")
+    )
+    sched = SchedulerEngine(
+        transport, "l3-scheduler", claim_limit=cohort * 2 + 10, lease_seconds=120
+    )
+    claimed_total = 0
+    try:
+        for _ in range(8):
+            claimed, _jobs, _errors = await sched.process_batch()
+            claimed_total += claimed
+            if claimed == 0:
+                break
+    finally:
+        await transport.aclose()
+        await engine.dispose()
+
+    async def _rows(prefix: str) -> list[tuple[str, float]]:
+        return [
+            (str(r["id"]), float(r["s"]))
+            for r in await ctx.admin.fetch(
+                "SELECT id, extract(epoch FROM next_fire_at) AS s"
+                " FROM taskq.schedules WHERE name LIKE $1 ORDER BY id",
+                f"{prefix}-{ctx.seed}-%",
+            )
+        ]
+
+    smeared = await _rows("l3-smear")
+    plain = await _rows("l3-plain")
+    # Measure seconds-past-the-hour (fire mod the 3600s cron period). Because a
+    # smeared fire is (a cron :00 instant) + offset, `fire % 3600 == offset`
+    # exactly, independent of WHICH hour a schedule lands in — so this is robust
+    # to the boundary case where a large-offset schedule's shifted as_of falls
+    # into the prior hour. Plain fires land on :00, so their past-hour is 0.
+    smeared_offsets = [round(s) % 3600 for _, s in smeared]
+    plain_offsets = [round(s) % 3600 for _, s in plain]
+    smeared_disp = max(smeared_offsets) - min(smeared_offsets) if len(smeared_offsets) > 1 else 0
+    plain_disp = max(plain_offsets) - min(plain_offsets) if len(plain_offsets) > 1 else 0
+
+    # Determinism tie: each schedule's past-hour offset equals the deterministic
+    # smear_offset_seconds(id, smear) exactly — the observed de-alignment IS the
+    # per-id function, not randomness.
+    deterministic = bool(smeared)
+    for sid, fire in smeared:
+        if round(fire) % 3600 != smear_offset_seconds(UUID(sid), smear):
+            deterministic = False
+            break
+
+    checks = [
+        _check(
+            "smeared_cohort_dealigns",
+            smeared_disp >= 0.5 * smear,
+            dispersion=smeared_disp,
+            floor=0.5 * smear,
+        ),
+        _check("unsmeared_cohort_byte_identical", plain_disp == 0, dispersion=plain_disp),
+        _check("dealignment_is_deterministic_per_id", deterministic),
+        _check(
+            "all_schedules_fired",
+            claimed_total >= 2 * cohort,
+            claimed=claimed_total,
+            expected=2 * cohort,
+        ),
+    ]
+    return {
+        "metrics": {
+            "cohort_per_arm": cohort,
+            "smear_seconds": smear,
+            "smeared_dispersion_s": round(smeared_disp, 1),
+            "plain_dispersion_s": round(plain_disp, 1),
+            "schedules_claimed": claimed_total,
+        },
+        "invariant_checks": checks,
+        "defect_observations": {
+            "smeared_dealigns": smeared_disp >= 0.5 * smear,
+            "plain_identical": plain_disp == 0.0,
+            "deterministic": deterministic,
+            "expected_posture": "0.5.1-smear",
+        },
+    }
+
+
 SCENARIO_RUNNERS = {
     "L1": _l1_notify_herd,
     "L2": _l2_retry_storm,
+    "L3": _l3_schedule_codue,
     "L4": _l4_admission_vs_drain,
     "L5": _l5_claim_error_posture,
     "L6": _l6_counter_contention,
