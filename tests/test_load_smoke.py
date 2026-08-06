@@ -1,8 +1,9 @@
-"""Toy smoke for the L-series: invariants always; red defects asserted reproduced.
+"""Toy smoke for the L-series: invariants always; defect expectations tracked.
 
-Red-before-green (harness spec SS1.4): L4/L5 assert the *defective* behavior of
-the unmodified runtime and contract. When P1b (survivable claim path) and later
-P7/P8 (flow-control plane) land, the flipped expectations ship in the same PR.
+Red-before-green (harness spec SS1.4): L4 still asserts the *defective*
+contract behavior (flips with P7/P8). L5 flipped green with P1b in the same PR
+and now asserts the survivable claim path; its red evidence on unmodified a26
+is retained under docs/evidence/load-red-a26-l5-2026-08-05.json.
 """
 
 from __future__ import annotations
@@ -64,6 +65,7 @@ async def test_load_scenario_records_and_enforces(
         assert metrics["backpressure_rejections"] > 0
     elif scenario == "L5":
         defects = result["defect_observations"]
-        assert defects["no_claim_error_backoff_reproduced"] is True
-        assert defects["single_nonretryable_claim_error_fatal"] is True
-        assert metrics["claim_errors_per_nudge"] >= 0.7
+        assert defects["claim_backoff_active"] is True
+        assert defects["single_nonretryable_survived"] is True
+        assert defects["sustained_corruption_fails_closed"] is True
+        assert metrics["claim_errors_per_nudge"] <= 0.6

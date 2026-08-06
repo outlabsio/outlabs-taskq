@@ -177,6 +177,7 @@ class ScenarioContext:
         listen: bool = True,
         retry: Any = True,
         fault_plan: ClaimFaultPlan | None = None,
+        service_overrides: dict[str, Any] | None = None,
     ) -> WorkerHandle:
         engine = create_async_engine(
             _sqlalchemy_dsn(self.dsn),
@@ -204,17 +205,20 @@ class ScenarioContext:
             ]
         )
         notifications = PostgresNotificationSource(self.dsn) if listen else None
+        service_options: dict[str, Any] = {
+            "queues": (queue,),
+            "batch": batch,
+            "poll_interval": poll_interval,
+            "listen": listen,
+            "presence_interval": 60.0,
+        }
+        if service_overrides:
+            service_options.update(service_overrides)
         service = WorkerService(
             transport,
             registry,
             worker_id,
-            options=WorkerServiceOptions(
-                queues=(queue,),
-                batch=batch,
-                poll_interval=poll_interval,
-                listen=listen,
-                presence_interval=60.0,
-            ),
+            options=WorkerServiceOptions(**service_options),
             supervisor_options=WorkerOptions(concurrency=concurrency),
             notifications=notifications,
         )

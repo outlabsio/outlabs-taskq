@@ -1,9 +1,10 @@
 """L-series load-behavior scenarios (harness spec SS4). Toy-first, report-only.
 
-L4 and L5 encode known defects of the unmodified runtime (red before green):
-their ``defect_observations`` assert the defective behavior is REPRODUCED.
-When the corresponding fixes land (P1b, and later P7/P8), these scenarios and
-the smoke expectations are amended in the same pull request.
+L4 encodes remaining known defects of the unmodified contract (red before
+green): its ``defect_observations`` assert the defective behavior is
+REPRODUCED, and flip in the same PR as the fixes (P7/P8). L5 flipped green
+with P1b: it now asserts the survivable claim path (backoff, ride-out of a
+single misclassified error, bounded fail-closed under sustained corruption).
 """
 
 from __future__ import annotations
@@ -484,6 +485,9 @@ async def _l4_admission_vs_drain(ctx: ScenarioContext) -> dict[str, Any]:
 
 
 async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
+    """Post-P1b posture: claim errors back off, one misclassification survives,
+    sustained corruption still fails closed within the bounded threshold."""
+
     queue, task_name = "load_l5", "load.noop5"
     await ctx.ensure_queue(queue)
 
@@ -491,6 +495,11 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
         return LoadOutput(value=payload.value)
 
     plan = ClaimFaultPlan(retryable_error=TaskqUnavailableError, fatal_error=TaskqValidationError)
+    overrides = {
+        "claim_backoff_base": 0.2,
+        "claim_backoff_cap": 1.0,
+        "claim_fatal_threshold": 8,
+    }
     worker = ctx.build_worker(
         queue,
         "l5-victim",
@@ -499,31 +508,46 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
         poll_interval=3.0,
         listen=True,
         fault_plan=plan,
+        service_overrides=overrides,
     )
     producer = await ctx.producer()
     recovered: WorkerHandle | None = None
     try:
         await _start_fleet([worker])
+
+        # Phase 1 — retryable-error window: attempts follow the jittered
+        # backoff cadence, not the nudge cadence, and the worker survives.
         plan.mode = "retryable"
         mark = time.monotonic()
         nudges = ctx.scale.nudge_jobs
         for index in range(nudges):
             await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-{index}", value=index)
             await asyncio.sleep(0.15)
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.4)
         error_claims = ctx.instruments.error_claims(since=mark)
+        survived_window = not worker.service.snapshot().fatal
+        plan.mode = "clean"
+        await ctx.wait_settled(queue, nudges)
 
+        # Phase 2 — a single misclassified non-retryable claim error is ridden
+        # out through the same backoff instead of killing the worker.
         plan.arm_fatal()
-        await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-trigger", value=99999)
+        await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-trigger2", value=99998)
+        await ctx.wait_settled(queue, nudges + 1)
+        survived_single_fatal = not worker.service.snapshot().fatal
+
+        # Phase 3 — sustained corruption-shaped errors still fail closed within
+        # the bounded consecutive-error threshold.
+        plan.mode = "corruption"
+        await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-trigger3", value=99999)
         await wait_until(
             _went_fatal(worker),
-            timeout=10.0,
-            message="worker did not fail on non-retryable claim error",
+            timeout=25.0,
+            message="worker did not fail closed under sustained corruption errors",
         )
         went_fatal = worker.service.snapshot().fatal
         await worker.aclose()
 
-        plan.mode = "clean"
         recovered = ctx.build_worker(
             queue,
             "l5-recovery",
@@ -533,26 +557,28 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
             listen=True,
         )
         await recovered.service.start()
-        await ctx.wait_settled(queue, nudges + 1)
+        await ctx.wait_settled(queue, nudges + 2)
         attempts = await ctx.attempts_per_job(queue)
-        no_backoff = error_claims >= max(2, int(nudges * 0.7))
+        backoff_active = 1 <= error_claims <= max(3, int(nudges * 0.6))
         checks = [
             _check(
-                "all_jobs_delivered_after_recovery",
-                await ctx.count_status(queue, ("succeeded",)) == nudges + 1,
+                "all_jobs_delivered",
+                await ctx.count_status(queue, ("succeeded",)) == nudges + 2,
             ),
             _check(
                 "no_duplicate_attempts",
-                attempts == {1: nudges + 1},
+                attempts == {1: nudges + 2},
                 **{"attempts": {str(k): v for k, v in attempts.items()}},
             ),
             _check(
-                "defect_reproduced_no_claim_backoff",
-                no_backoff,
+                "claim_backoff_active",
+                backoff_active,
                 error_claims=error_claims,
                 nudges=nudges,
             ),
-            _check("defect_reproduced_fatal_on_single_nonretryable", went_fatal),
+            _check("survived_retryable_window", survived_window),
+            _check("survived_single_nonretryable", survived_single_fatal),
+            _check("sustained_corruption_fails_closed", went_fatal),
         ]
         return {
             "metrics": {
@@ -562,9 +588,10 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
             },
             "invariant_checks": checks,
             "defect_observations": {
-                "no_claim_error_backoff_reproduced": no_backoff,
-                "single_nonretryable_claim_error_fatal": went_fatal,
-                "expected_posture": "a26-defective; flips with P1b in the same PR",
+                "claim_backoff_active": backoff_active,
+                "single_nonretryable_survived": survived_single_fatal,
+                "sustained_corruption_fails_closed": went_fatal,
+                "expected_posture": "post-P1b",
             },
         }
     finally:

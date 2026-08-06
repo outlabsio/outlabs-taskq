@@ -27,6 +27,7 @@ class ClaimFaultPlan:
     """Deterministic, phase-driven claim-fault schedule.
 
     ``mode == "retryable"`` makes every claim raise ``retryable_error``;
+    ``mode == "corruption"`` makes every claim raise ``fatal_error``;
     ``arm_fatal()`` makes exactly the next claim raise ``fatal_error`` (then
     the plan returns to clean). Shared across workers when shared.
     """
@@ -52,6 +53,9 @@ class ClaimFaultPlan:
         if self.mode == "retryable" and self.retryable_error is not None:
             self.injected_retryable += 1
             return self.retryable_error()
+        if self.mode == "corruption" and self.fatal_error is not None:
+            self.injected_fatal += 1
+            return self.fatal_error()
         return None
 
 
