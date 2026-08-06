@@ -94,7 +94,7 @@ async def _claim(
     runner: asyncpg.Connection, queue: str, worker: str, job_id: UUID | None = None
 ) -> asyncpg.Record:
     batch = await runner.fetchrow(
-        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4)",
+        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4::text[])",
         queue,
         worker,
         job_id,
@@ -278,7 +278,7 @@ async def test_old_and_new_claimers_are_executable_policy_cohorts(
     assert legacy is not None and legacy["state"] == "empty" and legacy["jobs"] == []
 
     supported = await runner.fetchrow(
-        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4)",
+        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4::text[])",
         "policy",
         "new-worker",
         first,
@@ -288,7 +288,7 @@ async def test_old_and_new_claimers_are_executable_policy_cohorts(
     assert [job["job_id"] for job in supported["jobs"]] == [first]
 
     unsupported = await runner.fetchrow(
-        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4)",
+        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4::text[])",
         "policy",
         "wrong-policy-worker",
         second,

@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.4.0.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.5.0.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.4.0"
+CONTRACT_VERSION = "0.5.0"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -41,6 +41,8 @@ TABLES = frozenset(
     {
         "admissions",
         "concurrency_limits",
+        "flow_limits",
+        "flow_state",
         "control_state",
         "job_attempts",
         "job_deps",
@@ -48,6 +50,7 @@ TABLES = frozenset(
         "jobs",
         "meta",
         "queue_counters",
+        "queue_flow",
         "queues",
         "schedule_decisions",
         "schedule_occurrences",
@@ -71,13 +74,16 @@ TABLE_SHAPES = {
     "job_attempts": (10, "c77285741656eeebe691db4f3e40ae29"),
     "job_deps": (3, "9d2a532798d70fa2514644b7a61da3c7"),
     "job_events": (8, "fee387eec268693cd507c443a58e1322"),
-    "jobs": (41, "943b80b9adef46c731b9208b3710b820"),
+    "jobs": (43, "3400624aa6584a1babd1d0c88280d1fb"),
     "meta": (3, "6b0aa3a5745ebdd662479daa8c766d1d"),
+    "flow_limits": (5, "56fcabc78fdf06b02c62be3182bbcccf"),
+    "flow_state": (3, "60f056634167b3b624b194567ca2a477"),
     "queue_counters": (10, "c2e43315895c6ddbac94394bd398a563"),
-    "queues": (16, "56a64a19b9cdef25b8e842e5f0c16fa2"),
+    "queue_flow": (4, "3051064bd425df592da59ed528b7f321"),
+    "queues": (23, "3a8dfd613184b7308c8e8fc53973e89b"),
     "schedule_decisions": (13, "ebb5c380a87c00d53e626db04a89f82c"),
     "schedule_occurrences": (7, "5ec90a35ba0383db811bf88020522004"),
-    "schedules": (36, "e86b7f366074ac307d44a5f4fb949efe"),
+    "schedules": (37, "c666ae211b1a176a7af3695f8a9b16b1"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
     "target_binding_events": (10, "94d73ea696dd9eb3f57f029eeca79698"),
     "target_identity": (9, "9c9e666464edd9c079c34f7737adfbe6"),
@@ -97,13 +103,16 @@ CONSTRAINTS = {
     "job_attempts": (3, "1b3551d273ad80b3a1914494ac750057"),
     "job_deps": (3, "fa4b0e4d226160305724e3e9fd330390"),
     "job_events": (2, "190355e5ad2160ab5d9d5adf84016b61"),
-    "jobs": (20, "9f7f486f864bcfaf09f43bfd4b8dffc2"),
+    "jobs": (21, "e92c8c5a806bf5c77211fc96bcabfd2d"),
     "meta": (1, "b8a6f433ca275e289861f29159c6d4f3"),
+    "flow_limits": (4, "998303160c2c6264e4e28c4e348dbfda"),
+    "flow_state": (1, "16791e93a3b47960ea20095c4abb0f10"),
     "queue_counters": (2, "44835b2b8bfcc389728ec65520ee5e7c"),
-    "queues": (9, "b565d95eb81c18bd78660ebe7230dc2a"),
+    "queue_flow": (2, "70fad7cf1e0e53edbd69ddb50ba61f9f"),
+    "queues": (16, "46680a8ecb4146dc9f2f6f90b3ff0959"),
     "schedule_decisions": (9, "21f272d0a93325771bf28c016c167f91"),
     "schedule_occurrences": (6, "7d7431666eaf79edefa9c3a26d0a122e"),
-    "schedules": (20, "3dcdfe858a4cc75d569883ae7a3a18e2"),
+    "schedules": (21, "c20e70ddf516bb88d89d20a44bade146"),
     "schema_migrations": (1, "9a70b629e02d9c9c4c87285047e4c5fa"),
     "target_binding_events": (7, "f88384b3fa51c9ecbdd7de53d09ae920"),
     "target_identity": (6, "a85be9ae99c9b946792dfdec1134e0c0"),
@@ -123,6 +132,8 @@ INDEXES = {
     "admissions_queue_key_uq": "1b6398a305f52362efc9341da1b65c51",
     "admissions_receipt_cleanup_idx": "bf5e2c97a410692ca5d77b2023d2fc18",
     "admissions_reservation_cleanup_idx": "3a23e0123c6bad7de55de7114615d33d",
+    "flow_limits_pkey": "702de8132b2affb2b26861d03ebd4cb5",
+    "flow_state_pkey": "7b89bec16b43d992923391f484f5dcfa",
     "concurrency_limits_pkey": "4451cd41ab2a31b52ae1a34d69435e19",
     "control_state_pkey": "43b5b6e33a824e152859f4ef9ccbb046",
     "job_attempts_job_idx": "ba54a88c3bf510cc36006927db2537cc",
@@ -152,10 +163,12 @@ INDEXES = {
     "taskq_schedules_retired_page_idx": "e481d68f7f36618a9a9d1558c3f75df0",
     "taskq_workflows_finished_page_idx": "b914de1f07d5988037f25ffb5d002ae2",
     "taskq_workflows_running_page_idx": "ca9143323cd280202816a1d78cf28559",
+    "jobs_ttl_idx": "aedd0a99c5f811bb5a95778f1f716ea4",
     "jobs_workflow_cancel_idx": "092a4c56bd382e8444bd4b41125eb3df",
     "jobs_workflow_state_idx": "5b4b0d89b781ae404916db187cf80ba5",
     "jobs_workflow_step_uq": "7eeaab0df8faf0900e8ed4f24fc763d4",
     "meta_pkey": "0d779a67c6f4038a1c416b7775e6c96e",
+    "queue_flow_pkey": "f233cb4f46bfd12d26c98204f12146cc",
     "queue_counters_pkey": "88df3d3cb7086757e2a8a2ae75def7bd",
     "queues_pkey": "afbb7fc868e58dcae6742808a3d01d91",
     "schedule_decisions_pkey": "95ff69e8ccb44704678ddd4b6ec70f60",
@@ -217,7 +230,11 @@ COMPOSITES = {
         ("receipt", "jsonb"),
         ("receipt_expires_at", "timestamp with time zone"),
     ),
-    "claim_batch": (("state", "text"), ("jobs", "taskq.claimed_job[]")),
+    "claim_batch": (
+        ("state", "text"),
+        ("jobs", "taskq.claimed_job[]"),
+        ("retry_after_seconds", "integer"),
+    ),
     "claimed_job": (
         ("job_id", "uuid"),
         ("queue", "text"),
@@ -283,6 +300,13 @@ COMPOSITES = {
         ("max_depth", "integer"),
         ("notify_enabled", "boolean"),
         ("paused", "boolean"),
+        ("max_running", "integer"),
+        ("claim_rate_per_minute", "integer"),
+        ("claim_burst", "integer"),
+        ("ramp_seconds", "integer"),
+        ("default_ttl_seconds", "integer"),
+        ("backpressure_retry_seconds", "integer"),
+        ("notify_mode", "text"),
     ),
     "queue_profile_update": (
         ("result", "text"),
@@ -467,8 +491,8 @@ class FunctionSpec:
 
 
 _FUNCTION_ROWS = r"""
-taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid|taskq.claim_batch|plpgsql|v|u|
-taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,text[])|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[]|taskq.claim_batch|plpgsql|v|u|
+taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,boolean)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid, p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|
+taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,text[],boolean)|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[], p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|
 taskq._claim_schedules_unattested(text,integer,integer)|p_worker_id text, p_limit integer DEFAULT 10, p_lease_seconds integer DEFAULT 60|taskq.schedule_claim_batch|plpgsql|v|u|
 taskq._enqueue_followup(uuid,text,jsonb,integer)|p_parent_job_id uuid, p_parent_queue text, p_spec jsonb, p_spec_index integer|TABLE(job_id uuid, created boolean)|plpgsql|v|u|
 taskq._janitor_unattested()||jsonb|plpgsql|v|u|
@@ -488,8 +512,11 @@ taskq.cancel_job(uuid,text,text)|p_job_id uuid, p_actor text, p_reason text DEFA
 taskq.cancel_running_job(uuid,uuid,text,text)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_reason text|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.cancel_workflow(uuid,text,text)|p_workflow_id uuid, p_actor text, p_reason text|taskq.workflow_result|plpgsql|v|u|taskq_operator
 taskq.claim_janitor_due()||boolean|plpgsql|v|u|
-taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid|taskq.claim_batch|plpgsql|v|u|taskq_runner
-taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[]|taskq.claim_batch|plpgsql|v|u|taskq_runner
+taskq._flow_consume_queue(text,integer,integer,numeric,integer)|p_queue text, p_rate_per_minute integer, p_burst integer, p_scale numeric, p_want integer|TABLE(granted integer, retry_after integer)|plpgsql|v|u|
+taskq._flow_scale(text,integer)|p_queue text, p_ramp_seconds integer|numeric|plpgsql|v|u|
+taskq._throttled_or_empty(boolean,integer)|p_accept boolean, p_retry_after integer|taskq.claim_batch|sql|v|u|
+taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,boolean)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid, p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|taskq_runner
+taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[], p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|taskq_runner
 taskq.claim_schedules(text,integer,integer)|p_worker_id text, p_limit integer DEFAULT 10, p_lease_seconds integer DEFAULT 60|taskq.schedule_claim_batch|plpgsql|v|u|taskq_housekeeper
 taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_result jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb, p_followups jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_result jsonb, p_stats jsonb, p_followups jsonb, p_continuation_policy_hash text|taskq.settle_result|plpgsql|v|u|taskq_runner
@@ -497,8 +524,9 @@ taskq.create_workflow(text,text,jsonb,text[],text)|p_workflow_key text, p_kind t
 taskq.create_workflow(text,text,jsonb,text[],text,integer,text)|p_workflow_key text, p_kind text, p_params jsonb, p_declared_queues text[], p_actor text, p_member_limit integer, p_continuation_policy_hash text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.emit_event(uuid,uuid,text,text,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_event_type text, p_actor text, p_message text, p_data jsonb DEFAULT NULL::jsonb|void|plpgsql|v|u|
 taskq.enqueue_many(text,jsonb)|p_queue text, p_jobs jsonb|TABLE(input_index integer, job_id uuid, outcome text)|plpgsql|v|u|taskq_producer
-taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)|p_queue text, p_job_type text, p_payload jsonb DEFAULT '{}'::jsonb, p_priority smallint DEFAULT NULL::smallint, p_scheduled_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_idempotency_key text DEFAULT NULL::text, p_concurrency_key text DEFAULT NULL::text, p_affinity_key text DEFAULT NULL::text, p_max_attempts smallint DEFAULT NULL::smallint, p_lease_seconds integer DEFAULT NULL::integer, p_backoff_mode text DEFAULT NULL::text, p_backoff_base integer DEFAULT NULL::integer, p_backoff_cap integer DEFAULT NULL::integer, p_depends_on uuid[] DEFAULT NULL::uuid[], p_workflow_id uuid DEFAULT NULL::uuid, p_step_key text DEFAULT NULL::text, p_parent_job_id uuid DEFAULT NULL::uuid, p_headers jsonb DEFAULT NULL::jsonb|TABLE(job_id uuid, created boolean)|plpgsql|v|u|taskq_producer
+taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)|p_queue text, p_job_type text, p_payload jsonb DEFAULT '{}'::jsonb, p_priority smallint DEFAULT NULL::smallint, p_scheduled_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_idempotency_key text DEFAULT NULL::text, p_concurrency_key text DEFAULT NULL::text, p_affinity_key text DEFAULT NULL::text, p_max_attempts smallint DEFAULT NULL::smallint, p_lease_seconds integer DEFAULT NULL::integer, p_backoff_mode text DEFAULT NULL::text, p_backoff_base integer DEFAULT NULL::integer, p_backoff_cap integer DEFAULT NULL::integer, p_depends_on uuid[] DEFAULT NULL::uuid[], p_workflow_id uuid DEFAULT NULL::uuid, p_step_key text DEFAULT NULL::text, p_parent_job_id uuid DEFAULT NULL::uuid, p_headers jsonb DEFAULT NULL::jsonb, p_ttl_seconds integer DEFAULT NULL::integer, p_flow_key text DEFAULT NULL::text|TABLE(job_id uuid, created boolean)|plpgsql|v|u|taskq_producer
 taskq.ensure_queue(text,jsonb,text)|p_name text, p_profile jsonb DEFAULT '{}'::jsonb, p_actor text DEFAULT NULL::text|TABLE(result text, profile jsonb)|plpgsql|v|u|taskq_operator
+taskq.expire_ttl(integer)|p_limit integer DEFAULT 200|integer|plpgsql|v|u|
 taskq.expire_job(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.expire_worker_leases(text,text)|p_worker_id text, p_actor text|jsonb|plpgsql|v|u|taskq_operator
 taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_error text, p_retryable boolean DEFAULT true, p_retry_after_seconds integer DEFAULT NULL::integer, p_progress jsonb DEFAULT NULL::jsonb, p_stats jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
@@ -507,6 +535,7 @@ taskq.finish_admission(text,text,uuid,jsonb,jsonb)|p_queue text, p_idempotency_k
 taskq.finalize_cancel_stragglers(integer)|p_limit integer|integer|plpgsql|v|u|
 taskq.finalize_dep_stragglers(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
 taskq.finalize_workflows(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
+taskq.flow_key_admit(text)|p_key text|boolean|plpgsql|v|u|
 taskq.get_authorization_projection(uuid)|p_job_id uuid|TABLE(job_id uuid, queue text, job_type text, status text)|sql|s|u|taskq_observer
 taskq.get_contract_meta()||TABLE(contract_version text, capabilities jsonb)|sql|s|u|taskq_observer
 taskq.get_job(uuid,boolean,boolean,boolean,boolean)|p_job_id uuid, p_include_error boolean DEFAULT false, p_include_result boolean DEFAULT false, p_include_progress boolean DEFAULT false, p_include_payload boolean DEFAULT false|TABLE(job_id uuid, queue text, job_type text, status text, outcome text, priority smallint, attempt_count smallint, failure_count smallint, max_attempts smallint, created_at timestamp with time zone, scheduled_at timestamp with time zone, started_at timestamp with time zone, finished_at timestamp with time zone, updated_at timestamp with time zone, error text, result jsonb, progress jsonb, payload jsonb)|sql|s|u|taskq_observer
@@ -538,7 +567,7 @@ taskq.reap_expired(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
 taskq.reap_job(uuid)|p_job_id uuid|boolean|plpgsql|v|u|
 taskq.queue_health(text)|p_queue text DEFAULT NULL::text|TABLE(queue text, verdict text, detail jsonb)|plpgsql|s|u|taskq_observer
 taskq.queue_health_internal()||TABLE(queue text, verdict text, detail jsonb)|plpgsql|s|u|
-taskq.redrive_failed(text,integer,text)|p_queue text, p_limit integer, p_actor text|TABLE(redriven integer, skipped integer)|plpgsql|v|u|taskq_operator
+taskq.redrive_failed(text,integer,text,integer)|p_queue text, p_limit integer, p_actor text, p_smear_seconds integer DEFAULT 0|TABLE(redriven integer, skipped integer)|plpgsql|v|u|taskq_operator
 taskq.redrive_job(uuid,text,boolean)|p_job_id uuid, p_actor text, p_reset_progress boolean DEFAULT false|boolean|plpgsql|v|u|taskq_operator
 taskq.refresh_stats_snapshot()||void|plpgsql|v|u|
 taskq.release_job(uuid,uuid,text,text,integer,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_cause text DEFAULT 'released'::text, p_delay_seconds integer DEFAULT 0, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
@@ -552,10 +581,12 @@ taskq.run_now(uuid,text)|p_job_id uuid, p_actor text|text|plpgsql|v|u|taskq_oper
 taskq.schedule_error(uuid,uuid,bigint,text,integer)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_error text, p_retry_seconds integer DEFAULT 30|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_error text, p_retry_seconds integer, p_deterministic boolean|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.seal_workflow(uuid,text)|p_workflow_id uuid, p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
+taskq.set_flow_limit(text,integer,integer,text)|p_key text, p_rate_per_minute integer, p_burst integer DEFAULT NULL::integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_concurrency_limit(text,integer,text)|p_key text, p_max_running integer, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.set_schedule_state(text,text,bigint,text,text)|p_name text, p_state text, p_expected_version bigint, p_actor text, p_reason text|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_delay_seconds integer, p_reason text DEFAULT NULL::text, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
 taskq.tick(integer)|p_reap_limit integer DEFAULT 200|jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
+taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)|p_queue text, p_job_type text, p_payload jsonb DEFAULT '{}'::jsonb, p_priority smallint DEFAULT NULL::smallint, p_scheduled_at timestamp with time zone DEFAULT NULL::timestamp with time zone, p_idempotency_key text DEFAULT NULL::text, p_concurrency_key text DEFAULT NULL::text, p_affinity_key text DEFAULT NULL::text, p_max_attempts smallint DEFAULT NULL::smallint, p_lease_seconds integer DEFAULT NULL::integer, p_backoff_mode text DEFAULT NULL::text, p_backoff_base integer DEFAULT NULL::integer, p_backoff_cap integer DEFAULT NULL::integer, p_depends_on uuid[] DEFAULT NULL::uuid[], p_workflow_id uuid DEFAULT NULL::uuid, p_step_key text DEFAULT NULL::text, p_parent_job_id uuid DEFAULT NULL::uuid, p_headers jsonb DEFAULT NULL::jsonb, p_ttl_seconds integer DEFAULT NULL::integer, p_flow_key text DEFAULT NULL::text|TABLE(outcome text, job_id uuid, retry_after_seconds integer)|plpgsql|v|u|taskq_producer
 taskq.truncate_utf8(text,integer)|p_value text, p_max_bytes integer|text|plpgsql|i|s|
 taskq.update_queue_profile(text,jsonb,text,bigint)|p_name text, p_profile jsonb, p_actor text, p_expected_version bigint|taskq.queue_profile_update|plpgsql|v|u|taskq_operator
 taskq.update_queue_counters()||trigger|plpgsql|v|u|
@@ -593,8 +624,8 @@ PUBLIC_ERRORS = {
     "taskq.cancel_workflow(uuid,text,text)": frozenset({"TQ001", "TQ422"}),
     "taskq.cancel_job(uuid,text,text)": frozenset({"TQ001"}),
     "taskq.cancel_running_job(uuid,uuid,text,text)": frozenset(),
-    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)": frozenset({"TQ422"}),
-    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])": frozenset(
+    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,boolean)": frozenset({"TQ422"}),
+    "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)": frozenset(
         {"TQ422", "TQ501"}
     ),
     "taskq.claim_schedules(text,integer,integer)": frozenset({"TQ422"}),
@@ -607,7 +638,7 @@ PUBLIC_ERRORS = {
         {"TQ001", "TQ409", "TQ422", "TQ501"}
     ),
     "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ422", "TQ429", "TQ500"}),
-    "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)": frozenset(
+    "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
         {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
     ),
     "taskq.ensure_queue(text,jsonb,text)": frozenset({"TQ422"}),
@@ -650,7 +681,11 @@ PUBLIC_ERRORS = {
     ),
     "taskq.put_schedule(text,jsonb,text,bigint)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.queue_health(text)": frozenset({"TQ001", "TQ501"}),
-    "taskq.redrive_failed(text,integer,text)": frozenset({"TQ422"}),
+    "taskq.redrive_failed(text,integer,text,integer)": frozenset({"TQ422"}),
+    "taskq.set_flow_limit(text,integer,integer,text)": frozenset({"TQ422", "TQ501"}),
+    "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
+        {"TQ422", "TQ501"}
+    ),
     "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
     "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
     "taskq.reprioritize(uuid,smallint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
@@ -693,10 +728,10 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.4.0"',
+    "contract_version": '"0.5.0"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
-        '"followups", "operator_schedule_list", "queue_counters", '
+        '"flow_control", "followups", "operator_schedule_list", "queue_counters", '
         '"read_model_job_events", "read_model_job_views_v2", '
         '"read_model_list_finished", "read_model_list_ready", '
         '"read_model_list_running", "read_model_workflow", '

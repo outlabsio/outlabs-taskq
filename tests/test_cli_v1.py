@@ -36,7 +36,7 @@ def _target(environment: str = "staging") -> TargetIdentityProfile:
         binding_version=3,
         bound_at=datetime(2026, 8, 4, tzinfo=UTC),
         bound_by="operator:test",
-        contract_version="0.4.0",
+        contract_version="0.5.0",
         capabilities={"active": []},
     )
 

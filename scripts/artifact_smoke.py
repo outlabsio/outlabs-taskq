@@ -48,7 +48,7 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.4.0"
+            == "0.5.0"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('queue_counters')") is True
@@ -295,7 +295,7 @@ def main() -> None:
         "payload": {},
         "headers": {},
     }
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.17"
 
     class ArtifactInput(BaseModel):
         value: int
@@ -443,8 +443,13 @@ def main() -> None:
         "0021_cli_read_model",
         "0022_queue_counters",
         "0023_activate_queue_counters",
+        "0024_flow_enforcement_producer",
+        "0025_flow_enforcement_claim",
+        "0026_flow_enforcement_enqueue",
+        "0027_activate_flow_control",
+        "0028_redrive_null_limit_guard",
     ]
-    assert len(FUNCTIONS) == 95
+    assert len(FUNCTIONS) == 102
 
     if args.mode != "core":
         return

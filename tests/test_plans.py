@@ -273,7 +273,9 @@ _READ_MODEL_PLAN_BINDINGS = {
 
 _PLAN_BINDINGS = {
     "claim": PlanBinding(
-        functions=("taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid)",),
+        functions=(
+            "taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,boolean)",
+        ),
         body_fragments=(
             "from taskq.jobs as j where j.queue = p_queue and j.status = 'queued'",
             "and j.scheduled_at <= now() and j.cancel_requested_at is null",
@@ -283,7 +285,7 @@ _PLAN_BINDINGS = {
     ),
     "dedup": PlanBinding(
         functions=(
-            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
             "taskq.enqueue_many(text,jsonb)",
         ),
         body_fragments=(
@@ -779,6 +781,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
         "active": [
             "admission_reservations",
             "dependencies_workflows",
+            "flow_control",
             "followups",
             "operator_schedule_list",
             "read_model_job_events",

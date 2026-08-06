@@ -31,7 +31,8 @@ BEHAVIOR_GROUPS = {
     },
     "bulk": {
         "taskq.enqueue_many(text,jsonb)",
-        "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+        "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
+        "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
     },
     "workflow": {
         "taskq.cancel_workflow(uuid,text,text)",
@@ -58,8 +59,8 @@ BEHAVIOR_GROUPS = {
     },
     "runner": {
         "taskq.cancel_running_job(uuid,uuid,text,text)",
-        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
-        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])",
+        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,boolean)",
+        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)",
         "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
         "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)",
         "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)",
@@ -89,13 +90,14 @@ BEHAVIOR_GROUPS = {
         "taskq.expire_worker_leases(text,text)",
         "taskq.pause_queue(text,text,text)",
         "taskq.purge_queued(text,integer,text,text)",
-        "taskq.redrive_failed(text,integer,text)",
+        "taskq.redrive_failed(text,integer,text,integer)",
         "taskq.redrive_job(uuid,text,boolean)",
         "taskq.reprioritize(uuid,smallint,text)",
         "taskq.request_worker_shutdown(text,text,text)",
         "taskq.resume_queue(text,text)",
         "taskq.run_now(uuid,text)",
         "taskq.set_concurrency_limit(text,integer,text)",
+        "taskq.set_flow_limit(text,integer,integer,text)",
         "taskq.list_schedules(text,integer,text)",
         "taskq.update_queue_profile(text,jsonb,text,bigint)",
     },
@@ -270,11 +272,12 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.4.0"
+    assert meta["contract_version"] == "0.5.0"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",
             "dependencies_workflows",
+            "flow_control",
             "followups",
             "operator_schedule_list",
             "queue_counters",

@@ -245,7 +245,7 @@ class TestPlan:
 
 def test_restore_equivalent_constraint_digest_is_exactly_bounded() -> None:
     assert sql_manifest.CONSTRAINT_EQUIVALENT_DIGESTS == {}
-    assert sql_manifest.CONSTRAINTS["schedules"][1] == "3dcdfe858a4cc75d569883ae7a3a18e2"
+    assert sql_manifest.CONSTRAINTS["schedules"][1] == "c20e70ddf516bb88d89d20a44bade146"
 
 
 class TestVerifyReport:

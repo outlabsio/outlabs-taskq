@@ -66,6 +66,11 @@ async def test_benchmark_scenario_records_json(
         "0021_cli_read_model",
         "0022_queue_counters",
         "0023_activate_queue_counters",
+        "0024_flow_enforcement_producer",
+        "0025_flow_enforcement_claim",
+        "0026_flow_enforcement_enqueue",
+        "0027_activate_flow_control",
+        "0028_redrive_null_limit_guard",
     ]
     assert len(result["runs"]) == (6 if scenario in {"B8", "B11"} else 3)
     assert result["summary"]["median_throughput_rows_per_second"] > 0

@@ -246,7 +246,7 @@ async def test_activation_preserves_old_worker_rollback_and_new_policy_drain(
 
     for label, policy_hash in (("a", "a" * 64), ("b", "b" * 64)):
         new_batch = await runner.fetchrow(
-            "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4)",
+            "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4::text[])",
             queue,
             f"new-worker-{label}",
             policy_jobs[label],
