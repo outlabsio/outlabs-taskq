@@ -96,7 +96,7 @@ async def _claim(
     runner: asyncpg.Connection, queue: str, worker: str, job_id: UUID
 ) -> asyncpg.Record:
     batch = await runner.fetchrow(
-        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4)",
+        "SELECT * FROM taskq.claim_jobs($1,$2,1,NULL,NULL,NULL,$3,$4::text[])",
         queue,
         worker,
         job_id,

@@ -890,6 +890,7 @@ class _FacadeDispatcher:
             "lease_seconds": body.lease_seconds,
             "affinity_key": body.affinity_key,
             "job_id": body.job_id,
+            "accept_throttled": body.accept_throttled,
         }
         if body.supported_policy_hashes is not None:
             claim_options["supported_policy_hashes"] = body.supported_policy_hashes
@@ -903,7 +904,10 @@ class _FacadeDispatcher:
             )
             outcome = self._claim_outcome(result)
             if outcome != "empty" or body.wait_seconds == 0:
-                return outcome, ClaimWireData(jobs=tuple(_wire_job(job) for job in result.jobs))
+                return outcome, ClaimWireData(
+                    jobs=tuple(_wire_job(job) for job in result.jobs),
+                    retry_after_seconds=result.retry_after_seconds,
+                )
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 return "timeout", ClaimWireData(jobs=())
@@ -919,7 +923,10 @@ class _FacadeDispatcher:
                 )
                 outcome = self._claim_outcome(result)
                 if outcome != "empty":
-                    return outcome, ClaimWireData(jobs=tuple(_wire_job(job) for job in result.jobs))
+                    return outcome, ClaimWireData(
+                        jobs=tuple(_wire_job(job) for job in result.jobs),
+                        retry_after_seconds=result.retry_after_seconds,
+                    )
                 if await request.is_disconnected():
                     raise TaskqUnavailableError(details={"reason": "claim_client_disconnected"})
                 remaining = deadline - time.monotonic()

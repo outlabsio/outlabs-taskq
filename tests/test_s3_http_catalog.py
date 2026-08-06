@@ -493,7 +493,7 @@ def _assert_catalog_matches_hand_derived_oracle(
 
 def test_http_catalog_matches_hand_derived_tier0_oracle() -> None:
     assert PROTOCOL_MAJOR == 1
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.17"
     _assert_catalog_matches_hand_derived_oracle()
 
 

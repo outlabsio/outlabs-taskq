@@ -52,7 +52,7 @@ class Output(BaseModel):
 
 
 def test_runtime_binds_current_protocol_document_revision() -> None:
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.17"
 
 
 def test_policy_advertisement_wire_bounds_and_canonicalizes() -> None:

@@ -67,6 +67,13 @@ async def test_profile_version_and_observer_projection_are_bounded(
         "max_depth",
         "notify_enabled",
         "paused",
+        "max_running",
+        "claim_rate_per_minute",
+        "claim_burst",
+        "ramp_seconds",
+        "default_ttl_seconds",
+        "backpressure_retry_seconds",
+        "notify_mode",
     }
     assert profile["profile_version"] == 2
 

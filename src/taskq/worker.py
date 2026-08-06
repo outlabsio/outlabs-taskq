@@ -564,6 +564,7 @@ class WorkerService:
                     claim_options: dict[str, Any] = {
                         "batch": batch,
                         "job_types": self._job_types_by_queue[queue],
+                        "accept_throttled": True,
                     }
                     if self._supported_policy_hashes:
                         claim_options["supported_policy_hashes"] = self._supported_policy_hashes
@@ -614,6 +615,14 @@ class WorkerService:
                         claimed_in_sweep = True
                     elif result.state is ClaimState.EMPTY:
                         self._observe_claim_result(0, batch)
+                    elif result.state is ClaimState.THROTTLED:
+                        # A typed flow verdict, not an error: honor the server's
+                        # retry hint (client-jittered upward) via the existing
+                        # per-queue retry map. No error streak, never fatal.
+                        delay = max(1, result.retry_after_seconds or 1) * (
+                            1 + self._rng.uniform(0.0, 0.3)
+                        )
+                        self._claim_retry_at[queue] = self.clock.monotonic() + delay
                     elif result.state in (ClaimState.UNKNOWN_QUEUE, ClaimState.UNAVAILABLE):
                         raise WorkerInvariantError(
                             f"unexpected claim state for subscribed queue: {result.state.value}"

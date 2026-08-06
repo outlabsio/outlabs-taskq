@@ -47,7 +47,7 @@ def test_0017_follows_byte_immutable_0016_definition() -> None:
 def test_0_2_5_machine_surface_has_exact_wfc_overloads() -> None:
     assert {
         "taskq._reserve_workflow_members(uuid,integer,text)",
-        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])",
+        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)",
         "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)",
         "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)",
     } <= set(FUNCTIONS)
@@ -61,7 +61,7 @@ async def test_0017_metadata_activates_workflow_continuations(
 ) -> None:
     assert (
         await pg.fetchval("SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'")
-        == "0.4.0"
+        == "0.5.0"
     )
     assert await pg.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
     assert (
@@ -121,11 +121,11 @@ async def test_legacy_claim_body_is_null_policy_only_and_new_frontier_is_bounded
 ) -> None:
     old_definition = await pg.fetchval(
         "SELECT pg_get_functiondef('taskq._claim_jobs_unattested(text,text,integer,text[],"
-        "integer,text,uuid)'::regprocedure)"
+        "integer,text,uuid,boolean)'::regprocedure)"
     )
     new_definition = await pg.fetchval(
         "SELECT pg_get_functiondef('taskq._claim_jobs_unattested(text,text,integer,text[],"
-        "integer,text,uuid,text[])'::regprocedure)"
+        "integer,text,uuid,text[],boolean)'::regprocedure)"
     )
     assert "j.continuation_policy_hash IS NULL" in old_definition
     assert "unnest(array_prepend(NULL::text,v_hashes))" in new_definition

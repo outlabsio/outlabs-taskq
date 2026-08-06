@@ -141,6 +141,7 @@ class ScriptedTransport:
         affinity_key: str | None = None,
         job_id: UUID | None = None,
         supported_policy_hashes: Sequence[str] | None = None,
+        accept_throttled: bool = False,
     ) -> ClaimResult:
         return await self._next(
             "claim",

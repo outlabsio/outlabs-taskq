@@ -120,7 +120,7 @@ CASES = (
     Corruption(
         "function_owner",
         (
-            "ALTER FUNCTION taskq.enqueue(text,text,jsonb,smallint,timestamptz,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb) OWNER TO taskq_operator",
+            "ALTER FUNCTION taskq.enqueue(text,text,jsonb,smallint,timestamptz,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text) OWNER TO taskq_operator",
         ),
         "function_hardening",
         "expected 'taskq_owner'",
@@ -315,8 +315,8 @@ def _failed_check(report: object, name: str) -> object:
     return matches[0]
 
 
-def test_machine_manifest_has_closed_0_4_0_function_surface() -> None:
-    assert len(FUNCTIONS) == 95
+def test_machine_manifest_has_closed_0_5_0_function_surface() -> None:
+    assert len(FUNCTIONS) == 102
     assert "taskq.queue_health(text)" in FUNCTIONS
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
     assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS
@@ -328,7 +328,13 @@ def test_machine_manifest_has_closed_0_4_0_function_surface() -> None:
     assert "taskq.create_workflow(text,text,jsonb,text[],text)" in FUNCTIONS
     assert "taskq.list_worker_presence(integer,timestamp with time zone,text)" in FUNCTIONS
     assert "taskq._reserve_workflow_members(uuid,integer,text)" in FUNCTIONS
-    assert "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[])" in FUNCTIONS
+    assert (
+        "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)" in FUNCTIONS
+    )
+    assert (
+        "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)"
+        in FUNCTIONS
+    )
     assert "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)" in FUNCTIONS
     assert "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)" in FUNCTIONS
     assert "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)" in FUNCTIONS
