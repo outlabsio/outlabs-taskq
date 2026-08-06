@@ -125,6 +125,58 @@ class CliTransport:
             raise TaskqCapabilityError(details={"transport": "http", "command": "redrive_failed"})
         return await self.transport.redrive_failed(queue, limit, self._actor())
 
+    async def queue_set_breaker(
+        self, queue: str, threshold: int | None, cooldown_seconds: int, half_open_successes: int
+    ) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "set_breaker_config"}
+            )
+        return {
+            "outcome": await self.transport.set_breaker_config(
+                queue, threshold, cooldown_seconds, half_open_successes, self._actor()
+            )
+        }
+
+    async def queue_trip_breaker(self, queue: str) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(details={"transport": "http", "command": "trip_breaker"})
+        return {"outcome": await self.transport.trip_breaker(queue, self._actor())}
+
+    async def queue_close_breaker(self, queue: str) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "force_close_breaker"}
+            )
+        return {"outcome": await self.transport.force_close_breaker(queue, self._actor())}
+
+    async def queue_set_aging(self, queue: str, aging_seconds: int | None) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "set_priority_aging"}
+            )
+        return {
+            "outcome": await self.transport.set_priority_aging(queue, aging_seconds, self._actor())
+        }
+
+    async def queue_set_flow_limit(self, key: str, rate_per_minute: int, burst: int | None) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(details={"transport": "http", "command": "set_flow_limit"})
+        return {
+            "outcome": await self.transport.set_flow_limit(
+                key, rate_per_minute, burst, self._actor()
+            )
+        }
+
+    async def schedule_set_smear(self, name: str, smear_seconds: int | None) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "set_schedule_smear"}
+            )
+        return {
+            "outcome": await self.transport.set_schedule_smear(name, smear_seconds, self._actor())
+        }
+
     async def job_list(self, queue: str, view: str, limit: int, cursor: Any) -> Any:
         if self.mode == "sql":
             return await self.transport.list_jobs(queue, view, limit=limit, after=cursor)

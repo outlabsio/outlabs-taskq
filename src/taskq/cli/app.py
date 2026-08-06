@@ -914,6 +914,96 @@ def queue_redrive_failed_command(state: CliState, queue: str, limit: int) -> Non
     _run(_transport_operation(state, "queue.redrive-failed", "QueueRedrive", operation))
 
 
+@queue_group.command("set-breaker")
+@click.argument("queue")
+@click.option(
+    "--failure-threshold",
+    type=click.IntRange(min=1),
+    help="consecutive terminal failures that trip the breaker",
+)
+@click.option("--off", is_flag=True, help="disable the breaker for this queue")
+@click.option(
+    "--cooldown-seconds", type=click.IntRange(min=1, max=86400), default=30, show_default=True
+)
+@click.option(
+    "--half-open-successes", type=click.IntRange(min=1, max=100), default=1, show_default=True
+)
+@pass_state
+def queue_set_breaker_command(
+    state: CliState,
+    queue: str,
+    failure_threshold: int | None,
+    off: bool,
+    cooldown_seconds: int,
+    half_open_successes: int,
+) -> None:
+    if off == (failure_threshold is not None):
+        raise click.UsageError("give exactly one of --failure-threshold or --off")
+    threshold = None if off else failure_threshold
+
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_set_breaker(
+            queue, threshold, cooldown_seconds, half_open_successes
+        )
+
+    _run(_transport_operation(state, "queue.set-breaker", "QueueControl", operation))
+
+
+@queue_group.command("trip-breaker")
+@click.argument("queue")
+@pass_state
+def queue_trip_breaker_command(state: CliState, queue: str) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_trip_breaker(queue)
+
+    _run(_transport_operation(state, "queue.trip-breaker", "QueueControl", operation))
+
+
+@queue_group.command("close-breaker")
+@click.argument("queue")
+@pass_state
+def queue_close_breaker_command(state: CliState, queue: str) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_close_breaker(queue)
+
+    _run(_transport_operation(state, "queue.close-breaker", "QueueControl", operation))
+
+
+@queue_group.command("set-aging")
+@click.argument("queue")
+@click.option(
+    "--aging-seconds",
+    type=click.IntRange(min=1),
+    help="seconds of waiting per one step of effective-priority improvement",
+)
+@click.option("--off", is_flag=True, help="disable aging (strict priority)")
+@pass_state
+def queue_set_aging_command(
+    state: CliState, queue: str, aging_seconds: int | None, off: bool
+) -> None:
+    if off == (aging_seconds is not None):
+        raise click.UsageError("give exactly one of --aging-seconds or --off")
+
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_set_aging(queue, None if off else aging_seconds)
+
+    _run(_transport_operation(state, "queue.set-aging", "QueueControl", operation))
+
+
+@queue_group.command("set-flow-limit")
+@click.argument("key")
+@click.option("--rate-per-minute", type=click.IntRange(min=1), required=True)
+@click.option("--burst", type=click.IntRange(min=1), default=None)
+@pass_state
+def queue_set_flow_limit_command(
+    state: CliState, key: str, rate_per_minute: int, burst: int | None
+) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_set_flow_limit(key, rate_per_minute, burst)
+
+    _run(_transport_operation(state, "queue.set-flow-limit", "QueueControl", operation))
+
+
 def _next_page_value(page: Any) -> Any:
     for field in ("next_after", "next_cursor"):
         value = getattr(page, field, None)
@@ -1874,6 +1964,27 @@ def schedule_retire_command(state: CliState, name: str, expected_version: int) -
         return await transport.schedule_retire(name, expected_version)
 
     _run(_transport_operation(state, "schedule.retire", "ScheduleMutation", operation))
+
+
+@schedule_group.command("set-smear")
+@click.argument("name")
+@click.option(
+    "--smear-seconds",
+    type=click.IntRange(min=1, max=3600),
+    help="deterministic per-schedule firing offset window (1..3600)",
+)
+@click.option("--off", is_flag=True, help="clear the smear (fire on the exact lattice)")
+@pass_state
+def schedule_set_smear_command(
+    state: CliState, name: str, smear_seconds: int | None, off: bool
+) -> None:
+    if off == (smear_seconds is not None):
+        raise click.UsageError("give exactly one of --smear-seconds or --off")
+
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.schedule_set_smear(name, None if off else smear_seconds)
+
+    _run(_transport_operation(state, "schedule.set-smear", "ScheduleMutation", operation))
 
 
 async def _schedule_observe(

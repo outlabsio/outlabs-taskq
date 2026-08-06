@@ -165,11 +165,11 @@ Use `taskq commands -o json` for complete machine metadata.
 | Context | `context list`, `context show`, `context validate` |
 | Database | `db plan`, `db migrate`, `db verify` |
 | Target | `target show`, `target bind` |
-| Queues | `queue list`, `health`, `show`, `ensure`, `update`, `pause`, `resume`, `purge`, `redrive-failed` |
+| Queues | `queue list`, `health`, `show`, `ensure`, `update`, `pause`, `resume`, `purge`, `redrive-failed`; flow control: `set-breaker`, `trip-breaker`, `close-breaker`, `set-aging`, `set-flow-limit` |
 | Jobs | `job list`, `show`, `events`, `enqueue`, `enqueue-many`, `cancel`, `redrive`, `run-now`, `reprioritize`, `expire`, `watch`, `wait` |
 | Workers | `worker run`, `list`, `shutdown`, `expire-leases` |
 | Workflows | `workflow list`, `show`, `create`, `seal`, `cancel`, `watch`, `wait` |
-| Schedules | `schedule list`, `show`, `pause`, `resume`, `retire`, `watch`, `wait`; `schedule manifest plan|apply|retire` |
+| Schedules | `schedule list`, `show`, `pause`, `resume`, `retire`, `set-smear`, `watch`, `wait`; `schedule manifest plan|apply|retire` |
 | Runtime/admin | `scheduler run|once|doctor`, `maintenance tick|janitor`, `auth plan|apply`, `metrics` |
 
 ## Bounded reads, cursors, watch, and wait
