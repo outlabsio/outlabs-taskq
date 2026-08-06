@@ -90,6 +90,11 @@ async def test_load_scenario_records_and_enforces(
         assert defects["single_flight_probe"] is True
         assert defects["recovers_and_ramps"] is True
         assert metrics["probes_admitted_under_fan"] == 1
+    elif scenario == "L9":
+        defects = result["defect_observations"]
+        assert defects["strict_starves_low"] is True
+        assert defects["aging_promotes_low"] is True
+        assert metrics["aged_last_low_position"] < metrics["strict_last_low_position"]
     elif scenario == "L10":
         defects = result["defect_observations"]
         assert defects["queue_rate_converges"] is True

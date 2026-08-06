@@ -36,7 +36,7 @@ from taskq.scheduler import SchedulerEngine
 from taskq.schedules import smear_offset_seconds
 from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L10")
+SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L9", "L10")
 
 
 def _check(name: str, ok: bool, **detail: Any) -> dict[str, Any]:
@@ -1624,6 +1624,116 @@ async def _l8_circuit_breaker(ctx: ScenarioContext) -> dict[str, Any]:
         await producer.close()
 
 
+# ---------------------------------------------------------------------------- L9
+
+
+async def _l9_priority_aging(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 3 fairness gate (0.6 spec S7): with a backlog of aged low-priority
+    work under a flood of fresh high-priority work, strict priority starves the
+    low-priority jobs (claimed only after every high-priority job); priority
+    aging promotes the aged jobs so they claim first, bounding their wait. The
+    aging-off arm and the aging-on arm are the same seed/shape — only the config
+    differs. Deterministic: low-priority jobs are backdated to simulate the wait.
+    """
+
+    low = 5
+    high = max(15, ctx.scale.storm_workers * 2)
+    claim_sql = (
+        "SELECT * FROM taskq.claim_jobs("
+        "$1,$2,1,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)"
+    )
+
+    async def _drain_order(queue: str, aging: bool) -> list[str]:
+        await ctx.ensure_queue(queue)
+        if aging:
+            # 1s per step; the 600s-aged low jobs get a capped-1000 boost, so their
+            # effective priority (10 - 600) beats fresh high-priority (0).
+            await ctx.operator.fetchval("SELECT taskq.set_priority_aging($1,1,'loadlab')", queue)
+        prod = await ctx.producer()
+        for i in range(low):
+            await prod.fetchrow(
+                "SELECT * FROM taskq.enqueue($1,'low','{}'::jsonb,"
+                "p_priority=>10::smallint,p_idempotency_key=>$2)",
+                queue,
+                f"l9-low-{ctx.seed}-{i}",
+            )
+        # Backdate the low cohort to simulate a long wait (deterministic).
+        await ctx.admin.execute(
+            "UPDATE taskq.jobs SET scheduled_at = now() - interval '600 seconds'"
+            " WHERE queue=$1 AND job_type='low'",
+            queue,
+        )
+        for i in range(high):
+            await prod.fetchrow(
+                "SELECT * FROM taskq.enqueue($1,'high','{}'::jsonb,"
+                "p_priority=>0::smallint,p_idempotency_key=>$2)",
+                queue,
+                f"l9-high-{ctx.seed}-{i}",
+            )
+        await prod.close()
+        runner = await _connect_role(ctx.dsn, "taskq_runner")
+        order: list[str] = []
+        try:
+            for _ in range(low + high):
+                b = await _attested_fetchrow(runner, claim_sql, queue, "l9")
+                if b is None or b["state"] != "claimed":
+                    break
+                order.append(str(b["jobs"][0]["job_type"]))
+        finally:
+            await runner.close()
+        return order
+
+    strict = await _drain_order("load_l9_strict", aging=False)
+    aged = await _drain_order("load_l9_aged", aging=True)
+
+    # Position of the last low-priority claim (0-indexed). Strict: at the very
+    # back (starved). Aged: among the first `low` (promoted).
+    strict_low_positions = [i for i, t in enumerate(strict) if t == "low"]
+    aged_low_positions = [i for i, t in enumerate(aged) if t == "low"]
+    strict_first_high_block = all(t == "high" for t in strict[:high])
+    aged_low_first = all(t == "low" for t in aged[:low])
+
+    checks = [
+        _check(
+            "strict_priority_starves_low",
+            strict_first_high_block and strict_low_positions == list(range(high, high + low)),
+            last_low=max(strict_low_positions, default=-1),
+            high=high,
+        ),
+        _check(
+            "aging_promotes_aged_low",
+            aged_low_first and aged_low_positions == list(range(low)),
+            aged_low_positions=aged_low_positions,
+        ),
+        _check(
+            "aging_bounds_low_wait",
+            max(aged_low_positions, default=10**9)
+            < min((i for i, t in enumerate(aged) if t == "high"), default=-1),
+            aged_max_low=max(aged_low_positions, default=-1),
+        ),
+        _check(
+            "all_jobs_claimed_both_arms",
+            len(strict) == low + high and len(aged) == low + high,
+            strict=len(strict),
+            aged=len(aged),
+        ),
+    ]
+    return {
+        "metrics": {
+            "low_jobs": low,
+            "high_jobs": high,
+            "strict_last_low_position": max(strict_low_positions, default=-1),
+            "aged_last_low_position": max(aged_low_positions, default=-1),
+        },
+        "invariant_checks": checks,
+        "defect_observations": {
+            "strict_starves_low": strict_first_high_block,
+            "aging_promotes_low": aged_low_first,
+            "expected_posture": "0.6.1-aging",
+        },
+    }
+
+
 SCENARIO_RUNNERS = {
     "L1": _l1_notify_herd,
     "L2": _l2_retry_storm,
@@ -1633,5 +1743,6 @@ SCENARIO_RUNNERS = {
     "L6": _l6_counter_contention,
     "L7": _l7_resume_redrive_stampede,
     "L8": _l8_circuit_breaker,
+    "L9": _l9_priority_aging,
     "L10": _l10_rate_conformance,
 }
