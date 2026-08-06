@@ -36,7 +36,7 @@ from taskq.scheduler import SchedulerEngine
 from taskq.schedules import smear_offset_seconds
 from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L10")
+SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L8", "L10")
 
 
 def _check(name: str, ok: bool, **detail: Any) -> dict[str, Any]:
@@ -1424,6 +1424,206 @@ async def _l3_schedule_codue(ctx: ScenarioContext) -> dict[str, Any]:
     }
 
 
+# ---------------------------------------------------------------------------- L8
+
+
+async def _l8_circuit_breaker(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 3 gate (0.6 spec S4.1): a per-queue breaker trips after exactly
+    `threshold` consecutive terminal failures; while open, claims are throttled
+    and NO job is burned; after cooldown exactly one probe is admitted
+    (single-flight under a concurrent fan); a failing probe re-opens; a
+    succeeding probe closes the breaker and stamps the recovery ramp. A
+    breaker-off control queue with the same failure pattern is unaffected.
+    """
+
+    threshold, cooldown = 3, 2
+    q = "load_l8"
+    await ctx.ensure_queue(q)
+    await ctx.operator.fetchval(
+        "SELECT taskq.set_breaker_config($1,$2,$3,1,'loadlab')", q, threshold, cooldown
+    )
+    total = max(40, ctx.scale.cohort_jobs)
+    producer = await ctx.producer()
+    await ctx.enqueue_many(producer, q, "load.brk", f"l8-{ctx.seed}", total)
+
+    claim_sql = (
+        "SELECT * FROM taskq.claim_jobs("
+        "$1,$2,1,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)"
+    )
+
+    async def one_claim(worker_id: str) -> tuple[str, Any]:
+        conn = await _connect_role(ctx.dsn, "taskq_runner")
+        try:
+            b = await _attested_fetchrow(conn, claim_sql, q, worker_id)
+            assert b is not None
+            return str(b["state"]), (b["jobs"][0] if b["state"] == "claimed" else None)
+        finally:
+            await conn.close()
+
+    runner = await _connect_role(ctx.dsn, "taskq_runner")
+    checks: list[dict[str, Any]] = []
+    try:
+
+        async def brk() -> dict[str, Any]:
+            return dict(
+                await ctx.admin.fetchrow(
+                    "SELECT breaker_state, breaker_failure_streak, breaker_opened_total"
+                    " FROM taskq.queue_flow WHERE queue=$1",
+                    q,
+                )
+            )
+
+        async def claim_fail() -> None:
+            b = await _attested_fetchrow(runner, claim_sql, q, "l8")
+            assert b is not None and b["state"] == "claimed"
+            job = b["jobs"][0]
+            await runner.fetchrow(
+                "SELECT * FROM taskq.fail_job($1,$2,$3,$4,false)",
+                job["job_id"],
+                job["attempt_id"],
+                "l8",
+                "boom",
+            )
+
+        # Phase 1 — trip on exactly `threshold` consecutive terminal failures.
+        trip_states = []
+        for _ in range(threshold):
+            await claim_fail()
+            trip_states.append((await brk())["breaker_state"])
+        checks.append(
+            _check(
+                "trips_exactly_at_threshold",
+                trip_states == ["closed"] * (threshold - 1) + ["open"],
+                trip_states=trip_states,
+            )
+        )
+
+        # Phase 2 — open: a concurrent fan is fully throttled, nothing burned.
+        fan = max(6, ctx.scale.storm_workers)
+        open_states = await asyncio.gather(*(one_claim(f"l8-open-{i}") for i in range(fan)))
+        open_running = int(
+            await ctx.admin.fetchval(
+                "SELECT count(*) FROM taskq.jobs WHERE queue=$1 AND status='running'", q
+            )
+            or 0
+        )
+        checks.append(
+            _check(
+                "open_throttles_all_and_burns_nothing",
+                all(s == "throttled" for s, _ in open_states) and open_running == 0,
+                claimed=sum(1 for s, _ in open_states if s == "claimed"),
+                running=open_running,
+            )
+        )
+
+        # Phase 3 — cooldown, then a concurrent fan admits exactly ONE probe.
+        await asyncio.sleep(cooldown + 0.3)
+        probe_states = await asyncio.gather(*(one_claim(f"l8-probe-{i}") for i in range(fan)))
+        probe_claimed = [job for s, job in probe_states if s == "claimed"]
+        checks.append(
+            _check(
+                "half_open_single_flight_one_probe",
+                len(probe_claimed) == 1,
+                probes_admitted=len(probe_claimed),
+                fan=fan,
+            )
+        )
+        # Fail the probe -> re-open (opened_total increments).
+        opened_before = (await brk())["breaker_opened_total"]
+        if probe_claimed:
+            job = probe_claimed[0]
+            await runner.fetchrow(
+                "SELECT * FROM taskq.fail_job($1,$2,$3,$4,false)",
+                job["job_id"],
+                job["attempt_id"],
+                "l8",
+                "still-bad",
+            )
+        reopened = await brk()
+        checks.append(
+            _check(
+                "failing_probe_reopens",
+                reopened["breaker_state"] == "open"
+                and reopened["breaker_opened_total"] == opened_before + 1,
+                state=reopened["breaker_state"],
+            )
+        )
+
+        # Phase 4 — recovery: a succeeding probe closes the breaker and ramps.
+        await asyncio.sleep(cooldown + 0.3)
+        b = await _attested_fetchrow(runner, claim_sql, q, "l8-recover")
+        recovered_probe = b is not None and b["state"] == "claimed"
+        if recovered_probe:
+            job = b["jobs"][0]
+            await runner.fetchrow(
+                "SELECT * FROM taskq.complete_job($1,$2,$3)", job["job_id"], job["attempt_id"], "l8"
+            )
+        final = await brk()
+        ramped = await ctx.admin.fetchval(
+            "SELECT ramp_started_at IS NOT NULL FROM taskq.queue_flow WHERE queue=$1", q
+        )
+        checks.append(
+            _check(
+                "recovery_closes_and_ramps",
+                recovered_probe and final["breaker_state"] == "closed" and ramped is True,
+                state=final["breaker_state"],
+                ramped=ramped,
+            )
+        )
+
+        # Control — a breaker-off queue with the same failures never trips.
+        qc = "load_l8_ctl"
+        await ctx.ensure_queue(qc)
+        cprod = await ctx.producer()
+        await ctx.enqueue_many(cprod, qc, "load.brk", f"l8c-{ctx.seed}", 8)
+        await cprod.close()
+        for _ in range(threshold + 1):
+            b = await _attested_fetchrow(runner, claim_sql, qc, "l8c")
+            assert b is not None and b["state"] == "claimed"
+            job = b["jobs"][0]
+            await runner.fetchrow(
+                "SELECT * FROM taskq.fail_job($1,$2,$3,$4,false)",
+                job["job_id"],
+                job["attempt_id"],
+                "l8c",
+                "boom",
+            )
+        b = await _attested_fetchrow(runner, claim_sql, qc, "l8c")
+        checks.append(
+            _check(
+                "breaker_off_control_unaffected",
+                b is not None and b["state"] == "claimed",
+                state=(b["state"] if b else None),
+            )
+        )
+
+        # No lost/duplicate jobs on the breaker queue.
+        job_count = int(
+            await ctx.admin.fetchval("SELECT count(*) FROM taskq.jobs WHERE queue=$1", q) or 0
+        )
+        checks.append(_check("no_lost_or_duplicate_jobs", job_count == total, jobs=job_count))
+
+        return {
+            "metrics": {
+                "threshold": threshold,
+                "cooldown_seconds": cooldown,
+                "fan_out": fan,
+                "probes_admitted_under_fan": len(probe_claimed),
+                "opened_total": final["breaker_opened_total"],
+            },
+            "invariant_checks": checks,
+            "defect_observations": {
+                "trips_at_threshold": trip_states[-1] == "open",
+                "single_flight_probe": len(probe_claimed) == 1,
+                "recovers_and_ramps": final["breaker_state"] == "closed" and ramped is True,
+                "expected_posture": "0.6.0-breaker",
+            },
+        }
+    finally:
+        await runner.close()
+        await producer.close()
+
+
 SCENARIO_RUNNERS = {
     "L1": _l1_notify_herd,
     "L2": _l2_retry_storm,
@@ -1432,5 +1632,6 @@ SCENARIO_RUNNERS = {
     "L5": _l5_claim_error_posture,
     "L6": _l6_counter_contention,
     "L7": _l7_resume_redrive_stampede,
+    "L8": _l8_circuit_breaker,
     "L10": _l10_rate_conformance,
 }

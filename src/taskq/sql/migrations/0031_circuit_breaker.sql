@@ -92,10 +92,11 @@ BEGIN
         RETURN 1;  -- another worker is probing
     END IF;
 
-    -- half_open: admit one probe at a time; others wait for it to settle.
-    IF pg_try_advisory_xact_lock(hashtextextended('taskq.breaker:' || p_queue, 0)) THEN
-        RETURN NULL;
-    END IF;
+    -- half_open: a probe was already admitted at the open->half_open transition
+    -- (elected by the advisory lock). Throttle every other claim until that probe
+    -- settles and the settle trigger moves the state to closed or open again.
+    -- This is the true single-flight guarantee: exactly one probe per cycle,
+    -- independent of the claim's transaction-scoped lock lifetime.
     RETURN 1;
 END $$;
 ALTER FUNCTION taskq._breaker_gate(text) OWNER TO taskq_owner;
