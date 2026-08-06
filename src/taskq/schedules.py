@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+import hashlib
 import re
 from typing import Any, Literal
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
@@ -113,6 +115,24 @@ def _next(recurrence: Mapping[str, Any], after: datetime) -> datetime:
     raise TaskqValidationError(details={"field": "recurrence"})
 
 
+def smear_offset_seconds(schedule_id: UUID, smear_seconds: int | None) -> int:
+    """Deterministic per-schedule firing offset, 0 when smear is off.
+
+    A stable, process-independent hash of the schedule id modulo ``smear_seconds``
+    (positive, in ``[0, smear_seconds)``). Two schedules sharing a cron expression
+    get different constant offsets, so their firings de-align instead of stampeding
+    on the same instant; a single schedule always gets the SAME offset, so its
+    cadence stays drift-free (the whole lattice shifts by one constant, never
+    accumulates). Uses blake2b, not the salted builtin ``hash()``, so the offset
+    is identical across processes and restarts.
+    """
+
+    if not smear_seconds or smear_seconds <= 0:
+        return 0
+    digest = hashlib.blake2b(schedule_id.bytes, digest_size=8).digest()
+    return int.from_bytes(digest, "big") % smear_seconds
+
+
 def evaluate_schedule(
     *,
     recurrence: Mapping[str, Any],
@@ -121,8 +141,53 @@ def evaluate_schedule(
     initialized: bool,
     next_fire_at: datetime,
     as_of: datetime,
+    smear_offset_seconds: int = 0,
 ) -> ScheduleEvaluation:
-    """Evaluate one claim using only its database-provided instants."""
+    """Evaluate one claim using only its database-provided instants.
+
+    ``smear_offset_seconds`` (from :func:`smear_offset_seconds`) shifts the
+    schedule's whole recurrence lattice by one per-schedule constant: the inputs
+    are moved into the un-smeared base frame, the pure evaluation runs there, and
+    every output instant is shifted back. This is exact for both interval and
+    cron lattices (a constant time translation preserves ordering, the
+    due<=as_of relationship, and 'next after last occurrence'), and drift-free
+    because the stored next_fire_at is always base_point + offset, so successive
+    claims recover the same base lattice. 0 (the default) is a pure passthrough.
+    """
+
+    if smear_offset_seconds:
+        off = timedelta(seconds=smear_offset_seconds)
+        base = _evaluate_base(
+            recurrence=recurrence,
+            catchup_policy=catchup_policy,
+            max_catchup=max_catchup,
+            initialized=initialized,
+            next_fire_at=next_fire_at - off,
+            as_of=as_of - off,
+        )
+        return ScheduleEvaluation(
+            occurrences=tuple(instant + off for instant in base.occurrences),
+            next_fire_at=base.next_fire_at + off,
+        )
+    return _evaluate_base(
+        recurrence=recurrence,
+        catchup_policy=catchup_policy,
+        max_catchup=max_catchup,
+        initialized=initialized,
+        next_fire_at=next_fire_at,
+        as_of=as_of,
+    )
+
+
+def _evaluate_base(
+    *,
+    recurrence: Mapping[str, Any],
+    catchup_policy: Literal["skip", "fire_once", "fire_all"] | str,
+    max_catchup: int,
+    initialized: bool,
+    next_fire_at: datetime,
+    as_of: datetime,
+) -> ScheduleEvaluation:
 
     due = _aware_utc(next_fire_at, "next_fire_at")
     cutoff = _aware_utc(as_of, "as_of")
@@ -164,4 +229,9 @@ def evaluate_schedule(
     return ScheduleEvaluation(occurrences=tuple(occurrences), next_fire_at=cursor)
 
 
-__all__ = ["ScheduleEvaluation", "evaluate_schedule", "validate_cron"]
+__all__ = [
+    "ScheduleEvaluation",
+    "evaluate_schedule",
+    "smear_offset_seconds",
+    "validate_cron",
+]

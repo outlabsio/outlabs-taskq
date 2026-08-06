@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.5.0.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.5.2.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.5.0"
+CONTRACT_VERSION = "0.5.2"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -336,6 +336,7 @@ COMPOSITES = {
         ("next_fire_at", "timestamp with time zone"),
         ("token", "uuid"),
         ("lease_seconds", "integer"),
+        ("smear_seconds", "integer"),
     ),
     "schedule_claim_batch": (
         ("state", "text"),
@@ -582,6 +583,7 @@ taskq.schedule_error(uuid,uuid,bigint,text,integer)|p_schedule_id uuid, p_token 
 taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_error text, p_retry_seconds integer, p_deterministic boolean|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.seal_workflow(uuid,text)|p_workflow_id uuid, p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.set_flow_limit(text,integer,integer,text)|p_key text, p_rate_per_minute integer, p_burst integer DEFAULT NULL::integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.set_schedule_smear(text,integer,text)|p_name text, p_smear_seconds integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_concurrency_limit(text,integer,text)|p_key text, p_max_running integer, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.set_schedule_state(text,text,bigint,text,text)|p_name text, p_state text, p_expected_version bigint, p_actor text, p_reason text|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id uuid, p_worker_id text, p_delay_seconds integer, p_reason text DEFAULT NULL::text, p_progress jsonb DEFAULT NULL::jsonb|taskq.settle_result|plpgsql|v|u|taskq_runner
@@ -683,6 +685,7 @@ PUBLIC_ERRORS = {
     "taskq.queue_health(text)": frozenset({"TQ001", "TQ501"}),
     "taskq.redrive_failed(text,integer,text,integer)": frozenset({"TQ422"}),
     "taskq.set_flow_limit(text,integer,integer,text)": frozenset({"TQ422", "TQ501"}),
+    "taskq.set_schedule_smear(text,integer,text)": frozenset({"TQ422", "TQ001"}),
     "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
         {"TQ422", "TQ501"}
     ),
@@ -728,7 +731,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.5.0"',
+    "contract_version": '"0.5.2"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
         '"flow_control", "followups", "operator_schedule_list", "queue_counters", '

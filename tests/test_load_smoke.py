@@ -69,3 +69,26 @@ async def test_load_scenario_records_and_enforces(
         assert defects["single_nonretryable_survived"] is True
         assert defects["sustained_corruption_fails_closed"] is True
         assert metrics["claim_errors_per_nudge"] <= 0.6
+    elif scenario == "L3":
+        defects = result["defect_observations"]
+        assert defects["smeared_dealigns"] is True
+        assert defects["plain_identical"] is True
+        assert defects["deterministic"] is True
+        assert metrics["smeared_dispersion_s"] >= 0.5 * metrics["smear_seconds"]
+        assert metrics["plain_dispersion_s"] == 0.0
+    elif scenario == "L7":
+        defects = result["defect_observations"]
+        assert defects["resume_ramp_flattens_spike"] is True
+        assert defects["redrive_smear_disperses"] is True
+        assert defects["redrive_plain_immediate"] is True
+        assert metrics["ramp_admitted_first_window"] < metrics["control_admitted_first_window"]
+        assert metrics["redrive_smeared_dispersion_s"] >= 0.5 * metrics["redrive_smear_seconds"]
+        assert metrics["redrive_plain_dispersion_s"] < 1.0
+    elif scenario == "L10":
+        defects = result["defect_observations"]
+        assert defects["queue_rate_converges"] is True
+        assert defects["dry_key_no_starvation"] is True
+        assert defects["max_running_holds"] is True
+        assert metrics["rate_throttled_verdicts"] > 0
+        assert metrics["key_free_still_queued"] == 0
+        assert metrics["cap_round2_claimed"] == 0

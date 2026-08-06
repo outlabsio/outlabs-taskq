@@ -145,6 +145,7 @@ _SCHEDULE_CLAIM_FIELDS = (
     "next_fire_at",
     "token",
     "lease_seconds",
+    "smear_seconds",
 )
 _JOB_EVENT_FIELDS = (
     "event_id",
@@ -1792,6 +1793,27 @@ class SqlTaskqTransport:
                 conn,
                 "SELECT taskq.set_flow_limit(:key, :rate, :burst, :actor) AS result",
                 {"key": key, "rate": rate_per_minute, "burst": burst, "actor": actor},
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
+    async def set_schedule_smear(
+        self, name: str, smear_seconds: int | None, actor: str | None = None
+    ) -> str:
+        """Set (or clear, with ``None``) a schedule's firing smear in seconds.
+
+        The supported write path for the anti-stampede smear read by the
+        scheduler since contract 0.5.1. Returns ``created`` is never emitted
+        (the schedule must already exist); outcomes are ``updated``, ``cleared``,
+        or ``unchanged``. Raises for an unknown schedule or an out-of-range value.
+        """
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_schedule_smear(:name, :smear, :actor) AS result",
+                {"name": name, "smear": smear_seconds, "actor": actor},
             )
             return str(row["result"])
 

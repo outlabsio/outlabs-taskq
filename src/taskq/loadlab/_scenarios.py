@@ -11,13 +11,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import time
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 import asyncpg
+from sqlalchemy.ext.asyncio import create_async_engine
 
-from taskq.bench import _attested_fetchrow, _connect_role
+from taskq.bench import _attested_fetchrow, _connect_role, _sqlalchemy_dsn
 from taskq.errors import TaskqUnavailableError, TaskqValidationError
 from taskq.loadlab._chassis import (
     LoadInput,
@@ -29,8 +32,11 @@ from taskq.loadlab._chassis import (
     wait_until,
 )
 from taskq.loadlab._instruments import ClaimFaultPlan
+from taskq.scheduler import SchedulerEngine
+from taskq.schedules import smear_offset_seconds
+from taskq.sql.transport import SqlTaskqTransport
 
-SCENARIOS = ("L1", "L2", "L4", "L5", "L6")
+SCENARIOS = ("L1", "L2", "L3", "L4", "L5", "L6", "L7", "L10")
 
 
 def _check(name: str, ok: bool, **detail: Any) -> dict[str, Any]:
@@ -820,10 +826,611 @@ def _l6_all_terminal(ctx: ScenarioContext, queue: str, total: int):
     return probe
 
 
+# --------------------------------------------------------------------------- L10
+
+
+async def _l10_rate_conformance(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 2b enforcement gate (0.5 spec S4.4): queue-level GCRA meters claims
+    to the configured rate; a dry key-level bucket skips its candidates without
+    starving unlimited work; ``max_running`` caps in-flight work within the
+    documented race margin under concurrent claims.
+
+    Structural over timing: claim counts over a fixed window (not fragile
+    inter-claim spacing), a wide-open control for the key phase, and a
+    two-round steady-state check for the cap. All three enforcement surfaces
+    are exercised on unmodified 0.5.0.
+    """
+
+    checks: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+
+    # ---- Phase A: queue-level GCRA rate conformance --------------------------
+    # A rate is not a scale knob, so these are fixed. The window is sized so the
+    # metered count dominates the burst allowance; a wide-open queue would admit
+    # hundreds over the same window.
+    rate_per_minute = 300  # 5 claims/second
+    burst = 3
+    window_seconds = 6.0
+    q_rate = "load_l10_rate"
+    await ctx.ensure_queue(q_rate, {"claim_rate_per_minute": rate_per_minute, "claim_burst": burst})
+    producer = await ctx.producer()
+    await ctx.enqueue_many(
+        producer, q_rate, "load.rate", f"l10a-{ctx.seed}", max(120, ctx.scale.cohort_jobs)
+    )
+    runner = await _connect_role(ctx.dsn, "taskq_runner")
+    claimed = 0
+    throttled = 0
+    try:
+        started = time.monotonic()
+        deadline = started + window_seconds
+        while time.monotonic() < deadline:
+            batch = await _attested_fetchrow(
+                runner,
+                "SELECT * FROM taskq.claim_jobs("
+                "$1,$2,1,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)",
+                q_rate,
+                "l10a-runner",
+            )
+            assert batch is not None
+            if batch["state"] == "claimed":
+                claimed += 1
+            elif batch["state"] == "throttled":
+                throttled += 1
+            await asyncio.sleep(0.01)
+        elapsed = time.monotonic() - started
+    finally:
+        await runner.close()
+
+    expected = rate_per_minute * elapsed / 60.0
+    # Steady rate excludes the burst head; averaged over the window it is robust
+    # to per-claim jitter. Spec target is +/-10%; the harness widens to +/-15%
+    # to absorb asyncio/DB scheduling jitter on a shared CI runner.
+    steady_rate_per_minute = max(0.0, claimed - burst) / elapsed * 60.0 if elapsed else 0.0
+    metrics.update(
+        rate_per_minute=rate_per_minute,
+        rate_burst=burst,
+        rate_window_seconds=round(elapsed, 2),
+        rate_claims_observed=claimed,
+        rate_claims_expected=round(expected, 1),
+        rate_throttled_verdicts=throttled,
+        rate_steady_per_minute=round(steady_rate_per_minute, 1),
+    )
+    checks.append(
+        _check(
+            "queue_rate_metered_not_wide_open",
+            claimed <= burst + expected * 1.5,
+            claimed=claimed,
+            ceiling=round(burst + expected * 1.5, 1),
+        )
+    )
+    checks.append(
+        _check(
+            "queue_rate_converges_to_configured",
+            0.85 * rate_per_minute <= steady_rate_per_minute <= 1.15 * rate_per_minute,
+            steady=round(steady_rate_per_minute, 1),
+            target=rate_per_minute,
+        )
+    )
+    checks.append(_check("queue_rate_gate_engaged", throttled > 0, throttled=throttled))
+    await producer.close()
+
+    # ---- Phase B: dry key-level bucket skips without starving unlimited work -
+    q_key = "load_l10_key"
+    await ctx.ensure_queue(q_key)  # queue rate unlimited
+    dry_key = f"l10dry-{ctx.seed}"
+    row = await ctx.operator.fetchrow(
+        "SELECT * FROM taskq.set_flow_limit($1,$2,$3,$4)", dry_key, 1, 1, "loadlab"
+    )
+    assert row is not None
+    pairs = max(8, ctx.scale.storm_workers * 3)
+    prod = await ctx.producer()
+    try:
+        for i in range(pairs):
+            await prod.fetchrow(
+                "SELECT * FROM taskq.enqueue($1,$2,$3::jsonb,"
+                " p_idempotency_key=>$4, p_flow_key=>$5)",
+                q_key,
+                "load.key",
+                json.dumps({"value": i}),
+                f"l10b-dry-{ctx.seed}-{i}",
+                dry_key,
+            )
+            await prod.fetchrow(
+                "SELECT * FROM taskq.enqueue($1,$2,$3::jsonb, p_idempotency_key=>$4)",
+                q_key,
+                "load.key",
+                json.dumps({"value": i}),
+                f"l10b-free-{ctx.seed}-{i}",
+            )
+    finally:
+        await prod.close()
+
+    key_runner = await _connect_role(ctx.dsn, "taskq_runner")
+    try:
+        for _ in range(pairs * 2):
+            free_left = await ctx.admin.fetchval(
+                "SELECT count(*) FROM taskq.jobs WHERE queue=$1"
+                " AND idempotency_key LIKE $2 AND status='queued'",
+                q_key,
+                f"l10b-free-{ctx.seed}-%",
+            )
+            if int(free_left or 0) == 0:
+                break
+            batch = await _attested_fetchrow(
+                key_runner,
+                "SELECT * FROM taskq.claim_jobs("
+                "$1,$2,$3::integer,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)",
+                q_key,
+                "l10b-runner",
+                pairs,
+            )
+            assert batch is not None
+            if batch["state"] not in ("claimed", "throttled", "empty"):
+                break
+            await asyncio.sleep(0.02)
+    finally:
+        await key_runner.close()
+
+    free_queued = int(
+        await ctx.admin.fetchval(
+            "SELECT count(*) FROM taskq.jobs WHERE queue=$1"
+            " AND idempotency_key LIKE $2 AND status='queued'",
+            q_key,
+            f"l10b-free-{ctx.seed}-%",
+        )
+        or 0
+    )
+    dry_queued = int(
+        await ctx.admin.fetchval(
+            "SELECT count(*) FROM taskq.jobs WHERE queue=$1"
+            " AND idempotency_key LIKE $2 AND status='queued'",
+            q_key,
+            f"l10b-dry-{ctx.seed}-%",
+        )
+        or 0
+    )
+    metrics.update(
+        key_pairs=pairs, key_free_still_queued=free_queued, key_dry_still_queued=dry_queued
+    )
+    checks.append(
+        _check("unlimited_work_not_starved_by_dry_key", free_queued == 0, free_queued=free_queued)
+    )
+    checks.append(
+        _check(
+            "dry_key_candidates_held_back",
+            dry_queued >= pairs - 2,
+            dry_queued=dry_queued,
+            pairs=pairs,
+        )
+    )
+
+    # ---- Phase C: max_running caps in-flight work under concurrent claims ----
+    q_cap = "load_l10_cap"
+    cap = 3
+    await ctx.ensure_queue(q_cap, {"max_running": cap})
+    capprod = await ctx.producer()
+    await ctx.enqueue_many(capprod, q_cap, "load.cap", f"l10c-{ctx.seed}", max(40, cap * 8))
+    await capprod.close()
+
+    async def _one_claim(worker_id: str) -> str:
+        conn = await _connect_role(ctx.dsn, "taskq_runner")
+        try:
+            batch = await _attested_fetchrow(
+                conn,
+                "SELECT * FROM taskq.claim_jobs("
+                "$1,$2,1,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)",
+                q_cap,
+                worker_id,
+            )
+            assert batch is not None
+            return str(batch["state"])
+        finally:
+            await conn.close()
+
+    fan = cap + 4
+    round1 = await asyncio.gather(*(_one_claim(f"l10c-r1-{i}") for i in range(fan)))
+    running_after_r1 = int(
+        await ctx.admin.fetchval(
+            "SELECT count(*) FROM taskq.jobs WHERE queue=$1 AND status='running'", q_cap
+        )
+        or 0
+    )
+    # No settle between rounds: running already sits at/above the cap, so a second
+    # concurrent fan must be fully throttled — the steady-state cap holds.
+    round2 = await asyncio.gather(*(_one_claim(f"l10c-r2-{i}") for i in range(fan)))
+    r1_claimed = sum(1 for s in round1 if s == "claimed")
+    r2_claimed = sum(1 for s in round2 if s == "claimed")
+    r2_throttled = sum(1 for s in round2 if s == "throttled")
+    metrics.update(
+        cap_max_running=cap,
+        cap_fan_out=fan,
+        cap_round1_claimed=r1_claimed,
+        cap_running_after_round1=running_after_r1,
+        cap_round2_claimed=r2_claimed,
+        cap_round2_throttled=r2_throttled,
+    )
+    checks.append(
+        _check(
+            "max_running_race_margin_bounded",
+            running_after_r1 <= cap + fan,
+            running=running_after_r1,
+            bound=cap + fan,
+        )
+    )
+    checks.append(
+        _check(
+            "max_running_holds_in_steady_state",
+            r2_claimed == 0,
+            round2_claimed=r2_claimed,
+            round2_throttled=r2_throttled,
+        )
+    )
+
+    return {
+        "metrics": metrics,
+        "invariant_checks": checks,
+        "defect_observations": {
+            "queue_rate_converges": (
+                0.85 * rate_per_minute <= steady_rate_per_minute <= 1.15 * rate_per_minute
+            ),
+            "dry_key_no_starvation": free_queued == 0,
+            "max_running_holds": r2_claimed == 0,
+            "expected_posture": "0.5.0-enforced",
+        },
+    }
+
+
+# ---------------------------------------------------------------------------- L7
+
+
+async def _l7_resume_redrive_stampede(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 2b enforcement gate (0.5 spec S4.2): the first-window claim/settle
+    spike after a mass resume or a bulk redrive is measurably flattened by the
+    slow-start ramp and the redrive smear, with no lost or duplicated work.
+
+    Phase A pairs a ramped queue against an unramped control; probing is
+    *sequential* (race-free) so the effective cap actually gates — a
+    simultaneous burst would race past any cap on both queues. Phase B pairs a
+    smeared redrive against a plain one and measures re-arrival dispersion.
+    """
+
+    checks: list[dict[str, Any]] = []
+    metrics: dict[str, Any] = {}
+
+    # ---- Phase A: resume ramp flattens the initial in-flight spike -----------
+    ramp_seconds = 20
+    cap = max(6, ctx.scale.storm_workers)
+    backlog = max(40, ctx.scale.cohort_jobs)
+    fan = cap * 3  # sequential probe attempts; exceeds the cap so the gate bites
+
+    async def _resume_and_probe(queue: str, with_ramp: bool) -> int:
+        profile: dict[str, Any] = {"max_running": cap}
+        if with_ramp:
+            profile["ramp_seconds"] = ramp_seconds
+        await ctx.ensure_queue(queue, profile)
+        await ctx.operator.fetchrow(
+            "SELECT taskq.pause_queue($1,$2,$3)", queue, "loadlab", "prime backlog"
+        )
+        prod = await ctx.producer()
+        await ctx.enqueue_many(prod, queue, "load.ramp", f"l7a-{queue}-{ctx.seed}", backlog)
+        await prod.close()
+        await ctx.operator.fetchrow("SELECT taskq.resume_queue($1,$2)", queue, "loadlab")
+        # Sequential single claims, no sleep: the whole probe finishes in well
+        # under a second, far inside the 20s ramp, so the ramped queue's
+        # effective cap stays near its floor while the control opens to `cap`.
+        runner = await _connect_role(ctx.dsn, "taskq_runner")
+        admitted = 0
+        try:
+            for _ in range(fan):
+                batch = await _attested_fetchrow(
+                    runner,
+                    "SELECT * FROM taskq.claim_jobs("
+                    "$1,$2,1,NULL::text[],NULL::integer,NULL::text,NULL::uuid,true)",
+                    queue,
+                    "l7a-probe",
+                )
+                assert batch is not None
+                if batch["state"] == "claimed":
+                    admitted += 1
+        finally:
+            await runner.close()
+        return admitted
+
+    ramped_admitted = await _resume_and_probe("load_l7_ramp", True)
+    control_admitted = await _resume_and_probe("load_l7_ctl", False)
+    metrics.update(
+        ramp_seconds=ramp_seconds,
+        ramp_cap=cap,
+        ramp_probe_attempts=fan,
+        ramp_admitted_first_window=ramped_admitted,
+        control_admitted_first_window=control_admitted,
+    )
+    checks.append(
+        _check(
+            "resume_ramp_flattens_initial_spike",
+            ramped_admitted < control_admitted,
+            ramped=ramped_admitted,
+            control=control_admitted,
+        )
+    )
+    checks.append(
+        _check(
+            "resume_ramp_admits_minimally_early",
+            ramped_admitted <= max(2, cap // 2),
+            ramped=ramped_admitted,
+            cap=cap,
+        )
+    )
+    checks.append(
+        _check(
+            "control_admits_up_to_cap",
+            control_admitted >= cap,
+            control=control_admitted,
+            cap=cap,
+        )
+    )
+
+    # ---- Phase B: redrive smear disperses re-arrival -------------------------
+    smear = 120  # seconds
+    cohort = max(12, ctx.scale.storm_workers * 4)
+
+    async def _make_failed(queue: str) -> int:
+        await ctx.ensure_queue(queue)
+        prod = await ctx.producer()
+        await ctx.enqueue_many(prod, queue, "load.redrive", f"l7b-{queue}-{ctx.seed}", cohort)
+        await prod.close()
+        runner = await _connect_role(ctx.dsn, "taskq_runner")
+        failed = 0
+        try:
+            while failed < cohort:
+                batch = await _attested_fetchrow(
+                    runner,
+                    "SELECT * FROM taskq.claim_jobs("
+                    "$1,$2,$3::integer,NULL::text[],NULL::integer,NULL::text,NULL::uuid,false)",
+                    queue,
+                    "l7b-fail",
+                    cohort,
+                )
+                if batch is None or batch["state"] != "claimed":
+                    break
+                for job in batch["jobs"]:
+                    settled = await runner.fetchrow(
+                        "SELECT * FROM taskq.fail_job($1,$2,$3,$4,false)",
+                        job["job_id"],
+                        job["attempt_id"],
+                        "l7b-fail",
+                        "boom",
+                    )
+                    assert settled is not None
+                    failed += 1
+        finally:
+            await runner.close()
+        return failed
+
+    q_smear, q_plain = "load_l7_redrive_s", "load_l7_redrive_p"
+    smeared_failed = await _make_failed(q_smear)
+    plain_failed = await _make_failed(q_plain)
+    rs = await ctx.operator.fetchrow(
+        "SELECT * FROM taskq.redrive_failed($1,$2,$3,$4)", q_smear, cohort, "loadlab", smear
+    )
+    rp = await ctx.operator.fetchrow(
+        "SELECT * FROM taskq.redrive_failed($1,$2,$3,$4)", q_plain, cohort, "loadlab", 0
+    )
+    assert rs is not None and rp is not None
+
+    async def _dispersion(queue: str) -> tuple[float, int]:
+        rows = await ctx.admin.fetch(
+            "SELECT extract(epoch FROM scheduled_at) AS s FROM taskq.jobs"
+            " WHERE queue=$1 AND status='queued'",
+            queue,
+        )
+        vals = [float(r["s"]) for r in rows]
+        return ((max(vals) - min(vals)) if len(vals) > 1 else 0.0, len(vals))
+
+    smeared_disp, smeared_requeued = await _dispersion(q_smear)
+    plain_disp, plain_requeued = await _dispersion(q_plain)
+    smeared_total = int(
+        await ctx.admin.fetchval("SELECT count(*) FROM taskq.jobs WHERE queue=$1", q_smear) or 0
+    )
+    plain_total = int(
+        await ctx.admin.fetchval("SELECT count(*) FROM taskq.jobs WHERE queue=$1", q_plain) or 0
+    )
+    metrics.update(
+        redrive_cohort=cohort,
+        redrive_smear_seconds=smear,
+        redrive_smeared_dispersion_s=round(smeared_disp, 2),
+        redrive_plain_dispersion_s=round(plain_disp, 2),
+        redrive_smeared_count=int(rs["redriven"]),
+        redrive_plain_count=int(rp["redriven"]),
+    )
+    checks.append(
+        _check(
+            "redrive_smear_disperses_rearrival",
+            smeared_disp >= 0.5 * smear,
+            dispersion=round(smeared_disp, 2),
+            floor=0.5 * smear,
+        )
+    )
+    checks.append(
+        _check(
+            "redrive_plain_is_immediate",
+            plain_disp < 1.0,
+            dispersion=round(plain_disp, 2),
+        )
+    )
+    checks.append(
+        _check(
+            "redrive_no_lost_or_duplicate_jobs",
+            smeared_total == cohort
+            and plain_total == cohort
+            and int(rs["redriven"]) == smeared_failed == cohort
+            and int(rp["redriven"]) == plain_failed == cohort,
+            smeared_total=smeared_total,
+            plain_total=plain_total,
+        )
+    )
+
+    return {
+        "metrics": metrics,
+        "invariant_checks": checks,
+        "defect_observations": {
+            "resume_ramp_flattens_spike": ramped_admitted < control_admitted,
+            "redrive_smear_disperses": smeared_disp >= 0.5 * smear,
+            "redrive_plain_immediate": plain_disp < 1.0,
+            "expected_posture": "0.5.0-enforced",
+        },
+    }
+
+
+# ---------------------------------------------------------------------------- L3
+
+
+async def _l3_schedule_codue(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 2b enforcement gate (0.5 spec S4.3): a co-cron schedule population
+    de-aligns under smear — each schedule's firing lattice shifts by a
+    deterministic per-id offset — while an unsmeared population fires
+    byte-identically. The population is CRON, not interval: an interval
+    schedule's frame-shift cancels (anchor and as_of shift together), so
+    de-alignment only manifests against the absolute cron lattice, matching the
+    contract-test invariant. Drives the real SchedulerEngine.process_batch
+    firing path (claim -> evaluate-with-smear -> fire) against seeded, co-due
+    schedules and measures the resulting next_fire_at dispersion.
+    """
+
+    queue = "load_l3"
+    await ctx.ensure_queue(queue)
+    cohort = max(12, ctx.scale.storm_workers * 4)
+    smear = 1800  # 30 min, < the 3600s hourly interval so offsets never wrap
+
+    definition = {
+        "target": {"kind": "job", "queue": queue, "job_type": "load.sched"},
+        "recurrence": {"kind": "cron", "expression": "0 * * * *", "timezone": "UTC"},
+        "catchup_policy": "skip",
+        "max_catchup": 1,
+    }
+
+    async def _seed(prefix: str, with_smear: bool) -> None:
+        for i in range(cohort):
+            # put_schedule is attestation-gated (scheduler family); attest the
+            # operator connection in-transaction, unlike the ungated ensure_queue.
+            row = await _attested_fetchrow(
+                ctx.operator,
+                "SELECT * FROM taskq.put_schedule($1,$2::jsonb,$3)",
+                f"{prefix}-{ctx.seed}-{i}",
+                json.dumps(definition),
+                "loadlab",
+            )
+            assert row is not None
+        # Force the whole cohort co-due at one past instant, initialized, and
+        # (for the smeared arm) carrying the smear column directly.
+        await ctx.admin.execute(
+            "UPDATE taskq.schedules SET initialized=true,"
+            " next_fire_at = now() - interval '5 seconds', smear_seconds = $2"
+            " WHERE name LIKE $1",
+            f"{prefix}-{ctx.seed}-%",
+            smear if with_smear else None,
+        )
+
+    await _seed("l3-smear", True)
+    await _seed("l3-plain", False)
+
+    # Drive the production firing path as the housekeeper role. One claim call
+    # takes the whole due set (claim_limit exceeds it), so every schedule shares
+    # a single as_of and thus a single cron target instant — de-alignment can
+    # then come only from the per-id smear, never from claim-timing skew.
+    engine = create_async_engine(
+        _sqlalchemy_dsn(ctx.dsn),
+        connect_args={"server_settings": {"role": "taskq_housekeeper"}},
+    )
+    transport = SqlTaskqTransport(
+        engine, expected_environment=os.environ.get("TASKQ_EXPECTED_ENV", "benchmark")
+    )
+    sched = SchedulerEngine(
+        transport, "l3-scheduler", claim_limit=cohort * 2 + 10, lease_seconds=120
+    )
+    claimed_total = 0
+    try:
+        for _ in range(8):
+            claimed, _jobs, _errors = await sched.process_batch()
+            claimed_total += claimed
+            if claimed == 0:
+                break
+    finally:
+        await transport.aclose()
+        await engine.dispose()
+
+    async def _rows(prefix: str) -> list[tuple[str, float]]:
+        return [
+            (str(r["id"]), float(r["s"]))
+            for r in await ctx.admin.fetch(
+                "SELECT id, extract(epoch FROM next_fire_at) AS s"
+                " FROM taskq.schedules WHERE name LIKE $1 ORDER BY id",
+                f"{prefix}-{ctx.seed}-%",
+            )
+        ]
+
+    smeared = await _rows("l3-smear")
+    plain = await _rows("l3-plain")
+    # Measure seconds-past-the-hour (fire mod the 3600s cron period). Because a
+    # smeared fire is (a cron :00 instant) + offset, `fire % 3600 == offset`
+    # exactly, independent of WHICH hour a schedule lands in — so this is robust
+    # to the boundary case where a large-offset schedule's shifted as_of falls
+    # into the prior hour. Plain fires land on :00, so their past-hour is 0.
+    smeared_offsets = [round(s) % 3600 for _, s in smeared]
+    plain_offsets = [round(s) % 3600 for _, s in plain]
+    smeared_disp = max(smeared_offsets) - min(smeared_offsets) if len(smeared_offsets) > 1 else 0
+    plain_disp = max(plain_offsets) - min(plain_offsets) if len(plain_offsets) > 1 else 0
+
+    # Determinism tie: each schedule's past-hour offset equals the deterministic
+    # smear_offset_seconds(id, smear) exactly — the observed de-alignment IS the
+    # per-id function, not randomness.
+    deterministic = bool(smeared)
+    for sid, fire in smeared:
+        if round(fire) % 3600 != smear_offset_seconds(UUID(sid), smear):
+            deterministic = False
+            break
+
+    checks = [
+        _check(
+            "smeared_cohort_dealigns",
+            smeared_disp >= 0.5 * smear,
+            dispersion=smeared_disp,
+            floor=0.5 * smear,
+        ),
+        _check("unsmeared_cohort_byte_identical", plain_disp == 0, dispersion=plain_disp),
+        _check("dealignment_is_deterministic_per_id", deterministic),
+        _check(
+            "all_schedules_fired",
+            claimed_total >= 2 * cohort,
+            claimed=claimed_total,
+            expected=2 * cohort,
+        ),
+    ]
+    return {
+        "metrics": {
+            "cohort_per_arm": cohort,
+            "smear_seconds": smear,
+            "smeared_dispersion_s": round(smeared_disp, 1),
+            "plain_dispersion_s": round(plain_disp, 1),
+            "schedules_claimed": claimed_total,
+        },
+        "invariant_checks": checks,
+        "defect_observations": {
+            "smeared_dealigns": smeared_disp >= 0.5 * smear,
+            "plain_identical": plain_disp == 0.0,
+            "deterministic": deterministic,
+            "expected_posture": "0.5.1-smear",
+        },
+    }
+
+
 SCENARIO_RUNNERS = {
     "L1": _l1_notify_herd,
     "L2": _l2_retry_storm,
+    "L3": _l3_schedule_codue,
     "L4": _l4_admission_vs_drain,
     "L5": _l5_claim_error_posture,
     "L6": _l6_counter_contention,
+    "L7": _l7_resume_redrive_stampede,
+    "L10": _l10_rate_conformance,
 }

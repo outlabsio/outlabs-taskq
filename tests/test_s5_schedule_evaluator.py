@@ -8,7 +8,9 @@ import pytest
 from pydantic import ValidationError
 
 from taskq import ScheduleDefinition, TaskqValidationError
-from taskq.schedules import evaluate_schedule
+from uuid import UUID
+
+from taskq.schedules import evaluate_schedule, smear_offset_seconds
 
 
 def _utc(year: int, month: int, day: int, hour: int = 0, minute: int = 0) -> datetime:
@@ -206,3 +208,90 @@ def test_evaluator_rejects_naive_or_not_due_claim_instants() -> None:
             next_fire_at=_utc(2026, 1, 1) + timedelta(seconds=1),
             as_of=_utc(2026, 1, 1),
         )
+
+
+def test_smear_offset_is_deterministic_positive_and_bounded() -> None:
+    a = UUID(int=1234567890)
+    assert smear_offset_seconds(a, None) == 0
+    assert smear_offset_seconds(a, 0) == 0
+    off = smear_offset_seconds(a, 300)
+    assert 0 <= off < 300
+    assert off == smear_offset_seconds(a, 300)  # stable across calls/processes
+    assert smear_offset_seconds(UUID(int=9876543210), 300) != off  # distinct schedules differ
+
+
+def test_smear_de_aligns_co_cron_schedules_and_stays_drift_free() -> None:
+    cron = {"kind": "cron", "expression": "0 * * * *", "timezone": "UTC"}
+    due = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    as_of = datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC)
+    hour_13 = datetime(2026, 1, 1, 13, 0, tzinfo=UTC)
+
+    offsets = {
+        UUID(int=1234567890): None,
+        UUID(int=9876543210): None,
+    }
+    fires = {}
+    for sid in offsets:
+        off = smear_offset_seconds(sid, 300)
+        offsets[sid] = off
+        ev = evaluate_schedule(
+            recurrence=cron,
+            catchup_policy="fire_once",
+            max_catchup=1,
+            initialized=True,
+            next_fire_at=due + timedelta(seconds=off),
+            as_of=as_of + timedelta(seconds=off),
+            smear_offset_seconds=off,
+        )
+        # each lands on its own base lattice point (13:00) shifted by its constant
+        assert ev.next_fire_at == hour_13 + timedelta(seconds=off)
+        fires[sid] = ev.next_fire_at
+    # the whole point: two schedules sharing one cron no longer fire together
+    assert len(set(fires.values())) == 2
+
+    # drift-free: re-evaluating from a smeared next keeps the same constant offset
+    sid = UUID(int=1234567890)
+    off = offsets[sid]
+    n1 = fires[sid]
+    n2 = evaluate_schedule(
+        recurrence=cron,
+        catchup_policy="fire_once",
+        max_catchup=1,
+        initialized=True,
+        next_fire_at=n1,
+        as_of=n1 + timedelta(seconds=1),
+        smear_offset_seconds=off,
+    )
+    assert n2.next_fire_at == datetime(2026, 1, 1, 14, 0, tzinfo=UTC) + timedelta(seconds=off)
+
+
+def test_smear_fire_all_shifts_the_whole_interval_lattice() -> None:
+    rec = {"kind": "interval", "interval_seconds": 3600}
+    off = 90
+    ev = evaluate_schedule(
+        recurrence=rec,
+        catchup_policy="fire_all",
+        max_catchup=100,
+        initialized=True,
+        next_fire_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC) + timedelta(seconds=off),
+        as_of=datetime(2026, 1, 1, 14, 5, tzinfo=UTC),
+        smear_offset_seconds=off,
+    )
+    # every occurrence is the base hourly lattice shifted by the same 90s
+    assert [o.minute for o in ev.occurrences] == [1, 1, 1]
+    assert all(o.second == 30 for o in ev.occurrences)
+
+
+def test_smear_zero_is_exact_passthrough() -> None:
+    rec = {"kind": "interval", "interval_seconds": 3600}
+    due = datetime(2026, 1, 1, 12, 0, tzinfo=UTC)
+    as_of = datetime(2026, 1, 1, 12, 0, 1, tzinfo=UTC)
+    kwargs = dict(
+        recurrence=rec,
+        catchup_policy="fire_once",
+        max_catchup=1,
+        initialized=True,
+        next_fire_at=due,
+        as_of=as_of,
+    )
+    assert evaluate_schedule(**kwargs, smear_offset_seconds=0) == evaluate_schedule(**kwargs)

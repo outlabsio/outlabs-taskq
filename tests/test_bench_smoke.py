@@ -71,6 +71,8 @@ async def test_benchmark_scenario_records_json(
         "0026_flow_enforcement_enqueue",
         "0027_activate_flow_control",
         "0028_redrive_null_limit_guard",
+        "0029_schedule_claim_smear",
+        "0030_schedule_smear_write",
     ]
     assert len(result["runs"]) == (6 if scenario in {"B8", "B11"} else 3)
     assert result["summary"]["median_throughput_rows_per_second"] > 0
