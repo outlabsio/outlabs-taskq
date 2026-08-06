@@ -84,6 +84,12 @@ async def test_load_scenario_records_and_enforces(
         assert metrics["ramp_admitted_first_window"] < metrics["control_admitted_first_window"]
         assert metrics["redrive_smeared_dispersion_s"] >= 0.5 * metrics["redrive_smear_seconds"]
         assert metrics["redrive_plain_dispersion_s"] < 1.0
+    elif scenario == "L8":
+        defects = result["defect_observations"]
+        assert defects["trips_at_threshold"] is True
+        assert defects["single_flight_probe"] is True
+        assert defects["recovers_and_ramps"] is True
+        assert metrics["probes_admitted_under_fan"] == 1
     elif scenario == "L10":
         defects = result["defect_observations"]
         assert defects["queue_rate_converges"] is True

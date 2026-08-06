@@ -69,6 +69,9 @@ def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
         "taskq.queue_health(text)",
         "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
         "taskq.set_flow_limit(text,integer,integer,text)",
+        "taskq.set_breaker_config(text,integer,integer,integer,text)",
+        "taskq.trip_breaker(text,text)",
+        "taskq.force_close_breaker(text,text)",
         "taskq.set_schedule_smear(text,integer,text)",
         "taskq.get_target_identity()",
         "taskq.list_managed_schedules(text,text,integer,text)",
@@ -78,7 +81,7 @@ def test_transport_method_ledger_is_exactly_the_public_manifest() -> None:
     }
     assert set(METHOD_FUNCTIONS.values()) == set(PUBLIC_FUNCTIONS) - inactive_wfc - direct_sql_only
     assert len(METHOD_FUNCTIONS) == 52
-    assert len(PUBLIC_FUNCTIONS) == 67
+    assert len(PUBLIC_FUNCTIONS) == 70
     assert METHOD_FUNCTIONS == {
         command.value: spec.sql_function for command, spec in COMMAND_SPECS.items()
     }
@@ -446,7 +449,7 @@ async def test_observer_and_housekeeper_transport(
     stats = await transports["observer"].get_queue_stats(queue)
     assert len(stats) == 1 and stats[0].queue == queue
     meta = await transports["observer"].get_contract_meta()
-    assert meta.contract_version == "0.5.2"
+    assert meta.contract_version == "0.6.0"
     names = {metric.name for metric in await transports["observer"].metrics()}
     assert "taskq_ready" in names
 
@@ -537,7 +540,7 @@ async def test_sql_transport_has_no_background_tasks_or_checked_out_resources(
     pool = transport.engine.sync_engine.pool
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before
-    assert (await transport.get_contract_meta()).contract_version == "0.5.2"
+    assert (await transport.get_contract_meta()).contract_version == "0.6.0"
     await asyncio.sleep(0)
     assert pool.checkedout() == 0  # type: ignore[attr-defined]
     assert asyncio.all_tasks() == before

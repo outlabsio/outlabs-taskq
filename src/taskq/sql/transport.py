@@ -1819,6 +1819,63 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def set_breaker_config(
+        self,
+        queue: str,
+        failure_threshold: int | None,
+        cooldown_seconds: int = 30,
+        half_open_successes: int = 1,
+        actor: str | None = None,
+    ) -> str:
+        """Configure (or disable, with ``failure_threshold=None``) a queue's
+        circuit breaker. Streak-based: trip after ``failure_threshold`` consecutive
+        terminal failures; open for ``cooldown_seconds``; close after
+        ``half_open_successes`` probe successes. Requires the circuit_breaker
+        capability."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_breaker_config("
+                ":queue, :threshold, :cooldown, :successes, :actor) AS result",
+                {
+                    "queue": queue,
+                    "threshold": failure_threshold,
+                    "cooldown": cooldown_seconds,
+                    "successes": half_open_successes,
+                    "actor": actor,
+                },
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
+    async def trip_breaker(self, queue: str, actor: str | None = None) -> str:
+        """Force a configured queue's breaker open now (manual)."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.trip_breaker(:queue, :actor) AS result",
+                {"queue": queue, "actor": actor},
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
+    async def force_close_breaker(self, queue: str, actor: str | None = None) -> str:
+        """Force a configured queue's breaker closed and stamp the recovery ramp."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.force_close_breaker(:queue, :actor) AS result",
+                {"queue": queue, "actor": actor},
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
     async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome:
         return ExpireJobOutcome(
             self._validated_outcome(

@@ -345,6 +345,8 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0028_redrive_null_limit_guard",
                 "0029_schedule_claim_smear",
                 "0030_schedule_smear_write",
+                "0031_circuit_breaker",
+                "0032_activate_circuit_breaker",
             ]
             report = await verify(conn)
             assert report.ok

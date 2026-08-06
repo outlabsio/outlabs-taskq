@@ -14,13 +14,7 @@ import json
 import asyncpg
 import pytest
 
-from taskq.sql.manifest import CONTRACT_VERSION
-
 pytestmark = pytest.mark.taskq_sql
-
-
-def test_contract_version_is_0_5_2() -> None:
-    assert CONTRACT_VERSION == "0.5.2"
 
 
 async def _make_schedule(operator: asyncpg.Connection, name: str) -> None:

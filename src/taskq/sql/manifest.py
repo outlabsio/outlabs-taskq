@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.5.2.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.0.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.5.2"
+CONTRACT_VERSION = "0.6.0"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -79,7 +79,7 @@ TABLE_SHAPES = {
     "flow_limits": (5, "56fcabc78fdf06b02c62be3182bbcccf"),
     "flow_state": (3, "60f056634167b3b624b194567ca2a477"),
     "queue_counters": (10, "c2e43315895c6ddbac94394bd398a563"),
-    "queue_flow": (4, "3051064bd425df592da59ed528b7f321"),
+    "queue_flow": (12, "a514eb7ab5ad64ce9a79432fd9a6a5ec"),
     "queues": (23, "3a8dfd613184b7308c8e8fc53973e89b"),
     "schedule_decisions": (13, "ebb5c380a87c00d53e626db04a89f82c"),
     "schedule_occurrences": (7, "5ec90a35ba0383db811bf88020522004"),
@@ -108,7 +108,7 @@ CONSTRAINTS = {
     "flow_limits": (4, "998303160c2c6264e4e28c4e348dbfda"),
     "flow_state": (1, "16791e93a3b47960ea20095c4abb0f10"),
     "queue_counters": (2, "44835b2b8bfcc389728ec65520ee5e7c"),
-    "queue_flow": (2, "70fad7cf1e0e53edbd69ddb50ba61f9f"),
+    "queue_flow": (6, "fed7efc4df623dd4b832f7868f6d3ab7"),
     "queues": (16, "46680a8ecb4146dc9f2f6f90b3ff0959"),
     "schedule_decisions": (9, "21f272d0a93325771bf28c016c167f91"),
     "schedule_occurrences": (6, "7d7431666eaf79edefa9c3a26d0a122e"),
@@ -204,6 +204,7 @@ VIEW_DEFINITIONS = {
 
 TRIGGERS = {
     "jobs_queue_counters_trg": "e4d01cdb14fe881204b1813b9c400206",
+    "jobs_breaker_trg": "70e109c5684045d7c8d716670874c6ae",
     "jobs_workflow_member_counts_trg": "e205009f6b176d0896964355ac52b416",
     "workflows_member_counts_lifecycle_trg": "b320cf77e24f9a929354b960dfdd54d2",
 }
@@ -516,6 +517,8 @@ taskq.claim_janitor_due()||boolean|plpgsql|v|u|
 taskq._flow_consume_queue(text,integer,integer,numeric,integer)|p_queue text, p_rate_per_minute integer, p_burst integer, p_scale numeric, p_want integer|TABLE(granted integer, retry_after integer)|plpgsql|v|u|
 taskq._flow_scale(text,integer)|p_queue text, p_ramp_seconds integer|numeric|plpgsql|v|u|
 taskq._throttled_or_empty(boolean,integer)|p_accept boolean, p_retry_after integer|taskq.claim_batch|sql|v|u|
+taskq._breaker_gate(text)|p_queue text|integer|plpgsql|v|u|
+taskq._breaker_on_settle()||trigger|plpgsql|v|u|
 taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,boolean)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid, p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|taskq_runner
 taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,text[],boolean)|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[], p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|taskq_runner
 taskq.claim_schedules(text,integer,integer)|p_worker_id text, p_limit integer DEFAULT 10, p_lease_seconds integer DEFAULT 60|taskq.schedule_claim_batch|plpgsql|v|u|taskq_housekeeper
@@ -583,6 +586,9 @@ taskq.schedule_error(uuid,uuid,bigint,text,integer)|p_schedule_id uuid, p_token 
 taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)|p_schedule_id uuid, p_token uuid, p_definition_version bigint, p_error text, p_retry_seconds integer, p_deterministic boolean|taskq.schedule_action_result|plpgsql|v|u|taskq_housekeeper
 taskq.seal_workflow(uuid,text)|p_workflow_id uuid, p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.set_flow_limit(text,integer,integer,text)|p_key text, p_rate_per_minute integer, p_burst integer DEFAULT NULL::integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.set_breaker_config(text,integer,integer,integer,text)|p_queue text, p_failure_threshold integer, p_cooldown_seconds integer DEFAULT 30, p_half_open_successes integer DEFAULT 1, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.trip_breaker(text,text)|p_queue text, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.force_close_breaker(text,text)|p_queue text, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_schedule_smear(text,integer,text)|p_name text, p_smear_seconds integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_concurrency_limit(text,integer,text)|p_key text, p_max_running integer, p_actor text|text|plpgsql|v|u|taskq_operator
 taskq.set_schedule_state(text,text,bigint,text,text)|p_name text, p_state text, p_expected_version bigint, p_actor text, p_reason text|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
@@ -685,6 +691,9 @@ PUBLIC_ERRORS = {
     "taskq.queue_health(text)": frozenset({"TQ001", "TQ501"}),
     "taskq.redrive_failed(text,integer,text,integer)": frozenset({"TQ422"}),
     "taskq.set_flow_limit(text,integer,integer,text)": frozenset({"TQ422", "TQ501"}),
+    "taskq.set_breaker_config(text,integer,integer,integer,text)": frozenset({"TQ422", "TQ501", "TQ001"}),
+    "taskq.trip_breaker(text,text)": frozenset({"TQ501", "TQ001"}),
+    "taskq.force_close_breaker(text,text)": frozenset({"TQ501", "TQ001"}),
     "taskq.set_schedule_smear(text,integer,text)": frozenset({"TQ422", "TQ001"}),
     "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
         {"TQ422", "TQ501"}
@@ -731,9 +740,9 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.5.2"',
+    "contract_version": '"0.6.0"',
     "capabilities": (
-        '{"active": ["admission_reservations", "dependencies_workflows", '
+        '{"active": ["admission_reservations", "circuit_breaker", "dependencies_workflows", '
         '"flow_control", "followups", "operator_schedule_list", "queue_counters", '
         '"read_model_job_events", "read_model_job_views_v2", '
         '"read_model_list_finished", "read_model_list_ready", '
