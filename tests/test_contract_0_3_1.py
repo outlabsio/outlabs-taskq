@@ -80,10 +80,11 @@ async def _enqueue(transport: SqlTaskqTransport, queue: str, **values: object):
 
 
 def test_0_3_1_machine_identity_and_capabilities_are_exact() -> None:
-    assert CONTRACT_VERSION == "0.3.1"
+    assert CONTRACT_VERSION == "0.4.0"
     assert PROTOCOL_DOCUMENT_REVISION == "1.0.16"
     assert {
         "operator_schedule_list",
+        "queue_counters",
         "read_model_job_events",
         "read_model_job_views_v2",
         "read_model_workflow_list",

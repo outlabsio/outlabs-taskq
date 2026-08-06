@@ -336,6 +336,8 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0019_scheduler_target_identity",
                 "0020_standalone_scheduler",
                 "0021_cli_read_model",
+                "0022_queue_counters",
+                "0023_activate_queue_counters",
             ]
             report = await verify(conn)
             assert report.ok

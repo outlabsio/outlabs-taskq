@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.3.1.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.4.0.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.3.1"
+CONTRACT_VERSION = "0.4.0"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -47,6 +47,7 @@ TABLES = frozenset(
         "job_events",
         "jobs",
         "meta",
+        "queue_counters",
         "queues",
         "schedule_decisions",
         "schedule_occurrences",
@@ -72,6 +73,7 @@ TABLE_SHAPES = {
     "job_events": (8, "fee387eec268693cd507c443a58e1322"),
     "jobs": (41, "943b80b9adef46c731b9208b3710b820"),
     "meta": (3, "6b0aa3a5745ebdd662479daa8c766d1d"),
+    "queue_counters": (10, "c2e43315895c6ddbac94394bd398a563"),
     "queues": (16, "56a64a19b9cdef25b8e842e5f0c16fa2"),
     "schedule_decisions": (13, "ebb5c380a87c00d53e626db04a89f82c"),
     "schedule_occurrences": (7, "5ec90a35ba0383db811bf88020522004"),
@@ -97,6 +99,7 @@ CONSTRAINTS = {
     "job_events": (2, "190355e5ad2160ab5d9d5adf84016b61"),
     "jobs": (20, "9f7f486f864bcfaf09f43bfd4b8dffc2"),
     "meta": (1, "b8a6f433ca275e289861f29159c6d4f3"),
+    "queue_counters": (2, "44835b2b8bfcc389728ec65520ee5e7c"),
     "queues": (9, "b565d95eb81c18bd78660ebe7230dc2a"),
     "schedule_decisions": (9, "21f272d0a93325771bf28c016c167f91"),
     "schedule_occurrences": (6, "7d7431666eaf79edefa9c3a26d0a122e"),
@@ -153,6 +156,7 @@ INDEXES = {
     "jobs_workflow_state_idx": "5b4b0d89b781ae404916db187cf80ba5",
     "jobs_workflow_step_uq": "7eeaab0df8faf0900e8ed4f24fc763d4",
     "meta_pkey": "0d779a67c6f4038a1c416b7775e6c96e",
+    "queue_counters_pkey": "88df3d3cb7086757e2a8a2ae75def7bd",
     "queues_pkey": "afbb7fc868e58dcae6742808a3d01d91",
     "schedule_decisions_pkey": "95ff69e8ccb44704678ddd4b6ec70f60",
     "schedule_decisions_retention_idx": "d6d31be91d72e84c0e282002fc43f7af",
@@ -186,6 +190,7 @@ VIEW_DEFINITIONS = {
 }
 
 TRIGGERS = {
+    "jobs_queue_counters_trg": "e4d01cdb14fe881204b1813b9c400206",
     "jobs_workflow_member_counts_trg": "e205009f6b176d0896964355ac52b416",
     "workflows_member_counts_lifecycle_trg": "b320cf77e24f9a929354b960dfdd54d2",
 }
@@ -531,6 +536,8 @@ taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text
 taskq.put_schedule(text,jsonb,text,bigint)|p_name text, p_definition jsonb, p_actor text, p_expected_version bigint DEFAULT NULL::bigint|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.reap_expired(integer)|p_limit integer DEFAULT 100|integer|plpgsql|v|u|
 taskq.reap_job(uuid)|p_job_id uuid|boolean|plpgsql|v|u|
+taskq.queue_health(text)|p_queue text DEFAULT NULL::text|TABLE(queue text, verdict text, detail jsonb)|plpgsql|s|u|taskq_observer
+taskq.queue_health_internal()||TABLE(queue text, verdict text, detail jsonb)|plpgsql|s|u|
 taskq.redrive_failed(text,integer,text)|p_queue text, p_limit integer, p_actor text|TABLE(redriven integer, skipped integer)|plpgsql|v|u|taskq_operator
 taskq.redrive_job(uuid,text,boolean)|p_job_id uuid, p_actor text, p_reset_progress boolean DEFAULT false|boolean|plpgsql|v|u|taskq_operator
 taskq.refresh_stats_snapshot()||void|plpgsql|v|u|
@@ -551,6 +558,7 @@ taskq.snooze_job(uuid,uuid,text,integer,text,jsonb)|p_job_id uuid, p_attempt_id 
 taskq.tick(integer)|p_reap_limit integer DEFAULT 200|jsonb|plpgsql|v|u|taskq_housekeeper,taskq_operator
 taskq.truncate_utf8(text,integer)|p_value text, p_max_bytes integer|text|plpgsql|i|s|
 taskq.update_queue_profile(text,jsonb,text,bigint)|p_name text, p_profile jsonb, p_actor text, p_expected_version bigint|taskq.queue_profile_update|plpgsql|v|u|taskq_operator
+taskq.update_queue_counters()||trigger|plpgsql|v|u|
 taskq.update_workflow_member_counts()||trigger|plpgsql|v|u|
 taskq.uuid7()||uuid|sql|v|s|
 taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)|p_worker_id text, p_queues text[], p_hostname text DEFAULT NULL::text, p_pid integer DEFAULT NULL::integer, p_version text DEFAULT NULL::text, p_meta jsonb DEFAULT NULL::jsonb|TABLE(shutdown_requested boolean)|plpgsql|v|u|taskq_runner
@@ -641,6 +649,7 @@ PUBLIC_ERRORS = {
         {"TQ001", "TQ409", "TQ422"}
     ),
     "taskq.put_schedule(text,jsonb,text,bigint)": frozenset({"TQ001", "TQ409", "TQ422"}),
+    "taskq.queue_health(text)": frozenset({"TQ001", "TQ501"}),
     "taskq.redrive_failed(text,integer,text)": frozenset({"TQ422"}),
     "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
     "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
@@ -684,15 +693,15 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.3.1"',
+    "contract_version": '"0.4.0"',
     "capabilities": (
         '{"active": ["admission_reservations", "dependencies_workflows", '
-        '"followups", "operator_schedule_list", "read_model_job_events", '
-        '"read_model_job_views_v2", "read_model_list_finished", '
-        '"read_model_list_ready", "read_model_list_running", '
-        '"read_model_workflow", "read_model_workflow_list", "scheduler_v2", '
-        '"schedules", "target_attestation", "worker_presence", '
-        '"workflow_continuations"]}'
+        '"followups", "operator_schedule_list", "queue_counters", '
+        '"read_model_job_events", "read_model_job_views_v2", '
+        '"read_model_list_finished", "read_model_list_ready", '
+        '"read_model_list_running", "read_model_workflow", '
+        '"read_model_workflow_list", "scheduler_v2", "schedules", '
+        '"target_attestation", "worker_presence", "workflow_continuations"]}'
     ),
 }
 SCHEDULE_SEED = {
