@@ -48,9 +48,10 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.3.1"
+            == "0.4.0"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
+        assert await conn.fetchval("SELECT taskq.has_capability('queue_counters')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('scheduler_v2')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('target_attestation')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('read_model_job_views_v2')") is True
@@ -70,9 +71,10 @@ async def _assert_activation(dsn: str) -> None:
                 "SELECT count(*) FROM taskq.schema_migrations "
                 "WHERE id IN "
                 "('0019_scheduler_target_identity','0020_standalone_scheduler',"
-                "'0021_cli_read_model')"
+                "'0021_cli_read_model','0022_queue_counters',"
+                "'0023_activate_queue_counters')"
             )
-            == 3
+            == 5
         )
     finally:
         await conn.close()
@@ -439,8 +441,10 @@ def main() -> None:
         "0019_scheduler_target_identity",
         "0020_standalone_scheduler",
         "0021_cli_read_model",
+        "0022_queue_counters",
+        "0023_activate_queue_counters",
     ]
-    assert len(FUNCTIONS) == 92
+    assert len(FUNCTIONS) == 95
 
     if args.mode != "core":
         return
