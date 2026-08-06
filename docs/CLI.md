@@ -52,6 +52,15 @@ Contexts may store endpoint URLs, secret environment-variable names, target
 expectations, and a direct-SQL actor. They cannot contain literal DSNs, tokens,
 passwords, or header values.
 
+> **Talking to a real deployment.** The CLI's `http` transport speaks the
+> packaged facade's contract (`/taskq/v1/*` routes + a `Taskq-Protocol-Version`
+> response header). It cannot drive an application that exposes TaskQ over its
+> own custom routes — that yields `TQ500: missing_or_invalid_protocol_header`.
+> For operators with database reach, a `sql` context is the simplest and most
+> robust path and needs no HTTP surface. See
+> [`Operator CLI Access.md`](Operator%20CLI%20Access.md) for both options and
+> their trade-offs.
+
 ```bash
 taskq context validate
 taskq context list
