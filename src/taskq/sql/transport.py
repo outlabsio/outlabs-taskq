@@ -1253,6 +1253,16 @@ class SqlTaskqTransport:
 
         return await self._run(operation, connection=connection)
 
+    async def get_queue_health(self, queue: str | None = None) -> list[dict[str, Any]]:
+        async def operation(conn: AsyncConnection) -> list[dict[str, Any]]:
+            result = await conn.execute(
+                text("SELECT queue, verdict, detail FROM taskq.queue_health(:queue)"),
+                {"queue": queue},
+            )
+            return [dict(row) for row in result.mappings()]
+
+        return await self._run(operation)
+
     async def get_scheduler_health(self) -> SchedulerHealth:
         async def operation(conn: AsyncConnection) -> SchedulerHealth:
             row = await self._one(conn, "SELECT * FROM taskq.get_scheduler_health()")

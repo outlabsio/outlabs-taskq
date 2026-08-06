@@ -814,6 +814,16 @@ def queue_list_command(state: CliState) -> None:
     _run(_transport_operation(state, "queue.list", "QueueList", operation))
 
 
+@queue_group.command("health")
+@click.argument("queue", required=False)
+@pass_state
+def queue_health_command(state: CliState, queue: str | None) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return {"items": jsonable(await transport.queue_health(queue))}
+
+    _run(_transport_operation(state, "queue.health", "QueueHealth", operation))
+
+
 @queue_group.command("show")
 @click.argument("queue")
 @pass_state

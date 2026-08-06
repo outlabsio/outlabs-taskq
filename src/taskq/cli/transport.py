@@ -46,6 +46,11 @@ class CliTransport:
             raise TaskqCapabilityError(details={"capability": "target_attestation_http"})
         return await self.transport.command(name)
 
+    async def queue_health(self, queue: str | None = None) -> Any:
+        if self.mode == "sql":
+            return await self.transport.get_queue_health(queue)
+        raise TaskqCapabilityError(details={"capability": "queue_health_http"})
+
     async def scheduler_health(self) -> Any:
         if self.mode == "sql":
             return await self.transport.get_scheduler_health()

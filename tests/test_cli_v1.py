@@ -68,7 +68,7 @@ def _leaf_paths(group: click.Group, prefix: tuple[str, ...] = ()) -> set[str]:
 
 def test_command_registry_exactly_matches_click_leaves_and_is_agent_complete() -> None:
     assert _leaf_paths(cli) == set(COMMAND_SPECS)
-    assert len(COMMAND_SPECS) == 63
+    assert len(COMMAND_SPECS) == 64
     for path, spec in COMMAND_SPECS.items():
         metadata = spec.as_dict()
         assert metadata["path"] == path

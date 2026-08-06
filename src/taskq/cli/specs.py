@@ -75,6 +75,7 @@ COMMAND_SPECS = {
             destructive=True,
         ),
         _s("queue.list", "List queue statistics", _BOTH, role="taskq_observer"),
+        _s("queue.health", "Per-queue health verdicts", _SQL, role="taskq_observer"),
         _s("queue.show", "Show a queue profile", _BOTH, role="taskq_observer"),
         _s(
             "queue.ensure",
