@@ -165,11 +165,19 @@ def _retry_after_seconds(response: httpx.Response) -> float:
         return 0.0
 
 
-def _retry_delay(response: httpx.Response) -> float:
+def _backoff_delay(attempt: int) -> float:
+    """Full-jitter exponential backoff for retries with no server guidance."""
+
+    return random.uniform(0.0, min(0.25 * (2**attempt), 5.0))
+
+
+def _retry_delay(response: httpx.Response, attempt: int) -> float:
     retry_after = _retry_after_seconds(response)
     if retry_after == 0:
-        return 0.0
-    return retry_after + random.uniform(0, min(retry_after * 0.1, 0.25))
+        return _backoff_delay(attempt)
+    # Never earlier than the server asked; proportionally desynchronized after
+    # it so a fleet honoring the same Retry-After does not re-arrive as one.
+    return retry_after * random.uniform(1.0, 1.5)
 
 
 def _can_retry(spec: HttpCommandSpec, body: Mapping[str, Any] | None) -> bool:
@@ -459,11 +467,11 @@ class AsyncTaskqHttpClient:
                         or code not in _RETRYABLE_HTTP_CODES
                     ):
                         raise
-                    await asyncio.sleep(_retry_delay(response))
+                    await asyncio.sleep(_retry_delay(response, attempt))
             except httpx.TransportError as exc:
                 if not retry or attempt >= self._config.max_retries:
                     raise TaskqUnavailableError(cause=exc) from exc
-                await asyncio.sleep(0)
+                await asyncio.sleep(_backoff_delay(attempt))
         raise AssertionError("unreachable")
 
     async def start(self) -> ContractMeta:
@@ -1127,11 +1135,11 @@ class TaskqHttpClient:
                         or code not in _RETRYABLE_HTTP_CODES
                     ):
                         raise
-                    time.sleep(_retry_delay(response))
+                    time.sleep(_retry_delay(response, attempt))
             except httpx.TransportError as exc:
                 if not retry or attempt >= self._config.max_retries:
                     raise TaskqUnavailableError(cause=exc) from exc
-                time.sleep(0)
+                time.sleep(_backoff_delay(attempt))
         raise AssertionError("unreachable")
 
     def start(self) -> ContractMeta:

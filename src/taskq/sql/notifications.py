@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import re
 from collections.abc import Callable, Sequence
 from typing import Any
@@ -36,7 +37,8 @@ class PostgresNotificationSource:
         self._closed = False
         self._lock = asyncio.Lock()
         self._channels: set[str] = set()
-        self._nudge: Callable[[], None] | None = None
+        self._nudge: Callable[[], None] | Callable[[str], None] | None = None
+        self._nudge_accepts_channel = False
         self._listener: Callable[..., None] | None = None
 
     def __repr__(self) -> str:
@@ -55,7 +57,9 @@ class PostgresNotificationSource:
             raise TaskqConfigError("invalid taskq notification channel")
         return result
 
-    async def connect(self, channels: Sequence[str], nudge: Callable[[], None]) -> None:
+    async def connect(
+        self, channels: Sequence[str], nudge: Callable[[], None] | Callable[[str], None]
+    ) -> None:
         requested = self._validated_channels(channels)
         async with self._lock:
             if self._closed:
@@ -64,6 +68,10 @@ class PostgresNotificationSource:
                 raise TaskqConfigError("notification source is already connected")
             self._channels.update(requested)
             self._nudge = nudge
+            try:
+                self._nudge_accepts_channel = len(inspect.signature(nudge).parameters) >= 1
+            except (TypeError, ValueError):
+                self._nudge_accepts_channel = False
             disconnected = asyncio.Event()
             self._disconnected = disconnected
             connection = await asyncpg.connect(self._dsn)
@@ -78,7 +86,10 @@ class PostgresNotificationSource:
                 ) -> None:
                     callback = self._nudge
                     if callback is not None:
-                        callback()
+                        if self._nudge_accepts_channel:
+                            callback(_channel)  # type: ignore[call-arg]
+                        else:
+                            callback()  # type: ignore[call-arg]
 
                 for channel in sorted(self._channels):
                     await connection.add_listener(channel, notified)

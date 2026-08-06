@@ -6,6 +6,7 @@ import copy
 import base64
 import json
 import re
+import random
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -894,7 +895,7 @@ class _FacadeDispatcher:
             claim_options["supported_policy_hashes"] = body.supported_policy_hashes
         deadline = time.monotonic() + body.wait_seconds
         while True:
-            generation = self.resources.claim_wait_hub.generation
+            generation = self.resources.claim_wait_hub.queue_generation(queue)
             result = await self.resources.runner.claim(
                 queue,
                 body.worker_id,
@@ -907,7 +908,9 @@ class _FacadeDispatcher:
             if remaining <= 0:
                 return "timeout", ClaimWireData(jobs=())
 
-            async with await self.resources.claim_wait_hub.subscribe(generation) as subscription:
+            async with await self.resources.claim_wait_hub.subscribe(
+                generation, queue
+            ) as subscription:
                 # Immediate authoritative recheck closes notify-between-claim-and-subscribe.
                 result = await self.resources.runner.claim(
                     queue,
@@ -922,7 +925,9 @@ class _FacadeDispatcher:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     return "timeout", ClaimWireData(jobs=())
-                await subscription.wait(min(remaining, self.poll_interval))
+                await subscription.wait(
+                    min(remaining, self.poll_interval * random.uniform(1.0, 1.5))
+                )
 
     @staticmethod
     def _claim_outcome(result: ClaimResult) -> str:
