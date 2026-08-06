@@ -30,7 +30,7 @@ from taskq.loadlab._chassis import (
 )
 from taskq.loadlab._instruments import ClaimFaultPlan
 
-SCENARIOS = ("L1", "L2", "L4", "L5")
+SCENARIOS = ("L1", "L2", "L4", "L5", "L6")
 
 
 def _check(name: str, ok: bool, **detail: Any) -> dict[str, Any]:
@@ -607,9 +607,223 @@ def _went_fatal(handle: WorkerHandle):
     return probe
 
 
+# --------------------------------------------------------------------------- L6
+
+
+async def _l6_counter_contention(ctx: ScenarioContext) -> dict[str, Any]:
+    """Wave 2a activation gate: counter exactness under concurrent mixed load,
+    and the trigger's write-path overhead measured enabled vs disabled."""
+
+    queue, task_name = "load_l6", "load.mixed"
+    await ctx.ensure_queue(queue)
+    seen: set[int] = set()
+
+    async def handler(payload: LoadInput) -> LoadOutput:
+        if payload.value % 5 == 0 and payload.value not in seen:
+            seen.add(payload.value)
+            raise RuntimeError("first attempt fails by design")
+        return LoadOutput(value=payload.value)
+
+    total = max(60, ctx.scale.cohort_jobs * 3)
+    fleet = [
+        ctx.build_worker(
+            queue,
+            f"l6-worker-{index}",
+            handler=handler,
+            task_name=task_name,
+            concurrency=2,
+            batch=2,
+            poll_interval=0.3,
+            listen=True,
+        )
+        for index in range(3)
+    ]
+    producers = [await ctx.producer() for _ in range(4)]
+    operator_cancels = 3
+    try:
+        await _start_fleet(fleet)
+
+        async def produce(conn: asyncpg.Connection, lane: int) -> None:
+            for index in range(lane, total, len(producers)):
+                await conn.fetchrow(
+                    "SELECT * FROM taskq.enqueue($1, $2, $3::jsonb, p_idempotency_key => $4)",
+                    queue,
+                    task_name,
+                    json.dumps({"value": index}),
+                    f"l6-{ctx.seed}-{index}",
+                )
+
+        await asyncio.gather(*(produce(conn, lane) for lane, conn in enumerate(producers)))
+        cancelled = 0
+        for _ in range(operator_cancels):
+            job_id = await ctx.admin.fetchval(
+                "SELECT id FROM taskq.jobs WHERE queue=$1 AND status='queued'"
+                " AND cancel_requested_at IS NULL LIMIT 1",
+                queue,
+            )
+            if job_id is None:
+                continue
+            row = await ctx.operator.fetchrow(
+                "SELECT * FROM taskq.cancel_job($1, 'loadlab', 'l6')", job_id
+            )
+            if row is not None and row["result"] in ("ok", "cancelled", "already_cancelled"):
+                cancelled += 1
+        await wait_until(
+            _l6_all_terminal(ctx, queue, total),
+            timeout=ctx.scale.settle_timeout_seconds,
+            message="l6 mixed workload did not fully settle",
+        )
+        for handle in fleet:
+            await handle.aclose()
+        fleet = []
+
+        # retention pass exercises the DELETE branch mid-scenario
+        await ctx.admin.execute(
+            "UPDATE taskq.jobs SET finished_at = now() - interval '30 days'"
+            " WHERE queue=$1 AND status IN ('succeeded','failed','cancelled')"
+            " AND id IN (SELECT id FROM taskq.jobs WHERE queue=$1"
+            "            AND status IN ('succeeded','failed','cancelled') LIMIT 20)",
+            queue,
+        )
+        janitor = await _connect_role(ctx.dsn, "taskq_housekeeper")
+        try:
+            await _attested_fetchrow(janitor, "SELECT taskq.janitor()")
+        finally:
+            await janitor.close()
+
+        counters = dict(
+            await ctx.admin.fetchrow(
+                "SELECT blocked, queued, running, enqueued_total, requeued_total,"
+                " succeeded_total, failed_total, cancelled_total"
+                " FROM taskq.queue_counters WHERE queue=$1",
+                queue,
+            )
+        )
+        truth = dict(
+            await ctx.admin.fetchrow(
+                "SELECT count(*) FILTER (WHERE status='blocked') AS blocked,"
+                " count(*) FILTER (WHERE status='queued') AS queued,"
+                " count(*) FILTER (WHERE status='running') AS running"
+                " FROM taskq.jobs WHERE queue=$1",
+                queue,
+            )
+        )
+        exact = all(counters[key] == truth[key] for key in ("blocked", "queued", "running"))
+        conserved = (
+            counters["enqueued_total"] == total
+            and counters["succeeded_total"] + counters["failed_total"] + counters["cancelled_total"]
+            >= total - truth["queued"] - truth["running"] - truth["blocked"]
+        )
+
+        # Overhead: identical direct-SQL claim/complete bursts, trigger on vs off.
+        burst = 150
+        prep = producers[0]
+
+        async def timed_burst(tag: str) -> float:
+            await ctx.enqueue_many(prep, queue, task_name, f"l6-burst-{tag}-{ctx.seed}", burst)
+            runner = await _connect_role(ctx.dsn, "taskq_runner")
+            started = time.monotonic()
+            try:
+                for index in range(burst):
+                    batch = await _attested_fetchrow(
+                        runner, "SELECT * FROM taskq.claim_jobs($1, $2)", queue, f"l6-{tag}"
+                    )
+                    assert batch is not None and batch["state"] == "claimed"
+                    job = batch["jobs"][0]
+                    settled = await runner.fetchrow(
+                        "SELECT * FROM taskq.complete_job($1, $2, $3)",
+                        job["job_id"],
+                        job["attempt_id"],
+                        f"l6-{tag}",
+                    )
+                    assert settled is not None and settled["result"] == "ok"
+            finally:
+                await runner.close()
+            return time.monotonic() - started
+
+        on_seconds = await timed_burst("on")
+        await ctx.admin.execute("ALTER TABLE taskq.jobs DISABLE TRIGGER jobs_queue_counters_trg")
+        try:
+            off_seconds = await timed_burst("off")
+        finally:
+            await ctx.admin.execute("ALTER TABLE taskq.jobs ENABLE TRIGGER jobs_queue_counters_trg")
+            await ctx.admin.execute("TRUNCATE taskq.queue_counters")
+            await ctx.admin.execute(
+                "INSERT INTO taskq.queue_counters (queue, blocked, queued, running,"
+                " enqueued_total, requeued_total, succeeded_total, failed_total,"
+                " cancelled_total)"
+                " SELECT q.name, COALESCE(c.blocked,0), COALESCE(c.queued,0),"
+                " COALESCE(c.running,0), COALESCE(c.total,0), 0, COALESCE(c.succeeded,0),"
+                " COALESCE(c.failed,0), COALESCE(c.cancelled,0)"
+                " FROM taskq.queues q LEFT JOIN ("
+                "  SELECT j.queue, count(*) AS total,"
+                "  count(*) FILTER (WHERE j.status='blocked') AS blocked,"
+                "  count(*) FILTER (WHERE j.status='queued') AS queued,"
+                "  count(*) FILTER (WHERE j.status='running') AS running,"
+                "  count(*) FILTER (WHERE j.status='succeeded') AS succeeded,"
+                "  count(*) FILTER (WHERE j.status='failed') AS failed,"
+                "  count(*) FILTER (WHERE j.status='cancelled') AS cancelled"
+                "  FROM taskq.jobs j GROUP BY j.queue) c ON c.queue = q.name"
+            )
+        overhead_pct = ((on_seconds - off_seconds) / off_seconds * 100) if off_seconds else 0.0
+        rebuilt = dict(
+            await ctx.admin.fetchrow(
+                "SELECT blocked, queued, running FROM taskq.queue_counters WHERE queue=$1",
+                queue,
+            )
+        )
+        truth_after = dict(
+            await ctx.admin.fetchrow(
+                "SELECT count(*) FILTER (WHERE status='blocked') AS blocked,"
+                " count(*) FILTER (WHERE status='queued') AS queued,"
+                " count(*) FILTER (WHERE status='running') AS running"
+                " FROM taskq.jobs WHERE queue=$1",
+                queue,
+            )
+        )
+        checks = [
+            _check("counter_levels_exact_after_mixed_load", exact, counters=counters, truth=truth),
+            _check("cumulatives_conserved", conserved, counters=counters, total=total),
+            _check("rebackfill_exact", rebuilt == truth_after, rebuilt=rebuilt, truth=truth_after),
+            _check(
+                "cancels_recorded", counters["cancelled_total"] >= cancelled, cancelled=cancelled
+            ),
+        ]
+        return {
+            "metrics": {
+                "mixed_jobs": total,
+                "burst_jobs": burst,
+                "trigger_on_seconds": round(on_seconds, 3),
+                "trigger_off_seconds": round(off_seconds, 3),
+                "trigger_overhead_pct": round(overhead_pct, 2),
+                "throughput_on_jobs_s": round(burst / on_seconds, 1) if on_seconds else 0,
+                "throughput_off_jobs_s": round(burst / off_seconds, 1) if off_seconds else 0,
+            },
+            "invariant_checks": checks,
+        }
+    finally:
+        for handle in fleet:
+            await handle.aclose()
+        for conn in producers:
+            await conn.close()
+
+
+def _l6_all_terminal(ctx: ScenarioContext, queue: str, total: int):
+    async def probe() -> bool:
+        value = await ctx.admin.fetchval(
+            "SELECT count(*) FROM taskq.jobs WHERE queue=$1"
+            " AND status IN ('succeeded','failed','cancelled')",
+            queue,
+        )
+        return int(value or 0) >= total
+
+    return probe
+
+
 SCENARIO_RUNNERS = {
     "L1": _l1_notify_herd,
     "L2": _l2_retry_storm,
     "L4": _l4_admission_vs_drain,
     "L5": _l5_claim_error_posture,
+    "L6": _l6_counter_contention,
 }
