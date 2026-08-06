@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import random
 import re
 import socket
 from collections.abc import Awaitable, Callable
@@ -193,6 +194,15 @@ class WorkerServiceOptions(BaseModel):
     listener_backoff_base: float = Field(default=0.25, gt=0)
     listener_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
     cancel_inflight_claim_on_stop: bool = False
+    # Load-behavior options (Wave 1). Zero disables the zero-able ones.
+    poll_jitter: float = Field(default=0.2, ge=0, le=0.5)
+    idle_poll_cap: float = Field(default=60.0, ge=0, le=86400)
+    claim_backoff_base: float = Field(default=0.25, gt=0)
+    claim_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
+    claim_fatal_threshold: int = Field(default=8, ge=1, le=100)
+    nudge_quiet_base: float = Field(default=0.05, gt=0, le=10)
+    nudge_quiet_cap: float = Field(default=2.0, gt=0, le=60)
+    adaptive_batch: bool = True
 
     @model_validator(mode="after")
     def _valid_service_options(self) -> WorkerServiceOptions:
@@ -204,6 +214,10 @@ class WorkerServiceOptions(BaseModel):
             raise ValueError("queues must match [a-z0-9_]{1,57}")
         if self.listener_backoff_cap < self.listener_backoff_base:
             raise ValueError("listener_backoff_cap must cover listener_backoff_base")
+        if self.claim_backoff_cap < self.claim_backoff_base:
+            raise ValueError("claim_backoff_cap must cover claim_backoff_base")
+        if self.nudge_quiet_cap < self.nudge_quiet_base:
+            raise ValueError("nudge_quiet_cap must cover nudge_quiet_base")
         return self
 
 
@@ -278,6 +292,7 @@ class WorkerService:
         clock: WorkerClock | None = None,
         effect_reporter: TrustedEffectReporter | None = None,
         continuation_policies: Sequence[CompiledContinuationPolicy] = (),
+        rng: random.Random | None = None,
     ) -> None:
         if options.listen and notifications is None:
             raise TaskqConfigError("listen=True requires a notification source")
@@ -314,6 +329,7 @@ class WorkerService:
         self._job_types_by_queue = bound_by_queue
         self.clock = clock or RealWorkerClock()
         self.notifications = notifications
+        self._rng = rng or random.Random()
         self.supervisor = WorkerSupervisor(
             transport,
             registry,
@@ -322,6 +338,7 @@ class WorkerService:
             clock=self.clock,
             effect_reporter=effect_reporter,
             continuation_policies=policies,
+            rng=self._rng,
         )
         self._supported_policy_hashes = policy_hashes
         self._state = WorkerServiceState.CONSTRUCTED
@@ -347,6 +364,13 @@ class WorkerService:
         self._started_monotonic: float | None = None
         self._last_claim_success: float | None = None
         self._last_presence_success: float | None = None
+        self._claim_error_streaks: dict[str, int] = {}
+        self._claim_retry_at: dict[str, float] = {}
+        self._idle_polls = 0
+        self._fruitless_nudges = 0
+        self._nudge_quiet_until = 0.0
+        self._batch_target = 1 if options.adaptive_batch else options.batch
+        self._last_wake = "initial"
 
     @property
     def state(self) -> WorkerServiceState:
@@ -517,7 +541,7 @@ class WorkerService:
                 self._refresh_running_state()
             if self._stop_requested.is_set():
                 break
-            await self._sleep_or_stop(backoff)
+            await self._sleep_or_stop(self._rng.uniform(0.0, backoff))
             backoff = min(backoff * 2, self.options.listener_backoff_cap)
 
     async def _claim_loop(self) -> None:
@@ -527,12 +551,16 @@ class WorkerService:
                     if not await self._wait_for_capacity_or_stop():
                         break
                 claimed_in_sweep = False
+                swept_any = False
                 for _ in self.options.queues:
                     if self._stop_requested.is_set() or self.supervisor.available_slots == 0:
                         break
                     queue = self.options.queues[self._queue_index]
                     self._queue_index = (self._queue_index + 1) % len(self.options.queues)
-                    batch = min(self.options.batch, self.supervisor.available_slots)
+                    if self._claim_retry_at.get(queue, 0.0) > self.clock.monotonic():
+                        continue
+                    swept_any = True
+                    batch = min(self._effective_batch(), self.supervisor.available_slots)
                     claim_options: dict[str, Any] = {
                         "batch": batch,
                         "job_types": self._job_types_by_queue[queue],
@@ -546,17 +574,10 @@ class WorkerService:
                             **claim_options,
                         )
                     except TaskqError as exc:
-                        if not exc.retryable:
-                            raise
-                        logger.warning(
-                            "claim.unavailable",
-                            extra={
-                                "worker_id": self.worker_id,
-                                "queue": queue,
-                                "error_code": exc.code.value,
-                            },
-                        )
+                        self._note_claim_error(queue, exc)
                         continue
+                    self._claim_error_streaks.pop(queue, None)
+                    self._claim_retry_at.pop(queue, None)
                     self._claim_sweeps += 1
                     logger.debug(
                         "poll.sweep",
@@ -589,18 +610,88 @@ class WorkerService:
                             )
                         self._claimed_jobs += len(result.jobs)
                         self._last_claim_success = self.clock.monotonic()
+                        self._observe_claim_result(len(result.jobs), batch)
                         claimed_in_sweep = True
+                    elif result.state is ClaimState.EMPTY:
+                        self._observe_claim_result(0, batch)
                     elif result.state in (ClaimState.UNKNOWN_QUEUE, ClaimState.UNAVAILABLE):
                         raise WorkerInvariantError(
                             f"unexpected claim state for subscribed queue: {result.state.value}"
                         )
-                if claimed_in_sweep and self.supervisor.available_slots > 0:
-                    continue
+                if claimed_in_sweep:
+                    self._idle_polls = 0
+                    self._fruitless_nudges = 0
+                    self._nudge_quiet_until = 0.0
+                    if self.supervisor.available_slots > 0:
+                        continue
+                elif swept_any and self._last_wake == "nudge":
+                    self._fruitless_nudges += 1
+                    quiet = min(
+                        self.options.nudge_quiet_base * (2 ** (self._fruitless_nudges - 1)),
+                        self.options.nudge_quiet_cap,
+                    )
+                    self._nudge_quiet_until = self.clock.monotonic() + quiet
+                elif swept_any and self._last_wake == "deadline" and self._listener_connected:
+                    self._idle_polls += 1
                 await self._wait_for_poll_or_nudge()
         except asyncio.CancelledError:
             raise
         except BaseException as exc:
             self._fail_service(exc)
+
+    def _effective_batch(self) -> int:
+        if not self.options.adaptive_batch:
+            return self.options.batch
+        return self._batch_target
+
+    def _observe_claim_result(self, got: int, asked: int) -> None:
+        if not self.options.adaptive_batch:
+            return
+        if got >= asked and got > 0:
+            self._batch_target = min(self._batch_target * 2, self.options.batch)
+        elif got == 0:
+            self._batch_target = max(1, self._batch_target // 2)
+
+    def _note_claim_error(self, queue: str, error: TaskqError) -> None:
+        """Bounded-retry-then-fatal for EVERY claim-path error class.
+
+        Contention is exactly where error classification is least reliable, so
+        no TaskqError is instantly fatal here: each backs the queue off with
+        jittered exponential delay, and only a persistent consecutive streak
+        fails the service closed (loudly). Truly unexpected non-taskq
+        exceptions and invariant claim states remain instantly fatal.
+        """
+
+        streak = self._claim_error_streaks.get(queue, 0) + 1
+        self._claim_error_streaks[queue] = streak
+        if streak >= self.options.claim_fatal_threshold:
+            logger.error(
+                "claim.failing",
+                extra={
+                    "worker_id": self.worker_id,
+                    "queue": queue,
+                    "error_code": error.code.value,
+                    "consecutive_errors": streak,
+                },
+            )
+            self._fail_service(error)
+            return
+        delay = min(
+            self.options.claim_backoff_base * (2 ** (streak - 1)),
+            self.options.claim_backoff_cap,
+        )
+        delay *= 0.5 + self._rng.random()
+        self._claim_retry_at[queue] = self.clock.monotonic() + delay
+        logger.warning(
+            "claim.unavailable",
+            extra={
+                "worker_id": self.worker_id,
+                "queue": queue,
+                "error_code": error.code.value,
+                "consecutive_errors": streak,
+                "retry_in_seconds": round(delay, 3),
+            },
+        )
 
     def _ensure_stop_task(self) -> None:
         if self._stop_task is None:
@@ -720,19 +811,51 @@ class WorkerService:
         return capacity in done and not self._stop_requested.is_set()
 
     async def _wait_for_poll_or_nudge(self) -> None:
+        now = self.clock.monotonic()
+        backing_off = [at for at in self._claim_retry_at.values() if at > now]
+        all_backing_off = 0 < len(self.options.queues) == len(backing_off)
+        if all_backing_off:
+            delay = max(0.01, min(backing_off) - now)
+            ignore_nudges = True
+        else:
+            delay = self.options.poll_interval
+            if self.options.idle_poll_cap > 0 and self._idle_polls > 0 and self._listener_connected:
+                cap = max(self.options.idle_poll_cap, self.options.poll_interval)
+                delay = min(self.options.poll_interval * (2 ** min(self._idle_polls, 16)), cap)
+            if self.options.poll_jitter > 0:
+                delay *= 1 + self._rng.uniform(-self.options.poll_jitter, self.options.poll_jitter)
+            ignore_nudges = False
         generation = self._nudge.generation
-        notified = asyncio.create_task(
-            self._nudge.wait_for_change(generation), name="taskq-worker-nudge"
-        )
-        deadline = asyncio.create_task(
-            self.clock.sleep(self.options.poll_interval), name="taskq-worker-poll-deadline"
-        )
-        stopping = asyncio.create_task(self._stop_requested.wait(), name="taskq-worker-poll-stop")
-        await asyncio.wait((notified, deadline, stopping), return_when=asyncio.FIRST_COMPLETED)
-        notified.cancel()
-        deadline.cancel()
-        stopping.cancel()
-        await asyncio.gather(notified, deadline, stopping, return_exceptions=True)
+        waiters: dict[str, asyncio.Task[Any]] = {
+            "stop": asyncio.create_task(self._stop_requested.wait(), name="taskq-worker-poll-stop"),
+            "deadline": asyncio.create_task(
+                self.clock.sleep(delay), name="taskq-worker-poll-deadline"
+            ),
+        }
+        if not ignore_nudges:
+            waiters["nudge"] = asyncio.create_task(
+                self._nudge.wait_for_change(generation), name="taskq-worker-nudge"
+            )
+        done, _ = await asyncio.wait(waiters.values(), return_when=asyncio.FIRST_COMPLETED)
+        reason = "deadline"
+        for name in ("stop", "nudge", "deadline"):
+            task = waiters.get(name)
+            if task is not None and task in done:
+                reason = name
+                break
+        for task in waiters.values():
+            task.cancel()
+        await asyncio.gather(*waiters.values(), return_exceptions=True)
+        if reason == "nudge":
+            self._idle_polls = 0
+            # Nudge decimation: inside a quiet window the wake is DEFERRED to
+            # the window's expiry, not dropped — further nudges coalesce into
+            # the single sweep that follows, and pickup latency stays bounded
+            # by nudge_quiet_cap instead of the poll interval.
+            remaining = self._nudge_quiet_until - self.clock.monotonic()
+            if remaining > 0 and not self._stop_requested.is_set():
+                await self._sleep_or_stop(remaining)
+        self._last_wake = reason
 
     async def _sleep_or_stop(self, delay: float) -> None:
         sleeping = asyncio.create_task(self.clock.sleep(delay), name="taskq-listener-backoff")
@@ -801,6 +924,7 @@ class WorkerSupervisor:
         clock: WorkerClock | None = None,
         effect_reporter: TrustedEffectReporter | None = None,
         continuation_policies: Sequence[CompiledContinuationPolicy] = (),
+        rng: random.Random | None = None,
     ) -> None:
         if not worker_id or len(worker_id) > 200:
             raise TaskqConfigError("worker_id must be non-empty and at most 200 characters")
@@ -820,6 +944,7 @@ class WorkerSupervisor:
         self.worker_id = worker_id
         self.options = options or WorkerOptions()
         self.clock = clock or RealWorkerClock()
+        self._rng = rng or random.Random()
         self.effect_reporter = effect_reporter
         self._continuation_policies = {
             policy.continuation_policy_hash: policy for policy in policies
@@ -1546,9 +1671,12 @@ class WorkerSupervisor:
                 return self._report_from_settle(job_id, command.value, result)
 
             if retryable and attempt < self.options.settle_max_attempts:
-                delay = min(
-                    self.options.settle_backoff_base * (2 ** (attempt - 1)),
-                    self.options.settle_backoff_cap,
+                delay = self._rng.uniform(
+                    0.0,
+                    min(
+                        self.options.settle_backoff_base * (2 ** (attempt - 1)),
+                        self.options.settle_backoff_cap,
+                    ),
                 )
                 if await self._settle_delay(delay, control):
                     return self._ownership_lost_report(job_id, control)

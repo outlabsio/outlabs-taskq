@@ -211,7 +211,7 @@ before SQL; direct SQL retains the trusted runner-role boundary.
 
 ## Development gates
 
-Protect `main` with pull requests, require branches to be current, and require the CI gates that run on pull requests: `lint`, `dependency-audit`, both `import-isolation` and `unit` Python lanes, `built-artifacts`, both PostgreSQL `sql-contract` lanes, both `fresh-cluster-security` lanes, `races`, `stage3-audit`, `migrations`, and `bench-smoke`. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process.
+Protect `main` with pull requests, require branches to be current, and require the CI gates that run on pull requests: `lint`, `dependency-audit`, both `import-isolation` and `unit` Python lanes, `built-artifacts`, both PostgreSQL `sql-contract` lanes, both `fresh-cluster-security` lanes, `races`, `stage3-audit`, `migrations`, `bench-smoke`, and both PostgreSQL `load-smoke` lanes. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process.
 
 ## License
 

@@ -250,9 +250,22 @@ class _RuntimeNotificationListener:
         self._lock = asyncio.Lock()
         self._monitor: asyncio.Task[None] | None = None
         self._closed = False
+        self._pending_notifies: set[str] = set()
+        self._drain_task: asyncio.Task[None] | None = None
 
-    def _nudge(self) -> None:
-        asyncio.create_task(self.hub.notify(), name="taskq-runtime-long-poll-nudge")
+    def _nudge(self, channel: str) -> None:
+        # Coalesce notify bursts into one bounded drainer task instead of one
+        # unreferenced fire-and-forget task per NOTIFY.
+        self._pending_notifies.add(channel.removeprefix("taskq_"))
+        if self._drain_task is None or self._drain_task.done():
+            self._drain_task = asyncio.create_task(
+                self._drain_notifies(), name="taskq-runtime-long-poll-nudge"
+            )
+
+    async def _drain_notifies(self) -> None:
+        while self._pending_notifies:
+            queue = self._pending_notifies.pop()
+            await self.hub.notify(queue)
 
     async def ensure_queue(self, queue: str) -> None:
         async with self._lock:
@@ -289,12 +302,14 @@ class _RuntimeNotificationListener:
             raise
 
     async def _reconnect_loop(self) -> None:
+        delay = self.backoff
         while not self._closed:
             try:
                 await self.source.connect(
                     [f"taskq_{queue}" for queue in sorted(self._queues)], self._nudge
                 )
                 self.healthy = True
+                delay = self.backoff
                 await self.hub.notify()
                 await self.source.wait_disconnected()
                 self.healthy = False
@@ -302,7 +317,10 @@ class _RuntimeNotificationListener:
                 raise
             except Exception:
                 self.healthy = False
-            await asyncio.sleep(self.backoff)
+            # Full-jitter exponential backoff: a DB restart must not make every
+            # ASGI process hammer reconnects in flat lockstep.
+            await asyncio.sleep(random.uniform(0.0, delay))
+            delay = min(delay * 2, max(self.backoff, 30.0))
 
     async def aclose(self) -> None:
         async with self._lock:

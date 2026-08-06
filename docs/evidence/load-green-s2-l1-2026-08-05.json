@@ -1,0 +1,188 @@
+{
+  "scenario": "L1",
+  "scale": "toy",
+  "method": {
+    "repetitions": 1,
+    "seed": 20260805,
+    "database_reset": "fresh database created for scenario and dropped afterward",
+    "reset_fingerprint": {
+      "database": "taskq_load_l1_edd9c50966164a86bdba46e43358b0aa",
+      "jobs_rows": 0,
+      "jobs_relfilenode": 160159,
+      "jobs_table_bytes": 155648,
+      "jobs_index_bytes": 147456,
+      "jobs_live_tuples": 0,
+      "jobs_dead_tuples": 0,
+      "migration_ledger": [
+        "0001_initial",
+        "0002_contract_0_1_1",
+        "0003_contract_0_1_2",
+        "0004_read_models",
+        "0005_read_model_conformance",
+        "0006_activate_ready_read_model",
+        "0007_admission_reservations",
+        "0008_followups",
+        "0009_workflows",
+        "0010_schedules",
+        "0011_finite_projections",
+        "0012_activate_finite_projections",
+        "0013_workflow_page_composite_repair",
+        "0014_worker_presence_projection",
+        "0015_activate_worker_presence",
+        "0016_workflow_continuations",
+        "0017_activate_workflow_continuations",
+        "0018_trusted_effect_fence",
+        "0019_scheduler_target_identity",
+        "0020_standalone_scheduler",
+        "0021_cli_read_model"
+      ],
+      "migration_checksums_sha256": "cd7a1dc64752bd60bae63c9fa57992c1e44ee63d88c772254db3b99cfbcaefd1"
+    }
+  },
+  "runs": [
+    {
+      "metrics": {
+        "workers": 4,
+        "jobs": 12,
+        "claim_calls": 29,
+        "claim_calls_per_delivered_job": 2.4166666666666665,
+        "empty_claim_ratio": 0.5862068965517241,
+        "mean_herd_size_per_enqueue": 7.166666666666667
+      },
+      "wake_latency": {
+        "p50_ms": 14.720999635756016,
+        "p95_ms": 20.126749761402607,
+        "p99_ms": 20.126749761402607,
+        "max_ms": 20.426124334335327
+      },
+      "invariant_checks": [
+        {
+          "name": "all_jobs_delivered",
+          "ok": true,
+          "detail": {
+            "succeeded": 13
+          }
+        },
+        {
+          "name": "single_attempt_per_job",
+          "ok": true,
+          "detail": {
+            "attempts": {
+              "1": 13
+            }
+          }
+        },
+        {
+          "name": "no_worker_fatal",
+          "ok": true,
+          "detail": {
+            "fatal_workers": []
+          }
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "median_workers": 4.0,
+    "median_jobs": 12.0,
+    "median_claim_calls": 29.0,
+    "median_claim_calls_per_delivered_job": 2.4166666666666665,
+    "median_empty_claim_ratio": 0.5862068965517241,
+    "median_mean_herd_size_per_enqueue": 7.166666666666667
+  },
+  "invariants": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "all_jobs_delivered",
+        "ok": true,
+        "detail": {
+          "succeeded": 13
+        }
+      },
+      {
+        "name": "single_attempt_per_job",
+        "ok": true,
+        "detail": {
+          "attempts": {
+            "1": 13
+          }
+        }
+      },
+      {
+        "name": "no_worker_fatal",
+        "ok": true,
+        "detail": {
+          "fatal_workers": []
+        }
+      }
+    ]
+  },
+  "defect_observations": null,
+  "envelopes": {
+    "accepted": null,
+    "note": "no envelope accepted for this runner"
+  },
+  "database": {
+    "before": {
+      "wal_lsn": 961890888,
+      "table_bytes": 155648,
+      "index_bytes": 147456,
+      "n_live_tup": 0,
+      "n_dead_tup": 0,
+      "vacuum_count": 0,
+      "autovacuum_count": 0,
+      "lock_waiters": 0,
+      "connections": 2,
+      "settings": {
+        "effective_cache_size": "524288",
+        "max_connections": "100",
+        "random_page_cost": "4",
+        "shared_buffers": "16384",
+        "synchronous_commit": "on",
+        "wal_level": "replica",
+        "work_mem": "4096"
+      }
+    },
+    "after": {
+      "wal_lsn": 961953208,
+      "table_bytes": 253952,
+      "index_bytes": 237568,
+      "n_live_tup": 13,
+      "n_dead_tup": 26,
+      "vacuum_count": 0,
+      "autovacuum_count": 0,
+      "lock_waiters": 0,
+      "connections": 2,
+      "settings": {
+        "effective_cache_size": "524288",
+        "max_connections": "100",
+        "random_page_cost": "4",
+        "shared_buffers": "16384",
+        "synchronous_commit": "on",
+        "wal_level": "replica",
+        "work_mem": "4096"
+      }
+    },
+    "wal_bytes": 62320
+  },
+  "postgres": {
+    "settings": {
+      "effective_cache_size": "524288",
+      "max_connections": "100",
+      "random_page_cost": "4",
+      "shared_buffers": "16384",
+      "synchronous_commit": "on",
+      "wal_level": "replica",
+      "work_mem": "4096"
+    },
+    "settings_fingerprint_sha256": "5b9d2e6af9a3e7fe53d1c2e1b841cdb8b673ce348f3b31a1f8941a68fbc583a9"
+  },
+  "environment": {
+    "git_sha": "fd0ee72dae35b6d8ebce87728db9abfddae76a40",
+    "python": "3.12.8",
+    "platform": "macOS-15.7.5-arm64-arm-64bit",
+    "hostname": "Drews-MacBook-Pro.local",
+    "generated_at": "2026-08-06T08:56:59.820954+00:00"
+  }
+}
