@@ -68,7 +68,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
         results = await asyncio.gather(install(0), install(1))
         assert sorted(results, key=len) == [
             [],
-            ["0020_standalone_scheduler", "0021_cli_read_model"],
+            ["0020_standalone_scheduler", "0021_cli_read_model", "0022_queue_counters", "0023_activate_queue_counters"],
         ]
         async with engines[0].connect() as conn:
             report = await verify(conn)
@@ -153,6 +153,8 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
             assert await migrate(conn) == [
                 "0020_standalone_scheduler",
                 "0021_cli_read_model",
+                "0022_queue_counters",
+                "0023_activate_queue_counters",
             ]
             report = await verify(conn)
             assert report.ok
@@ -248,6 +250,8 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
         assert [item["id"] for item in second_plan["pending"]] == [
             "0020_standalone_scheduler",
             "0021_cli_read_model",
+            "0022_queue_counters",
+            "0023_activate_queue_counters",
         ]
         assert (
             await asyncio.to_thread(
@@ -271,7 +275,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             == 0
         )
         migrated = json.loads(capsys.readouterr().out)["data"]
-        assert migrated["applied"] == ["0020_standalone_scheduler", "0021_cli_read_model"]
+        assert migrated["applied"] == ["0020_standalone_scheduler", "0021_cli_read_model", "0022_queue_counters", "0023_activate_queue_counters"]
         assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
         assert json.loads(capsys.readouterr().out)["data"]["ok"] is True
     finally:

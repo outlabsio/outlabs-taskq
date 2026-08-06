@@ -80,6 +80,7 @@ BEHAVIOR_GROUPS = {
         "taskq.list_workflows(text,integer,jsonb)",
         "taskq.list_worker_presence(integer,timestamp with time zone,text)",
         "taskq.metrics()",
+        "taskq.queue_health(text)",
     },
     "operator": {
         "taskq.cancel_job(uuid,text,text)",
@@ -269,13 +270,14 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.3.1"
+    assert meta["contract_version"] == "0.4.0"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",
             "dependencies_workflows",
             "followups",
             "operator_schedule_list",
+            "queue_counters",
             "read_model_job_events",
             "read_model_job_views_v2",
             "read_model_list_finished",
