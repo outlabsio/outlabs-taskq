@@ -769,6 +769,7 @@ class AsyncTaskqHttpClient:
         affinity_key: str | None = None,
         job_id: UUID | None = None,
         supported_policy_hashes: Sequence[str] | None = None,
+        accept_throttled: bool = False,
     ) -> ClaimResult:
         await self.start()
         outcome, data, _ = await self._request(
@@ -782,6 +783,7 @@ class AsyncTaskqHttpClient:
                 "affinity_key": affinity_key,
                 "job_id": str(job_id) if job_id is not None else None,
                 "wait_seconds": self._claim_wait_seconds,
+                "accept_throttled": accept_throttled,
                 "supported_policy_hashes": (
                     list(supported_policy_hashes) if supported_policy_hashes is not None else None
                 ),
@@ -790,7 +792,11 @@ class AsyncTaskqHttpClient:
         wire = ClaimWireData.model_validate(data)
         state = ClaimState.EMPTY if outcome == "timeout" else ClaimState(outcome)
         return CLAIM_BATCH_ADAPTER.validate_python(
-            {"state": state, "jobs": [job.to_core() for job in wire.jobs]}
+            {
+                "state": state,
+                "jobs": [job.to_core() for job in wire.jobs],
+                "retry_after_seconds": wire.retry_after_seconds,
+            }
         )
 
     async def heartbeat(
@@ -1436,6 +1442,7 @@ class TaskqHttpClient:
         job_id: UUID | None = None,
         wait_seconds: float = 0,
         supported_policy_hashes: Sequence[str] | None = None,
+        accept_throttled: bool = False,
     ) -> ClaimResult:
         self.start()
         outcome, data, _ = self._request(
@@ -1449,6 +1456,7 @@ class TaskqHttpClient:
                 "affinity_key": affinity_key,
                 "job_id": str(job_id) if job_id is not None else None,
                 "wait_seconds": wait_seconds,
+                "accept_throttled": accept_throttled,
                 "supported_policy_hashes": (
                     list(supported_policy_hashes) if supported_policy_hashes is not None else None
                 ),
@@ -1457,7 +1465,11 @@ class TaskqHttpClient:
         wire = ClaimWireData.model_validate(data)
         state = ClaimState.EMPTY if outcome == "timeout" else ClaimState(outcome)
         return CLAIM_BATCH_ADAPTER.validate_python(
-            {"state": state, "jobs": [job.to_core() for job in wire.jobs]}
+            {
+                "state": state,
+                "jobs": [job.to_core() for job in wire.jobs],
+                "retry_after_seconds": wire.retry_after_seconds,
+            }
         )
 
     def heartbeat(

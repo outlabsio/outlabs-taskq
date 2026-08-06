@@ -475,7 +475,8 @@ class SqlTaskqTransport:
                     :queue, :job_type, CAST(:payload AS jsonb), :priority, :scheduled_at,
                     :idempotency_key, :concurrency_key, :affinity_key, :max_attempts,
                     :lease_seconds, :backoff_mode, :backoff_base, :backoff_cap,
-                    :depends_on, :workflow_id, :step_key, NULL, CAST(:headers AS jsonb))""",
+                    :depends_on, :workflow_id, :step_key, NULL, CAST(:headers AS jsonb),
+                    :ttl_seconds, :flow_key)""",
                 {
                     **command.model_dump(exclude={"payload", "headers", "depends_on"}),
                     "payload": _json_param(command.payload),
@@ -752,6 +753,7 @@ class SqlTaskqTransport:
         affinity_key: str | None = None,
         job_id: UUID | None = None,
         supported_policy_hashes: Sequence[str] | None = None,
+        accept_throttled: bool = False,
         connection: AsyncConnection | None = None,
     ) -> ClaimResult:
         continuation = (
@@ -771,17 +773,25 @@ class SqlTaskqTransport:
                 "lease_seconds": lease_seconds,
                 "affinity_key": affinity_key,
                 "job_id": job_id,
+                "accept_throttled": accept_throttled,
             }
+            # Cast the overload-discriminating params: an 8-arg call must
+            # bind :accept_throttled to boolean (not the 9-arg overload's
+            # text[] policy slot), and the 9-arg call must bind the policy
+            # array to text[]. Untyped params are ambiguous across the
+            # boolean/text[] trailing overloads.
             if continuation is None:
                 statement = (
                     "SELECT * FROM taskq.claim_jobs(:queue, :worker_id, :batch, "
-                    ":job_types, :lease_seconds, :affinity_key, :job_id)"
+                    "CAST(:job_types AS text[]), :lease_seconds, :affinity_key, "
+                    ":job_id, CAST(:accept_throttled AS boolean))"
                 )
             else:
                 statement = (
                     "SELECT * FROM taskq.claim_jobs(:queue, :worker_id, :batch, "
-                    ":job_types, :lease_seconds, :affinity_key, :job_id, "
-                    ":supported_policy_hashes)"
+                    "CAST(:job_types AS text[]), :lease_seconds, :affinity_key, "
+                    ":job_id, CAST(:supported_policy_hashes AS text[]), "
+                    "CAST(:accept_throttled AS boolean))"
                 )
                 params["supported_policy_hashes"] = list(continuation.supported_policy_hashes)
             row = await self._one(conn, statement, params)
@@ -811,7 +821,13 @@ class SqlTaskqTransport:
                 decoded["progress"] = _json(decoded["progress"])
                 decoded_jobs.append(decoded)
             jobs = tuple(decoded_jobs)
-            return CLAIM_BATCH_ADAPTER.validate_python({"state": row["state"], "jobs": jobs})
+            return CLAIM_BATCH_ADAPTER.validate_python(
+                {
+                    "state": row["state"],
+                    "jobs": jobs,
+                    "retry_after_seconds": row.get("retry_after_seconds"),
+                }
+            )
 
         return await self._run(operation, connection=connection, attest=True)
 
@@ -1724,14 +1740,60 @@ class SqlTaskqTransport:
             )
         )
 
-    async def redrive_failed(self, queue: str, limit: int, actor: str) -> RedriveFailedResult:
+    async def redrive_failed(
+        self, queue: str, limit: int, actor: str, *, smear_seconds: int = 0
+    ) -> RedriveFailedResult:
         async def operation(conn: AsyncConnection) -> RedriveFailedResult:
             row = await self._one(
                 conn,
-                "SELECT * FROM taskq.redrive_failed(:queue, :limit, :actor)",
-                {"queue": queue, "limit": limit, "actor": actor},
+                "SELECT * FROM taskq.redrive_failed(:queue, :limit, :actor, :smear_seconds)",
+                {"queue": queue, "limit": limit, "actor": actor, "smear_seconds": smear_seconds},
             )
             return RedriveFailedResult.model_validate(row)
+
+        return await self._run(operation)
+
+    async def try_enqueue(
+        self, command: EnqueueCommand, *, connection: AsyncConnection | None = None
+    ) -> dict[str, Any]:
+        """Typed producer verdict: accepted / existed / rejected_depth + hint."""
+
+        async def operation(conn: AsyncConnection) -> dict[str, Any]:
+            row = await self._one(
+                conn,
+                """SELECT * FROM taskq.try_enqueue(
+                    :queue, :job_type, CAST(:payload AS jsonb), :priority, :scheduled_at,
+                    :idempotency_key, :concurrency_key, :affinity_key, :max_attempts,
+                    :lease_seconds, :backoff_mode, :backoff_base, :backoff_cap,
+                    :depends_on, :workflow_id, :step_key, NULL, CAST(:headers AS jsonb),
+                    :ttl_seconds, :flow_key)""",
+                {
+                    **command.model_dump(exclude={"payload", "headers", "depends_on"}),
+                    "payload": _json_param(command.payload),
+                    "headers": _json_param(command.headers),
+                    "depends_on": (
+                        list(command.depends_on) if command.depends_on is not None else None
+                    ),
+                },
+            )
+            return {
+                "outcome": row["outcome"],
+                "job_id": row["job_id"],
+                "retry_after_seconds": row["retry_after_seconds"],
+            }
+
+        return await self._run(operation, connection=connection)
+
+    async def set_flow_limit(
+        self, key: str, rate_per_minute: int, burst: int | None = None, actor: str | None = None
+    ) -> str:
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_flow_limit(:key, :rate, :burst, :actor) AS result",
+                {"key": key, "rate": rate_per_minute, "burst": burst, "actor": actor},
+            )
+            return str(row["result"])
 
         return await self._run(operation)
 

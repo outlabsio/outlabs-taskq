@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.16"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.17"
 T = TypeVar("T")
 
 
@@ -259,6 +259,8 @@ class EnqueueCommand(BaseModel):
     )
     depends_on: tuple[UUID, ...] | None = Field(default=None, max_length=100)
     headers: dict[str, Any] | None = None
+    ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
+    flow_key: str | None = Field(default=None, min_length=1, max_length=120)
 
     @model_validator(mode="after")
     def _workflow_shape(self) -> EnqueueCommand:
@@ -600,6 +602,7 @@ class ClaimWireRequest(BaseModel):
     affinity_key: str | None = None
     job_id: UUID | None = None
     wait_seconds: float = Field(default=0, ge=0, le=30)
+    accept_throttled: bool = False
     supported_policy_hashes: tuple[str, ...] | None = Field(default=None, max_length=32)
 
     @field_validator("supported_policy_hashes")
@@ -924,6 +927,7 @@ class ClaimState(StrEnum):
     CLAIMED = "claimed"
     EMPTY = "empty"
     PAUSED = "paused"
+    THROTTLED = "throttled"
     UNKNOWN_QUEUE = "unknown_queue"
     UNAVAILABLE = "unavailable"
 
@@ -933,6 +937,7 @@ class ClaimResult(BaseModel):
 
     state: ClaimState
     jobs: tuple[ClaimedJob, ...] = ()
+    retry_after_seconds: int | None = None
 
     @model_validator(mode="after")
     def _jobs_match_state(self) -> ClaimResult:
@@ -1772,7 +1777,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
         ),
         CommandName.ENQUEUE: _spec(
-            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb)",
+            "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
             _PRODUCER,
             tuple(item.value for item in EnqueueStatus),
             (
@@ -1802,7 +1807,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             (TqCode.NOT_FOUND,),
         ),
         CommandName.CLAIM: _spec(
-            "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid)",
+            "taskq.claim_jobs(text,text,integer,text[],integer,text,uuid,boolean)",
             _RUNNER,
             tuple(item.value for item in ClaimState),
             (TqCode.VALIDATION,),
@@ -2019,7 +2024,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             (TqCode.NOT_FOUND, TqCode.CONFLICT),
         ),
         CommandName.REDRIVE_FAILED: _spec(
-            "taskq.redrive_failed(text,integer,text)",
+            "taskq.redrive_failed(text,integer,text,integer)",
             _OPERATOR,
             ("ok",),
             (TqCode.VALIDATION,),
@@ -2096,6 +2101,7 @@ class ClaimWireData(BaseModel):
     model_config = ConfigDict(frozen=True, extra="ignore")
 
     jobs: tuple[ClaimedJobWire, ...] = ()
+    retry_after_seconds: int | None = None
     elapsed_seconds: float | None = None
     deadline: datetime | None = None
 
