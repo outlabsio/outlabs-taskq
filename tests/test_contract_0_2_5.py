@@ -61,7 +61,7 @@ async def test_0017_metadata_activates_workflow_continuations(
 ) -> None:
     assert (
         await pg.fetchval("SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'")
-        == "0.5.1"
+        == "0.5.2"
     )
     assert await pg.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
     assert (
