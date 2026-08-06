@@ -1,0 +1,193 @@
+{
+  "scenario": "L5",
+  "scale": "toy",
+  "method": {
+    "repetitions": 1,
+    "seed": 20260805,
+    "database_reset": "fresh database created for scenario and dropped afterward",
+    "reset_fingerprint": {
+      "database": "taskq_load_l5_c9d59fdcac664f03ae8945019bc6d3d4",
+      "jobs_rows": 0,
+      "jobs_relfilenode": 25630,
+      "jobs_table_bytes": 155648,
+      "jobs_index_bytes": 147456,
+      "jobs_live_tuples": 0,
+      "jobs_dead_tuples": 0,
+      "migration_ledger": [
+        "0001_initial",
+        "0002_contract_0_1_1",
+        "0003_contract_0_1_2",
+        "0004_read_models",
+        "0005_read_model_conformance",
+        "0006_activate_ready_read_model",
+        "0007_admission_reservations",
+        "0008_followups",
+        "0009_workflows",
+        "0010_schedules",
+        "0011_finite_projections",
+        "0012_activate_finite_projections",
+        "0013_workflow_page_composite_repair",
+        "0014_worker_presence_projection",
+        "0015_activate_worker_presence",
+        "0016_workflow_continuations",
+        "0017_activate_workflow_continuations",
+        "0018_trusted_effect_fence",
+        "0019_scheduler_target_identity",
+        "0020_standalone_scheduler",
+        "0021_cli_read_model"
+      ],
+      "migration_checksums_sha256": "cd7a1dc64752bd60bae63c9fa57992c1e44ee63d88c772254db3b99cfbcaefd1"
+    }
+  },
+  "runs": [
+    {
+      "metrics": {
+        "nudges_sent": 10,
+        "claim_errors_during_window": 10,
+        "claim_errors_per_nudge": 1.0
+      },
+      "invariant_checks": [
+        {
+          "name": "all_jobs_delivered_after_recovery",
+          "ok": true,
+          "detail": {}
+        },
+        {
+          "name": "no_duplicate_attempts",
+          "ok": true,
+          "detail": {
+            "attempts": {
+              "1": 11
+            }
+          }
+        },
+        {
+          "name": "defect_reproduced_no_claim_backoff",
+          "ok": true,
+          "detail": {
+            "error_claims": 10,
+            "nudges": 10
+          }
+        },
+        {
+          "name": "defect_reproduced_fatal_on_single_nonretryable",
+          "ok": true,
+          "detail": {}
+        }
+      ],
+      "defect_observations": {
+        "no_claim_error_backoff_reproduced": true,
+        "single_nonretryable_claim_error_fatal": true,
+        "expected_posture": "a26-defective; flips with P1b in the same PR"
+      }
+    }
+  ],
+  "summary": {
+    "median_nudges_sent": 10.0,
+    "median_claim_errors_during_window": 10.0,
+    "median_claim_errors_per_nudge": 1.0
+  },
+  "invariants": {
+    "ok": true,
+    "checks": [
+      {
+        "name": "all_jobs_delivered_after_recovery",
+        "ok": true,
+        "detail": {}
+      },
+      {
+        "name": "no_duplicate_attempts",
+        "ok": true,
+        "detail": {
+          "attempts": {
+            "1": 11
+          }
+        }
+      },
+      {
+        "name": "defect_reproduced_no_claim_backoff",
+        "ok": true,
+        "detail": {
+          "error_claims": 10,
+          "nudges": 10
+        }
+      },
+      {
+        "name": "defect_reproduced_fatal_on_single_nonretryable",
+        "ok": true,
+        "detail": {}
+      }
+    ]
+  },
+  "defect_observations": {
+    "no_claim_error_backoff_reproduced": true,
+    "single_nonretryable_claim_error_fatal": true,
+    "expected_posture": "a26-defective; flips with P1b in the same PR"
+  },
+  "envelopes": {
+    "accepted": null,
+    "note": "no envelope accepted for this runner"
+  },
+  "database": {
+    "before": {
+      "wal_lsn": 113535168,
+      "table_bytes": 155648,
+      "index_bytes": 147456,
+      "n_live_tup": 0,
+      "n_dead_tup": 0,
+      "vacuum_count": 0,
+      "autovacuum_count": 0,
+      "lock_waiters": 0,
+      "connections": 2,
+      "settings": {
+        "effective_cache_size": "524288",
+        "max_connections": "100",
+        "random_page_cost": "4",
+        "shared_buffers": "16384",
+        "synchronous_commit": "on",
+        "wal_level": "replica",
+        "work_mem": "4096"
+      }
+    },
+    "after": {
+      "wal_lsn": 113584624,
+      "table_bytes": 253952,
+      "index_bytes": 237568,
+      "n_live_tup": 11,
+      "n_dead_tup": 22,
+      "vacuum_count": 0,
+      "autovacuum_count": 0,
+      "lock_waiters": 0,
+      "connections": 2,
+      "settings": {
+        "effective_cache_size": "524288",
+        "max_connections": "100",
+        "random_page_cost": "4",
+        "shared_buffers": "16384",
+        "synchronous_commit": "on",
+        "wal_level": "replica",
+        "work_mem": "4096"
+      }
+    },
+    "wal_bytes": 49456
+  },
+  "postgres": {
+    "settings": {
+      "effective_cache_size": "524288",
+      "max_connections": "100",
+      "random_page_cost": "4",
+      "shared_buffers": "16384",
+      "synchronous_commit": "on",
+      "wal_level": "replica",
+      "work_mem": "4096"
+    },
+    "settings_fingerprint_sha256": "5b9d2e6af9a3e7fe53d1c2e1b841cdb8b673ce348f3b31a1f8941a68fbc583a9"
+  },
+  "environment": {
+    "git_sha": "f2ef2624162bd340db20834c9a1d99ca5f1fc586",
+    "python": "3.12.8",
+    "platform": "macOS-15.7.5-arm64-arm-64bit",
+    "hostname": "Drews-MacBook-Pro.local",
+    "generated_at": "2026-08-06T08:29:15.477445+00:00"
+  }
+}
