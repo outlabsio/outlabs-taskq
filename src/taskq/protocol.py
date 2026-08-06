@@ -1461,6 +1461,7 @@ class ScheduleClaim(BaseModel):
     next_fire_at: datetime
     token: UUID
     lease_seconds: int
+    smear_seconds: int | None = None
 
 
 class ScheduleClaimResult(BaseModel):

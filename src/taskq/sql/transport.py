@@ -145,6 +145,7 @@ _SCHEDULE_CLAIM_FIELDS = (
     "next_fire_at",
     "token",
     "lease_seconds",
+    "smear_seconds",
 )
 _JOB_EVENT_FIELDS = (
     "event_id",

@@ -35,7 +35,7 @@ from taskq.protocol import (
     SchedulerHealth,
     TargetIdentityProfile,
 )
-from taskq.schedules import evaluate_schedule
+from taskq.schedules import evaluate_schedule, smear_offset_seconds
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.transport import HousekeeperTransport
 
@@ -532,6 +532,9 @@ class SchedulerEngine:
                     initialized=claim.initialized,
                     next_fire_at=claim.next_fire_at,
                     as_of=claim.as_of,
+                    smear_offset_seconds=smear_offset_seconds(
+                        claim.schedule_id, claim.smear_seconds
+                    ),
                 )
             except asyncio.CancelledError:
                 raise
