@@ -98,6 +98,7 @@ BEHAVIOR_GROUPS = {
         "taskq.run_now(uuid,text)",
         "taskq.set_concurrency_limit(text,integer,text)",
         "taskq.set_flow_limit(text,integer,integer,text)",
+        "taskq.set_priority_aging(text,integer,text)",
         "taskq.set_breaker_config(text,integer,integer,integer,text)",
         "taskq.trip_breaker(text,text)",
         "taskq.force_close_breaker(text,text)",
@@ -276,7 +277,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.0"
+    assert meta["contract_version"] == "0.6.1"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",

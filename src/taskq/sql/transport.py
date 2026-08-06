@@ -1876,6 +1876,24 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def set_priority_aging(
+        self, queue: str, aging_seconds: int | None, actor: str | None = None
+    ) -> str:
+        """Set (or clear, with ``aging_seconds=None``) a queue's priority aging.
+        A queued job's effective claim priority improves by one step per
+        ``aging_seconds`` of waiting, so sustained high-priority load cannot
+        starve low-priority work. Applies to the normal claim path only."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_priority_aging(:queue, :seconds, :actor) AS result",
+                {"queue": queue, "seconds": aging_seconds, "actor": actor},
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
     async def expire_job(self, job_id: UUID, actor: str) -> ExpireJobOutcome:
         return ExpireJobOutcome(
             self._validated_outcome(
