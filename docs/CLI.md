@@ -148,7 +148,7 @@ production mutation requires all of:
 Configuration or environment acknowledgements do not satisfy these gates.
 Destructive/bulk operations require `--yes` in every environment. These include
 schema migration, target bind/rotation, purge, bulk redrive, workflow cancel,
-schedule retirement, lease expiry, janitor, and auth reconciliation.
+schedule retirement, lease expiry, janitor, audit-log prune, and auth reconciliation.
 
 Migration, schedule-manifest, and auth apply commands accept the digest from a
 reviewed plan. Apply recomputes the target-bound plan and rejects drift. Queue

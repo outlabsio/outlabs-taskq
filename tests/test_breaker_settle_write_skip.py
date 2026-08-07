@@ -141,3 +141,35 @@ async def test_streak_still_trips(
         await _settle(runner, q, fail=True)
     assert await _state(pg, q) == "open"
     assert await _trip_reason(pg, q) == "streak"
+
+
+async def test_rate_window_success_is_persisted_under_skip(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # The 0038 skip must still persist the rate window on a SUCCESS — a success dilutes
+    # the failure ratio. If a skip-list regression drops the success write, the window
+    # over-counts failures and the breaker false-trips on rate.
+    q = "wskip_rate"
+    await _queue(operator, q)
+    await operator.fetchval(
+        f"SELECT taskq.set_breaker_config('{q}',100,30,1,'a')"
+    )  # streak won't trip
+    await operator.fetchval(f"SELECT taskq.set_breaker_rate('{q}',0.7,300,3,'a')")
+    await _enqueue(producer, q, 6)
+    x0 = await _xmin(pg, q)
+    await _settle(runner, q, fail=False)
+    assert await _xmin(pg, q) != x0, "a success under rate config must write the rate window"
+    await _settle(runner, q, fail=False)
+    for _ in range(3):
+        await _settle(runner, q, fail=True)
+    # True ratio 3F/2S = 0.60 < 0.70 -> no trip. A dropped success write reads 3F/0S -> false trip.
+    assert await _state(pg, q) == "closed"
+    row = await pg.fetchrow(
+        "SELECT breaker_window_failures f, breaker_window_successes s"
+        " FROM taskq.queue_flow WHERE queue=$1",
+        q,
+    )
+    assert (row["f"], row["s"]) == (3, 2)

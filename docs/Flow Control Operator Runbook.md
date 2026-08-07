@@ -1,6 +1,6 @@
 # TaskQ Flow Control — Operator Runbook
 
-How to operate the flow-control plane (SQL contracts 0.4.0–0.6.4): circuit breaker,
+How to operate the flow-control plane (SQL contracts 0.4.0–0.6.6): circuit breaker,
 rate limits, in-flight caps, slow-start ramps, job TTL, redrive/schedule smear, and
 priority aging. This is the *operational* companion to the design specs
 (`Task Queue 0.4/0.5/0.6 …`); it says **when to turn each knob, what to set it to,
@@ -154,7 +154,7 @@ that is worthless if stale (a refresh that a newer one supersedes).
 - **Redrive smear:** `taskq.redrive_failed(queue, limit, actor, smear_seconds)` spreads
   redriven jobs' `scheduled_at` across `[now, now+smear)` instead of releasing them all
   at once — avoids a re-arrival thundering herd after a bulk redrive.
-- **Schedule smear:** `taskq queue`… no — schedules: `taskq schedule set-smear <name>
+- **Schedule smear:** `taskq schedule set-smear <name>
   --smear-seconds 300`. Applies a deterministic per-schedule offset so co-scheduled
   jobs (many cron entries at `:00`) de-align instead of firing in a stampede. Set it on
   any group of schedules that share a firing instant.
@@ -196,8 +196,15 @@ As of 0.6.2 a tripped breaker surfaces two ways: the `breaker_open` **health ver
 (with breaker state in the health `detail`), and **job events** on transitions. Use the
 health surface for "is it open right now" and events for "when did it trip."
 
+These are direct-SQL reads for a **DBA or `taskq_observer` connection**, not the operator
+role: `taskq.queue_health` is granted to `taskq_observer` only, and the raw `queue_flow` /
+`job_events` / `queue_counters` / `flow_limits` tables carry no application-role grants by
+design (read-model discipline) — query those from a superuser/owner connection. For
+operator-level observability use the granted CLI surfaces instead: `taskq queue health`,
+`taskq queue audit` (§12), `taskq metrics`, and `taskq queue show`.
+
 ```sql
--- Is any breaker open right now? (health verdict + breaker detail)
+-- Is any breaker open right now? (health verdict + breaker detail; needs taskq_observer)
 SELECT queue, verdict, detail -> 'breaker' AS breaker
   FROM taskq.queue_health(NULL) WHERE verdict = 'breaker_open';   -- or: taskq queue health <queue>
 
@@ -218,9 +225,9 @@ SELECT * FROM taskq.queue_counters WHERE queue = '<queue>';
 SELECT * FROM taskq.flow_limits;
 ```
 
-Manual `trip_breaker` / `force_close_breaker` do not emit events (they are
-operator-initiated; the verb's actor is the record). A queue-scoped audit table that
-would cover those too is a documented follow-up.
+Automatic breaker transitions land in `job_events` (above); **operator** actions —
+manual `trip`/`force-close` and every config change — land in the queue audit log (§12),
+attributed to the actor who made them.
 
 Worker-side, `throttled` verdicts (from any gate — breaker, rate, cap) surface as
 throttle counts in the worker's snapshot; they are not errors and do not trip the
@@ -237,7 +244,8 @@ claim-error backoff.
 5. Confirm via §9 that state moved the way you expected (breaker tripped and recovered;
    rate held; low-priority work drained).
 6. Tighten one step if needed; re-watch. Stop at "good enough," not "maximally tight."
-7. Record what you set and why (there is no config-history view yet).
+7. No need to record what you set — the audit log captures every change with its
+   before/after and actor automatically (`taskq queue audit <queue>`, §12).
 
 ## 11. Known operational gaps (as of 0.6.6)
 
@@ -272,8 +280,9 @@ SQL: `SELECT * FROM taskq.list_queue_audit('<queue>', 50, NULL);` (read access i
 rolls back with the action, so the log only ever shows changes that actually landed.
 
 **Pruning.** The log is append-only; cap its growth with the maintenance verb
-(`taskq_housekeeper` or `taskq_operator`), safe to run on a schedule:
+(`taskq_housekeeper` or `taskq_operator`). It's a **destructive** delete, so it requires
+`--yes` — include that when wiring it into a scheduled job:
 ```bash
-taskq maintenance prune-audit --older-than-hours 2160   # drop rows older than ~90 days
+taskq maintenance prune-audit --older-than-hours 2160 --yes   # drop rows older than ~90 days
 ```
 SQL: `SELECT taskq.prune_queue_audit(2160);` — returns the number of rows removed.

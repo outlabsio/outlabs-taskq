@@ -299,12 +299,33 @@ async def _event_loop_delay(samples: int = 20) -> dict[str, float]:
     return _latency_summary(delays)
 
 
-async def _representative_claim_plan(admin: asyncpg.Connection, queue: str) -> dict[str, Any]:
+_CLAIM_PLAN_PROBE_QUEUE = "bench_claim_plan_probe"
+
+
+async def _representative_claim_plan(
+    admin: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+) -> dict[str, Any]:
+    # The claim-path index gate must be captured against a queue that actually holds
+    # claimable rows, with fresh planner statistics. Explaining a live scenario queue
+    # was a race: workers may have drained it to zero queued rows at the instant
+    # EXPLAIN ANALYZE runs, and with no ANALYZE the planner falls back to default
+    # estimates and switches to taskq_jobs_scheduled_page_idx + Sort instead of
+    # jobs_claim_idx -- an environment-sensitive false failure (green wherever the drain
+    # cadence and stats happened to line up, red where they did not). Seed a dedicated,
+    # worker-free probe queue through the public contract and ANALYZE it -- the same
+    # populated-and-analysed basis the B9 read-model gate relies on -- so the planner
+    # deterministically chooses jobs_claim_idx for the claim ordering at every scale and
+    # on every platform.
+    await _ensure_queue(operator, _CLAIM_PLAN_PROBE_QUEUE)
+    await _bulk(producer, _CLAIM_PLAN_PROBE_QUEUE, "claim-plan-probe", 512)
+    await admin.execute("ANALYZE taskq.jobs")
     raw = await admin.fetchval(
         f"""
         EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)
         SELECT id FROM taskq.jobs
-         WHERE queue = '{queue}' AND status = 'queued'
+         WHERE queue = '{_CLAIM_PLAN_PROBE_QUEUE}' AND status = 'queued'
            AND cancel_requested_at IS NULL AND scheduled_at <= now()
          ORDER BY priority, scheduled_at, id LIMIT 1
         """
@@ -1257,17 +1278,15 @@ async def _run_scenario_in_database(
             runs = await _b14(dsn, producer, queue, scale, repetitions, seed)
         else:  # pragma: no cover - guarded by SCENARIOS
             raise AssertionError("unreachable benchmark scenario")
-        explain_queue = {
-            "B3": "bench_b3_0",
-            "B13": "bench_b13_0",
-        }.get(scenario, queue)
-        explain = await _representative_claim_plan(admin, explain_queue)
         after = await _database_snapshot(admin)
         wal_bytes = await admin.fetchval(
             "SELECT pg_wal_lsn_diff($1::pg_lsn, $2::pg_lsn)::bigint",
             after["wal_lsn"],
             before["wal_lsn"],
         )
+        # Structural claim-path gate: it seeds a probe queue, so it runs *after* the
+        # measured before/after window to keep the WAL and throughput evidence clean.
+        explain = await _representative_claim_plan(admin, operator, producer)
         throughputs = [run["throughput_rows_per_second"] for run in runs]
         p99_values = [
             max(

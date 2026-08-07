@@ -228,3 +228,145 @@ async def test_set_breaker_latency_operator_only(
     with pytest.raises(asyncpg.PostgresError) as exc:
         await runner.fetchval("SELECT taskq.set_breaker_latency('c064_perm',1000,60,10,'a')")
     assert exc.value.sqlstate == "42501"
+
+
+async def test_force_close_resets_latency_window(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # F1 (migration 0040): force_close must clear the latency window, else a single
+    # fast success re-trips off the stale tripping average.
+    q = "c064_fc_lat"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',100,30,1,'a')")
+    await operator.fetchval(f"SELECT taskq.set_breaker_latency('{q}',1000,300,3,'a')")
+    await _enqueue(producer, q, 6)
+    for _ in range(3):
+        await _settle_slow(runner, pg, q, 2000)
+    assert await _state(pg, q) == "open"
+    assert await _trip_reason(pg, q) == "latency"
+    assert await operator.fetchval(f"SELECT taskq.force_close_breaker('{q}','a')") == "closed"
+    # One fast success must NOT re-trip — the stale window is gone.
+    await _settle_slow(runner, pg, q, 10)
+    assert await _state(pg, q) == "closed"
+    assert (
+        await pg.fetchval(f"SELECT breaker_latency_count FROM taskq.queue_flow WHERE queue='{q}'")
+        == 1
+    )
+
+
+async def test_force_close_resets_rate_window(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # F1 (migration 0040): force_close must clear the rate window, else a single
+    # failure re-trips off the stale failure ratio.
+    q = "c064_fc_rate"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',100,30,1,'a')")
+    await operator.fetchval(f"SELECT taskq.set_breaker_rate('{q}',0.5,300,4,'a')")
+    await _enqueue(producer, q, 8)
+    for fail in (True, True, False, True):  # 3F/1S over 4 -> trip
+        await _settle_slow(runner, pg, q, 10, fail=fail)
+    assert await _state(pg, q) == "open"
+    assert await _trip_reason(pg, q) == "rate"
+    await operator.fetchval(f"SELECT taskq.force_close_breaker('{q}','a')")
+    # One failure must NOT re-trip — window is empty (1F, total 1 < min_volume 4).
+    await _settle_slow(runner, pg, q, 10, fail=True)
+    assert await _state(pg, q) == "closed"
+
+
+async def test_half_open_wedge_recovers(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # P1 (migration 0041): a probe that resolves non-terminally (released back to
+    # queued) never fires the settle trigger, stranding the breaker in half_open. The
+    # half-open deadline must re-open it instead of wedging forever.
+    q = "c064_wedge"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',3,1,1,'a')")  # cooldown 1s
+    await _enqueue(producer, q, 5)
+    for _ in range(3):
+        await _settle_slow(runner, pg, q, 10, fail=True)
+    assert await _state(pg, q) == "open"
+    await asyncio.sleep(1.2)  # past cooldown
+    b = await runner.fetchrow(_CLAIM, q, "w")  # elects the single probe
+    assert b["state"] == "claimed"
+    assert await _state(pg, q) == "half_open"
+    job = b["jobs"][0]
+    await runner.fetchrow(
+        "SELECT * FROM taskq.release_job($1,$2,$3)", job["job_id"], job["attempt_id"], "w"
+    )
+    assert await _state(pg, q) == "half_open"  # stuck: no succeeded/failed transition
+    # Past the half-open deadline (2*cooldown), the next claim re-opens the breaker.
+    await asyncio.sleep(2.2)
+    await runner.fetchrow(_CLAIM, q, "w")
+    assert await _state(pg, q) == "open"
+
+
+async def test_trip_reason_precedence_streak_over_latency(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # When streak and latency would both trip on the same settle, reason is 'streak'.
+    q = "c064_prec"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',3,30,1,'a')")
+    await operator.fetchval(f"SELECT taskq.set_breaker_latency('{q}',1000,300,3,'a')")
+    await _enqueue(producer, q, 5)
+    for _ in range(3):
+        await _settle_slow(runner, pg, q, 5000, fail=True)  # slow + failing: feeds both
+    assert await _state(pg, q) == "open"
+    assert await _trip_reason(pg, q) == "streak"
+
+
+async def test_latency_window_fed_by_failures(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # The latency window is fed on EVERY terminal settle, failures included. High streak
+    # threshold + no rate config, so slow FAILURES can only trip via latency.
+    q = "c064_latfail"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',100,30,1,'a')")
+    await operator.fetchval(f"SELECT taskq.set_breaker_latency('{q}',1000,300,3,'a')")
+    await _enqueue(producer, q, 5)
+    for _ in range(3):
+        await _settle_slow(runner, pg, q, 2000, fail=True)
+    assert await _state(pg, q) == "open"
+    assert await _trip_reason(pg, q) == "latency"
+
+
+async def test_latency_window_rolls_over(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    producer: asyncpg.Connection,
+    runner: asyncpg.Connection,
+) -> None:
+    # Tumbling window: samples older than window_seconds are dropped, so a trip cannot
+    # fire on ancient history across a window boundary.
+    q = "c064_roll"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_breaker_config('{q}',100,30,1,'a')")
+    await operator.fetchval(f"SELECT taskq.set_breaker_latency('{q}',1000,1,3,'a')")  # 1s window
+    await _enqueue(producer, q, 6)
+    for _ in range(2):
+        await _settle_slow(runner, pg, q, 2000)
+    await asyncio.sleep(1.2)  # past the 1s window
+    await _settle_slow(runner, pg, q, 2000)  # rolls over: count resets to 1, no trip
+    assert await _state(pg, q) == "closed"
+    assert (
+        await pg.fetchval(f"SELECT breaker_latency_count FROM taskq.queue_flow WHERE queue='{q}'")
+        == 1
+    )

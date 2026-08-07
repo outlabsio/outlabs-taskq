@@ -354,6 +354,8 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0037_queue_audit",
                 "0038_breaker_settle_write_skip",
                 "0039_queue_audit_prune",
+                "0040_breaker_manual_window_reset",
+                "0041_breaker_half_open_atomic",
             ]
             report = await verify(conn)
             assert report.ok

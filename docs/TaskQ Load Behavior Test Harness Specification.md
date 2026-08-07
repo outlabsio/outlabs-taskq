@@ -56,8 +56,9 @@ Each scenario names: load shape, faults, invariants, envelope metrics, and the f
 | L7 | Resume/redrive stampede | Paused-full queue resumed; bulk redrive with and without smear/ramp; measure first-60s claim/settle/notify spike | F12/F4; P12 |
 | L8 | Breaker lifecycle | Induced downstream failure → trip → half-open probes → close; measure time-to-stop-claiming, probe single-flight, recovery ramp | Wave 3 gate; P10 |
 | L9 | Starvation observatory | Priority flood + key-skew; record starvation age distribution (observational, no envelope in v1) | F8; P15/P16 prep |
+| L10 | Rate/cap/key conformance | Queue GCRA rate limit + `flow_limits` key-space + `max_running` cap under sustained load; measure steady-state rate convergence, no free-key starvation, cap holds under a burst | Wave 2 gate; P5/P6/P7 |
 
-L1–L5 are the v1 build set (S1). L6 lands with Wave 2a, L7 with P12, L8 with Wave 3. L4 and L5 must reproduce their defects red on current code before P1b lands (SS1.4).
+L1–L5 are the v1 build set (S1). L6 lands with Wave 2a, L7 with P12, L8 with Wave 3, L10 with the 0.5 flow-control plane (rate/cap/key-fairness conformance). L4 and L5 must reproduce their defects red on current code before P1b lands (SS1.4). Amendment (2026-08-07): the `full` scale tier was made runnable end-to-end for L3/L7/L8/L10 by chunking seed enqueues to the plane's own API bounds (≤1000-spec `enqueue_many`, ≤100 schedule-claim, ≤50 job-claim); the `small` tier — the one that first caught the half-open single-flight violation (breaker T1) — should be run periodically, not only under the toy CI smoke.
 
 ## 5. Temporary database and runner contract
 

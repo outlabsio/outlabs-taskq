@@ -62,3 +62,20 @@ async def test_prune_granted_to_operator_and_housekeeper_not_runner(
     with pytest.raises(asyncpg.PostgresError) as exc:
         await runner.fetchval("SELECT taskq.prune_queue_audit(720)")
     assert exc.value.sqlstate == "42501"
+
+
+async def test_prune_cutoff_unit_is_hours(
+    pg: asyncpg.Connection, operator: asyncpg.Connection, housekeeper: asyncpg.Connection
+) -> None:
+    # Pin the unit: an hours->seconds slip (3600x) would prune a 2-hour-old row at
+    # prune(720). A 2h row must survive prune(720) and be deleted by prune(1).
+    q = "c066_unit"
+    await _queue(operator, q)
+    await operator.fetchval(f"SELECT taskq.set_priority_aging('{q}',10,'a')")
+    await pg.execute(
+        "UPDATE taskq.queue_audit SET created_at = now() - interval '2 hours' WHERE queue=$1", q
+    )
+    assert await housekeeper.fetchval("SELECT taskq.prune_queue_audit(720)") == 0
+    assert await _audit_count(pg, q) == 1
+    assert await housekeeper.fetchval("SELECT taskq.prune_queue_audit(1)") == 1
+    assert await _audit_count(pg, q) == 0
