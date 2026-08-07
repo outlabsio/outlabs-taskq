@@ -824,6 +824,23 @@ def queue_health_command(state: CliState, queue: str | None) -> None:
     _run(_transport_operation(state, "queue.health", "QueueHealth", operation))
 
 
+@queue_group.command("audit")
+@click.argument("queue")
+@click.option("--limit", type=click.IntRange(1, 100), default=50, show_default=True)
+@click.option(
+    "--before-id",
+    type=click.IntRange(min=1),
+    default=None,
+    help="page: only audit entries with an id below this",
+)
+@pass_state
+def queue_audit_command(state: CliState, queue: str, limit: int, before_id: int | None) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return {"items": jsonable(await transport.queue_audit(queue, limit, before_id))}
+
+    _run(_transport_operation(state, "queue.audit", "QueueAudit", operation))
+
+
 @queue_group.command("show")
 @click.argument("queue")
 @pass_state

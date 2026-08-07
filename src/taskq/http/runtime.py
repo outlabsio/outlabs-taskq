@@ -63,6 +63,7 @@ SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.2",
         "0.6.3",
         "0.6.4",
+        "0.6.5",
     }
 )
 ADMISSION_SQL_CONTRACT_VERSIONS = frozenset(
@@ -90,6 +91,7 @@ ADMISSION_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.2",
         "0.6.3",
         "0.6.4",
+        "0.6.5",
     }
 )
 WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset(
@@ -115,6 +117,7 @@ WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.2",
         "0.6.3",
         "0.6.4",
+        "0.6.5",
     }
 )
 WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset(
@@ -138,6 +141,7 @@ WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.2",
         "0.6.3",
         "0.6.4",
+        "0.6.5",
     }
 )
 SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset(
@@ -156,6 +160,7 @@ SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.2",
         "0.6.3",
         "0.6.4",
+        "0.6.5",
     }
 )
 WORKER_PRESENCE_SQL_CONTRACT_VERSIONS = frozenset(

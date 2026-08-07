@@ -1280,6 +1280,26 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def list_queue_audit(
+        self, queue: str, limit: int = 50, before_id: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Queue-scoped operator audit log, newest first, keyset-paginated by
+        ``before_id`` (only entries with a lower id). Records every queue-scoped
+        operator verb (breaker config/rate/latency, manual trip/force-close, aging)
+        with its actor and a before/after detail."""
+
+        async def operation(conn: AsyncConnection) -> list[dict[str, Any]]:
+            result = await conn.execute(
+                text(
+                    "SELECT id, event_type, actor, detail, created_at"
+                    " FROM taskq.list_queue_audit(:queue, :limit, :before_id)"
+                ),
+                {"queue": queue, "limit": limit, "before_id": before_id},
+            )
+            return [dict(row) for row in result.mappings()]
+
+        return await self._run(operation)
+
     async def get_scheduler_health(self) -> SchedulerHealth:
         async def operation(conn: AsyncConnection) -> SchedulerHealth:
             row = await self._one(conn, "SELECT * FROM taskq.get_scheduler_health()")

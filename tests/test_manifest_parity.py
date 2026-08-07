@@ -78,6 +78,7 @@ BEHAVIOR_GROUPS = {
         "taskq.get_workflow_page(uuid,integer,uuid)",
         "taskq.list_jobs(text,text,integer,jsonb)",
         "taskq.list_job_events(uuid,integer,bigint,boolean)",
+        "taskq.list_queue_audit(text,integer,bigint)",
         "taskq.list_workflows(text,integer,jsonb)",
         "taskq.list_worker_presence(integer,timestamp with time zone,text)",
         "taskq.metrics()",
@@ -279,7 +280,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.4"
+    assert meta["contract_version"] == "0.6.5"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",

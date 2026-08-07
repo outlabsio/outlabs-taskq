@@ -165,7 +165,7 @@ Use `taskq commands -o json` for complete machine metadata.
 | Context | `context list`, `context show`, `context validate` |
 | Database | `db plan`, `db migrate`, `db verify` |
 | Target | `target show`, `target bind` |
-| Queues | `queue list`, `health`, `show`, `ensure`, `update`, `pause`, `resume`, `purge`, `redrive-failed`; flow control: `set-breaker`, `set-breaker-rate`, `set-breaker-latency`, `trip-breaker`, `close-breaker`, `set-aging`, `set-flow-limit` |
+| Queues | `queue list`, `health`, `audit`, `show`, `ensure`, `update`, `pause`, `resume`, `purge`, `redrive-failed`; flow control: `set-breaker`, `set-breaker-rate`, `set-breaker-latency`, `trip-breaker`, `close-breaker`, `set-aging`, `set-flow-limit` |
 | Jobs | `job list`, `show`, `events`, `enqueue`, `enqueue-many`, `cancel`, `redrive`, `run-now`, `reprioritize`, `expire`, `watch`, `wait` |
 | Workers | `worker run`, `list`, `shutdown`, `expire-leases` |
 | Workflows | `workflow list`, `show`, `create`, `seal`, `cancel`, `watch`, `wait` |
