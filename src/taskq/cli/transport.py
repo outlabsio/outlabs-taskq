@@ -150,6 +150,17 @@ class CliTransport:
             )
         return {"outcome": await self.transport.force_close_breaker(queue, self._actor())}
 
+    async def queue_set_breaker_rate(
+        self, queue: str, failure_ratio: float | None, window_seconds: int, min_volume: int
+    ) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(details={"transport": "http", "command": "set_breaker_rate"})
+        return {
+            "outcome": await self.transport.set_breaker_rate(
+                queue, failure_ratio, window_seconds, min_volume, self._actor()
+            )
+        }
+
     async def queue_set_aging(self, queue: str, aging_seconds: int | None) -> Any:
         if self.mode != "sql":
             raise TaskqCapabilityError(

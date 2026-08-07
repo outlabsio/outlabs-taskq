@@ -316,7 +316,7 @@ def _failed_check(report: object, name: str) -> object:
 
 
 def test_machine_manifest_has_closed_0_5_0_function_surface() -> None:
-    assert len(FUNCTIONS) == 109
+    assert len(FUNCTIONS) == 110
     assert "taskq.queue_health(text)" in FUNCTIONS
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
     assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS

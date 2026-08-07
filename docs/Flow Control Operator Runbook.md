@@ -34,20 +34,29 @@ successful probe closes it (and slow-starts via the ramp), a failing probe re-op
 hard-down (a provider API, a scraper proxy pool, a downstream service). The canonical
 case is the proxy-blip-burns-the-day's-scrape scenario.
 
-**When NOT to use it (important limitation).** The breaker is **streak-based** — a
-single success resets the streak. A downstream that fails *intermittently* (fail,
-succeed, fail, succeed at a high rate) **never trips.** If your failure mode is
-"flaky, not dead," the breaker will not help yet (rate/window tripping is a
-documented follow-up). It is also blind to slow-but-succeeding downstreams.
+**Two trip triggers — pick per failure mode.** A configured breaker trips on
+**either**:
+- **Streak** (always on) — N *consecutive* terminal failures. Fast, catches a
+  hard-down downstream. But a single success resets it, so it never catches a
+  *flaky* downstream (fail, succeed, fail, succeed at a high rate).
+- **Rate** (optional, 0.6.3) — a sustained failure *ratio* over a rolling window.
+  Add it for downstreams that fail intermittently rather than going hard-down.
+
+It is still blind to slow-but-succeeding downstreams (latency tripping is a
+documented follow-up).
 
 **Configure.**
 ```bash
 taskq queue set-breaker <queue> --failure-threshold 5 --cooldown-seconds 30 --half-open-successes 1
-taskq queue set-breaker <queue> --off          # disable
+# Optional rate trip: trip if >=50% of the last 60s' settles failed (min 20 settles).
+taskq queue set-breaker-rate <queue> --failure-ratio 0.5 --window-seconds 60 --min-volume 20
+taskq queue set-breaker-rate <queue> --off     # remove the rate trip (keep streak)
+taskq queue set-breaker <queue> --off          # disable the whole breaker
 taskq queue trip-breaker <queue>               # force open (e.g. known maintenance)
 taskq queue close-breaker <queue>              # force closed + slow-start
 ```
-SQL equivalent: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>');`
+SQL: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>');`
+and `SELECT taskq.set_breaker_rate('<queue>', 0.5, 60, 20, '<actor>');`
 
 **Recommended starting points.**
 - `failure-threshold`: start **conservative (5–10)**. Too low false-trips a
@@ -56,6 +65,11 @@ SQL equivalent: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>')
   proxy blip; longer for a provider outage).
 - `half-open-successes`: `1` is fine to start. Raise it if a downstream tends to
   "recover then immediately die again" (a single good probe isn't enough signal).
+- **Rate trip** (if used): `failure-ratio` = the fraction you consider "broken" (0.5
+  is a reasonable start); `min-volume` high enough that a quiet queue's few failures
+  don't trip (≥ 10–20); `window-seconds` a few multiples of the downstream's blip
+  duration. The `breaker_opened` event's `reason` field says which trigger fired
+  (`streak` vs `rate`).
 
 **How to tell it's working.** A tripped breaker shows as the **`breaker_open`
 verdict** in `queue_health` (`taskq queue health <queue>`), with breaker state in the
@@ -212,17 +226,17 @@ claim-error backoff.
 6. Tighten one step if needed; re-watch. Stop at "good enough," not "maximally tight."
 7. Record what you set and why (there is no config-history view yet).
 
-## 11. Known operational gaps (as of 0.6.2)
+## 11. Known operational gaps (as of 0.6.3)
 
-- **Breaker is streak-based only** — blind to intermittent-high-failure and to
-  slow-but-succeeding downstreams.
+- **Breaker is blind to slow-but-succeeding downstreams** — no latency-based tripping
+  yet (streak + rate cover consecutive and intermittent *failures*, not slowness).
 - **Manual trip/close emit no events** — only automatic transitions do; a queue-scoped
   audit table would cover manual verbs too.
 - **Aging skips workflow continuations.**
 - **No config-history view** — record changes yourself.
 
-*Closed in 0.6.2:* the `breaker_open` health verdict and automatic-transition breaker
-events (§9).
+*Closed recently:* the `breaker_open` health verdict + breaker events (0.6.2, §9); the
+streak-only intermittent-failure blindness (0.6.3 — add a rate trip with `set-breaker-rate`, §1).
 
 See the vault's *TaskQ Flow Control Implementation Plan* (Known Gaps backlog) for the
 plan to close these.
