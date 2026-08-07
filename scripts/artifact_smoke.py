@@ -48,7 +48,7 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.5.1"
+            == "0.6.6"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('queue_counters')") is True
@@ -449,8 +449,20 @@ def main() -> None:
         "0027_activate_flow_control",
         "0028_redrive_null_limit_guard",
         "0029_schedule_claim_smear",
+        "0030_schedule_smear_write",
+        "0031_circuit_breaker",
+        "0032_activate_circuit_breaker",
+        "0033_priority_aging",
+        "0034_breaker_observability",
+        "0035_breaker_rate_tripping",
+        "0036_breaker_latency_tripping",
+        "0037_queue_audit",
+        "0038_breaker_settle_write_skip",
+        "0039_queue_audit_prune",
+        "0040_breaker_manual_window_reset",
+        "0041_breaker_half_open_atomic",
     ]
-    assert len(FUNCTIONS) == 102
+    assert len(FUNCTIONS) == 114
 
     if args.mode != "core":
         return
