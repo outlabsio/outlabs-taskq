@@ -83,6 +83,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0031_circuit_breaker",
                 "0032_activate_circuit_breaker",
                 "0033_priority_aging",
+                "0034_breaker_observability",
             ],
         ]
         async with engines[0].connect() as conn:
@@ -180,6 +181,7 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
                 "0031_circuit_breaker",
                 "0032_activate_circuit_breaker",
                 "0033_priority_aging",
+                "0034_breaker_observability",
             ]
             report = await verify(conn)
             assert report.ok
@@ -287,6 +289,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0031_circuit_breaker",
             "0032_activate_circuit_breaker",
             "0033_priority_aging",
+            "0034_breaker_observability",
         ]
         assert (
             await asyncio.to_thread(
@@ -325,6 +328,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0031_circuit_breaker",
             "0032_activate_circuit_breaker",
             "0033_priority_aging",
+            "0034_breaker_observability",
         ]
         assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
         assert json.loads(capsys.readouterr().out)["data"]["ok"] is True

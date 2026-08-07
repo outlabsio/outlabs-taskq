@@ -57,8 +57,10 @@ SQL equivalent: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>')
 - `half-open-successes`: `1` is fine to start. Raise it if a downstream tends to
   "recover then immediately die again" (a single good probe isn't enough signal).
 
-**How to tell it's working.** There is **no dashboard or event stream yet** (a known
-gap). You read state directly — see §9. Watch `breaker_state` and `breaker_opened_total`.
+**How to tell it's working.** A tripped breaker shows as the **`breaker_open`
+verdict** in `queue_health` (`taskq queue health <queue>`), with breaker state in the
+`detail`. Every automatic transition also emits a **job event** (`breaker_opened`,
+`breaker_reopened`, `breaker_closed`) on the job that drove it — see §9.
 
 **Incident response — a stuck-open breaker.** If a breaker is open but the downstream
 is actually healthy (false trip, or it recovered during a long cooldown):
@@ -161,30 +163,37 @@ the queue was idle before an enqueue (instead of every enqueue), cutting notify 
 on busy queues. The greedy claim loop + poll backstop cover mid-drain arrivals. Safe to
 leave `'always'` (default) unless a queue's NOTIFY volume is itself a problem.
 
-## 9. Observability — what to query (there is no dashboard yet)
+## 9. Observability
 
-The flow-control plane does **not** yet emit breaker events or surface a `breaker_open`
-health verdict (documented gaps). Until it does, read state directly:
+As of 0.6.2 a tripped breaker surfaces two ways: the `breaker_open` **health verdict**
+(with breaker state in the health `detail`), and **job events** on transitions. Use the
+health surface for "is it open right now" and events for "when did it trip."
 
 ```sql
--- Breaker + rate + aging + ramp state for a queue:
-SELECT queue, breaker_state, breaker_failure_streak, breaker_opened_total,
-       breaker_tripped_at, breaker_failure_threshold, breaker_cooldown_seconds,
+-- Is any breaker open right now? (health verdict + breaker detail)
+SELECT queue, verdict, detail -> 'breaker' AS breaker
+  FROM taskq.queue_health(NULL) WHERE verdict = 'breaker_open';   -- or: taskq queue health <queue>
+
+-- Breaker timeline (automatic transitions): opened / reopened / closed.
+SELECT e.created_at, e.event_type, e.data
+  FROM taskq.job_events e JOIN taskq.jobs j ON j.id = e.job_id
+ WHERE j.queue = '<queue>' AND e.event_type LIKE 'breaker_%'
+ ORDER BY e.created_at DESC;
+
+-- Full flow state for a queue (breaker + rate + aging + ramp config and state):
+SELECT breaker_state, breaker_failure_streak, breaker_opened_total, breaker_tripped_at,
+       breaker_failure_threshold, breaker_cooldown_seconds,
        priority_aging_seconds, ramp_started_at
   FROM taskq.queue_flow WHERE queue = '<queue>';
 
--- Any breaker currently open across the whole system:
-SELECT queue, breaker_tripped_at FROM taskq.queue_flow WHERE breaker_state <> 'closed';
-
--- Live levels + cumulative throughput (0.4.0 counters):
+-- Live levels + cumulative throughput (0.4.0 counters); configured key flow limits:
 SELECT * FROM taskq.queue_counters WHERE queue = '<queue>';
-
--- Health verdict + drain-rate/ETA (does NOT include breaker state):
-SELECT * FROM taskq.queue_health('<queue>');   -- or: taskq queue health <queue>
-
--- Configured key-level flow limits:
 SELECT * FROM taskq.flow_limits;
 ```
+
+Manual `trip_breaker` / `force_close_breaker` do not emit events (they are
+operator-initiated; the verb's actor is the record). A queue-scoped audit table that
+would cover those too is a documented follow-up.
 
 Worker-side, `throttled` verdicts (from any gate — breaker, rate, cap) surface as
 throttle counts in the worker's snapshot; they are not errors and do not trip the
@@ -203,17 +212,17 @@ claim-error backoff.
 6. Tighten one step if needed; re-watch. Stop at "good enough," not "maximally tight."
 7. Record what you set and why (there is no config-history view yet).
 
-## 11. Known operational gaps (as of 0.6.1)
+## 11. Known operational gaps (as of 0.6.2)
 
-- **No breaker events / audit trail** — trips and recoveries bump a counter but are not
-  in the event log. You cannot reconstruct *when* a breaker tripped beyond
-  `breaker_tripped_at` (last transition only) and `breaker_opened_total` (lifetime count).
-- **No `breaker_open` health verdict** — `queue_health` won't flag a tripped breaker;
-  use the §9 query.
 - **Breaker is streak-based only** — blind to intermittent-high-failure and to
   slow-but-succeeding downstreams.
+- **Manual trip/close emit no events** — only automatic transitions do; a queue-scoped
+  audit table would cover manual verbs too.
 - **Aging skips workflow continuations.**
 - **No config-history view** — record changes yourself.
+
+*Closed in 0.6.2:* the `breaker_open` health verdict and automatic-transition breaker
+events (§9).
 
 See the vault's *TaskQ Flow Control Implementation Plan* (Known Gaps backlog) for the
 plan to close these.
