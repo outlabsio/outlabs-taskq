@@ -642,3 +642,73 @@ def test_structured_error_details_recursively_redact_secrets_and_payloads() -> N
     assert envelope.error.details["field"] == "input"
     assert "payload" not in envelope.error.details
     assert "do-not-print" not in rendered
+
+
+def test_taskq_sqlstate_through_driver_surfaces_message_not_internal() -> None:
+    # A taskq-defined SQLSTATE raised by the SQL contract (e.g. migration 0020 refusing
+    # an unbound target) reaches the CLI wrapped as a driver DBAPIError. It must surface
+    # the contract's own actionable message + a reason-specific hint, not collapse into
+    # the opaque CLI_INTERNAL "command failed with DBAPIError" catch-all.
+    class _AsyncpgError(Exception):
+        sqlstate = "TQ422"
+        message = "0020 refuses an unbound taskq target; run taskq target bind first"
+        detail = '{"reason":"target_unbound"}'
+
+    class _DriverWrapper(Exception):
+        # SQLAlchemy's asyncpg wrapper carries the sqlstate but not the clean message.
+        sqlstate = "TQ422"
+
+    wrapper = _DriverWrapper("(asyncpg.exceptions.UnknownPostgresError) ...")
+    wrapper.__cause__ = _AsyncpgError()
+
+    class _DBAPIError(Exception):
+        pass
+
+    dbapi = _DBAPIError("statement failed")
+    dbapi.orig = wrapper  # type: ignore[attr-defined]
+
+    exit_code, envelope = normalize_error(dbapi, command="db.migrate", request_id=None)
+    assert exit_code == 1
+    assert envelope.error.code == "TQ422"
+    assert envelope.error.category == "taskq_contract_refused"
+    assert envelope.error.retryable is False
+    assert "run taskq target bind" in envelope.error.message
+    assert "taskq target bind" in envelope.error.hint
+    assert envelope.error.details.get("reason") == "target_unbound"
+
+
+def test_unknown_exception_still_maps_to_cli_internal() -> None:
+    # Non-taskq exceptions must keep falling through to the CLI_INTERNAL catch-all so the
+    # domain-error recognizer above never widens the net past real TQ SQLSTATEs.
+    exit_code, envelope = normalize_error(
+        RuntimeError("boom"), command="job.enqueue", request_id=None
+    )
+    assert exit_code == 3
+    assert envelope.error.code == "CLI_INTERNAL"
+
+
+def test_taskq_sqlstate_via_psycopg_diag_surfaces_message() -> None:
+    # psycopg exposes the clean message/detail through a .diag Diagnostic rather than a
+    # .message attribute; the recognizer must read both so the hint surfaces on the sync
+    # driver path too (the asyncpg async path is covered above).
+    class _Diag:
+        sqlstate = "TQ422"
+        message_primary = "0020 refuses an unbound taskq target; run taskq target bind first"
+        message_detail = '{"reason":"target_unbound"}'
+
+    class _PsycopgError(Exception):
+        sqlstate = "TQ422"
+        diag = _Diag()
+
+    class _DBAPIError(Exception):
+        pass
+
+    dbapi = _DBAPIError("statement failed")
+    dbapi.orig = _PsycopgError()  # type: ignore[attr-defined]
+
+    exit_code, envelope = normalize_error(dbapi, command="db.migrate", request_id=None)
+    assert exit_code == 1
+    assert envelope.error.code == "TQ422"
+    assert "run taskq target bind" in envelope.error.message
+    assert "taskq target bind" in envelope.error.hint
+    assert envelope.error.details.get("reason") == "target_unbound"

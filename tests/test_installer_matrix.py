@@ -268,9 +268,14 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
                     "json",
                 ],
             )
-            == 3
+            # An unbound target refuses migration 0020 with TQ422 (exit 1,
+            # taskq_contract_refused) -- not the old opaque CLI_INTERNAL (exit 3).
+            == 1
         )
-        assert capsys.readouterr().out == ""
+        migrate_output = capsys.readouterr()
+        assert migrate_output.out == ""
+        # The contract's own bind hint must surface through the sync psycopg driver too.
+        assert "target bind" in migrate_output.err
         binder = await asyncpg.connect(_database_dsn(taskq_dsn, database))
         try:
             identity = await binder.fetchrow("SELECT * FROM taskq.get_target_identity()")

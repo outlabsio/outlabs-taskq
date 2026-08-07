@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 import click
@@ -70,6 +71,61 @@ def _bounded_details(value: dict[str, Any]) -> dict[str, Any]:
     return safe if isinstance(safe, dict) else {}
 
 
+# Reason -> operator hint for taskq-defined SQLSTATEs surfaced through the SQL driver.
+_TASKQ_SQLSTATE_HINTS = {
+    "target_unbound": (
+        "bind the target before migrating past the identity checkpoint: "
+        "taskq target bind --environment <env> --actor <actor>"
+    ),
+}
+
+
+def _taskq_domain_error(exc: BaseException) -> tuple[str, str, dict[str, Any]] | None:
+    """Recognize a taskq-defined SQLSTATE (``TQxxx``) raised by the SQL contract.
+
+    Migrations and functions raise these with an actionable operator message — e.g.
+    migration 0020's "run taskq target bind first" — but they reach the CLI wrapped as
+    a driver ``DBAPIError``, which the catch-all below would otherwise collapse into an
+    opaque ``CLI_INTERNAL`` "command failed with DBAPIError". Walk the ``.orig`` /
+    ``__cause__`` chain to recover the SQLSTATE (on the SQLAlchemy wrapper) and the clean
+    message + ``DETAIL`` payload (on the underlying asyncpg error). Returns
+    ``(sqlstate, message, detail)`` or ``None`` when this is not a taskq domain error.
+    """
+    sqlstate: str | None = None
+    message: str | None = None
+    detail: dict[str, Any] = {}
+    seen: set[int] = set()
+    cursor: BaseException | None = exc
+    for _ in range(6):
+        if cursor is None or id(cursor) in seen:
+            break
+        seen.add(id(cursor))
+        state = getattr(cursor, "sqlstate", None)
+        if sqlstate is None and isinstance(state, str) and state.startswith("TQ"):
+            sqlstate = state
+        if message is None:
+            # asyncpg exposes the clean message/detail as .message/.detail; psycopg
+            # exposes them through a .diag Diagnostic (.message_primary/.message_detail).
+            diag = getattr(cursor, "diag", None)
+            candidate = getattr(cursor, "message", None) or getattr(diag, "message_primary", None)
+            if isinstance(candidate, str) and candidate:
+                message = candidate
+                raw_detail = getattr(cursor, "detail", None) or getattr(
+                    diag, "message_detail", None
+                )
+                if isinstance(raw_detail, str) and raw_detail.strip().startswith("{"):
+                    try:
+                        parsed = json.loads(raw_detail)
+                    except ValueError:
+                        parsed = None
+                    if isinstance(parsed, dict):
+                        detail = parsed
+        cursor = getattr(cursor, "orig", None) or getattr(cursor, "__cause__", None)
+    if sqlstate is None:
+        return None
+    return sqlstate, message or "taskq contract operation refused", detail
+
+
 def normalize_error(
     exc: BaseException, *, command: str, request_id: str | None
 ) -> tuple[int, CliErrorEnvelope]:
@@ -134,6 +190,18 @@ def normalize_error(
             "use a context with the required TaskQ permission",
             1,
             {},
+        )
+    elif (domain := _taskq_domain_error(exc)) is not None:
+        sqlstate, domain_message, detail = domain
+        reason = detail.get("reason") if isinstance(detail.get("reason"), str) else None
+        code, category, message, retryable, hint, exit_code, details = (
+            sqlstate,
+            "taskq_contract_refused",
+            domain_message,
+            False,
+            _TASKQ_SQLSTATE_HINTS.get(reason or "", "inspect the target and command input"),
+            1,
+            _bounded_details(detail),
         )
     else:
         code, category, message, retryable, hint, exit_code, details = (

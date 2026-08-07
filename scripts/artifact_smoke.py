@@ -489,6 +489,8 @@ def main() -> None:
             _migrate(taskq_cli, dsn, digest, cwd=Path.cwd())
         except subprocess.CalledProcessError as checkpoint:
             assert checkpoint.stderr
+            surfaced = (checkpoint.stdout or "") + (checkpoint.stderr or "")
+            assert "target bind" in surfaced, surfaced[:500]
         else:
             raise AssertionError("fresh install must stop at the unbound target checkpoint")
         asyncio.run(_bind_target(dsn))
@@ -510,6 +512,8 @@ def main() -> None:
             _migrate(taskq_cli, upgrade_dsn, digest, cwd=Path.cwd())
         except subprocess.CalledProcessError as checkpoint:
             assert checkpoint.stderr
+            surfaced = (checkpoint.stdout or "") + (checkpoint.stderr or "")
+            assert "target bind" in surfaced, surfaced[:500]
         else:
             raise AssertionError("upgrade must stop at the unbound target checkpoint")
         asyncio.run(_bind_target(upgrade_dsn))
