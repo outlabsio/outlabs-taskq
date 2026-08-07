@@ -969,6 +969,36 @@ def queue_close_breaker_command(state: CliState, queue: str) -> None:
     _run(_transport_operation(state, "queue.close-breaker", "QueueControl", operation))
 
 
+@queue_group.command("set-breaker-rate")
+@click.argument("queue")
+@click.option(
+    "--failure-ratio",
+    type=click.FloatRange(min=0, max=1, min_open=True),
+    help="failure fraction over the window that trips the breaker (0,1]",
+)
+@click.option("--off", is_flag=True, help="disable rate tripping (keep streak tripping)")
+@click.option("--window-seconds", type=click.IntRange(1, 86400), default=60, show_default=True)
+@click.option("--min-volume", type=click.IntRange(min=1), default=10, show_default=True)
+@pass_state
+def queue_set_breaker_rate_command(
+    state: CliState,
+    queue: str,
+    failure_ratio: float | None,
+    off: bool,
+    window_seconds: int,
+    min_volume: int,
+) -> None:
+    if off == (failure_ratio is not None):
+        raise click.UsageError("give exactly one of --failure-ratio or --off")
+
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_set_breaker_rate(
+            queue, None if off else failure_ratio, window_seconds, min_volume
+        )
+
+    _run(_transport_operation(state, "queue.set-breaker-rate", "QueueControl", operation))
+
+
 @queue_group.command("set-aging")
 @click.argument("queue")
 @click.option(

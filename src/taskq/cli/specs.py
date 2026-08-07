@@ -133,6 +133,13 @@ COMMAND_SPECS = {
             mutates=True,
         ),
         _s(
+            "queue.set-breaker-rate",
+            "Configure or disable a breaker failure-rate trip",
+            _SQL,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
             "queue.set-aging",
             "Configure or disable per-queue priority aging",
             _SQL,

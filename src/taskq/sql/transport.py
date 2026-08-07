@@ -1876,6 +1876,36 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def set_breaker_rate(
+        self,
+        queue: str,
+        failure_ratio: float | None,
+        window_seconds: int = 60,
+        min_volume: int = 10,
+        actor: str | None = None,
+    ) -> str:
+        """Add (or clear, with ``failure_ratio=None``) a rolling-window failure-rate
+        trip to a configured breaker. Trips when at least ``min_volume`` settles in
+        the last ``window_seconds`` and the failure ratio reaches ``failure_ratio``
+        — catching flaky downstreams the consecutive-failure streak misses.
+        Requires an already-configured breaker."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_breaker_rate(:queue, :ratio, :window, :min, :actor) AS result",
+                {
+                    "queue": queue,
+                    "ratio": failure_ratio,
+                    "window": window_seconds,
+                    "min": min_volume,
+                    "actor": actor,
+                },
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
     async def set_priority_aging(
         self, queue: str, aging_seconds: int | None, actor: str | None = None
     ) -> str:
