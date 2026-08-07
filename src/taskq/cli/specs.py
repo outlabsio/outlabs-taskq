@@ -355,6 +355,14 @@ COMMAND_SPECS = {
             mutates=True,
             destructive=True,
         ),
+        _s(
+            "maintenance.prune-audit",
+            "Prune queue audit rows older than N hours",
+            _SQL,
+            role="taskq_housekeeper",
+            mutates=True,
+            destructive=True,
+        ),
         _s("auth.plan", "Plan OutLabs IAM permission changes", _SQL),
         _s(
             "auth.apply",

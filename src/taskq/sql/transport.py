@@ -1300,6 +1300,21 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def prune_queue_audit(self, older_than_hours: int) -> int:
+        """Delete queue_audit rows older than ``older_than_hours`` and return how many
+        were removed. A bounded maintenance/retention op (housekeeper + operator), off
+        any hot path — a single range scan over the queue_audit_time_brin index."""
+
+        async def operation(conn: AsyncConnection) -> int:
+            row = await self._one(
+                conn,
+                "SELECT taskq.prune_queue_audit(:hours) AS deleted",
+                {"hours": older_than_hours},
+            )
+            return int(row["deleted"])
+
+        return await self._run(operation)
+
     async def get_scheduler_health(self) -> SchedulerHealth:
         async def operation(conn: AsyncConnection) -> SchedulerHealth:
             row = await self._one(conn, "SELECT * FROM taskq.get_scheduler_health()")

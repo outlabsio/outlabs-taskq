@@ -170,7 +170,7 @@ Use `taskq commands -o json` for complete machine metadata.
 | Workers | `worker run`, `list`, `shutdown`, `expire-leases` |
 | Workflows | `workflow list`, `show`, `create`, `seal`, `cancel`, `watch`, `wait` |
 | Schedules | `schedule list`, `show`, `pause`, `resume`, `retire`, `set-smear`, `watch`, `wait`; `schedule manifest plan|apply|retire` |
-| Runtime/admin | `scheduler run|once|doctor`, `maintenance tick|janitor`, `auth plan|apply`, `metrics` |
+| Runtime/admin | `scheduler run|once|doctor`, `maintenance tick|janitor|prune-audit`, `auth plan|apply`, `metrics` |
 
 ## Bounded reads, cursors, watch, and wait
 

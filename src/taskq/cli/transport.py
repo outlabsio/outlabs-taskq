@@ -404,6 +404,13 @@ class CliTransport:
             raise TaskqCapabilityError(details={"transport": "http", "command": "janitor"})
         return await self.transport.janitor()
 
+    async def prune_queue_audit(self, older_than_hours: int) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "prune_queue_audit"}
+            )
+        return await self.transport.prune_queue_audit(older_than_hours)
+
     async def metrics(self) -> Any:
         return await self.transport.metrics()
 

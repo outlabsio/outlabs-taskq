@@ -24,7 +24,7 @@ def _profile(*, environment: str = "staging", version: int = 1) -> TargetIdentit
         binding_version=version,
         bound_at=datetime(2026, 8, 3, tzinfo=UTC),
         bound_by="release-agent",
-        contract_version="0.6.5",
+        contract_version="0.6.6",
         capabilities={"active": ["scheduler_v2", "target_attestation"]},
     )
 
@@ -35,7 +35,7 @@ class _ReadTransport:
 
     async def meta(self) -> ContractMeta:
         return ContractMeta(
-            contract_version="0.6.5",
+            contract_version="0.6.6",
             capabilities={"active": ["scheduler_v2", "target_attestation"]},
         )
 

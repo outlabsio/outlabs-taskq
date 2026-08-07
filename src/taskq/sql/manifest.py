@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.5.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.6.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.6.5"
+CONTRACT_VERSION = "0.6.6"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -572,6 +572,7 @@ taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)|p_job_id uuid, p_atte
 taskq.manage_workflow_member_counts()||trigger|plpgsql|v|u|
 taskq.metrics()||TABLE(name text, labels jsonb, value numeric)|sql|s|u|taskq_observer
 taskq.pause_queue(text,text,text)|p_name text, p_actor text, p_reason text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.prune_queue_audit(integer)|p_older_than_hours integer|bigint|plpgsql|v|u|taskq_housekeeper,taskq_operator
 taskq.purge_queued(text,integer,text,text)|p_queue text, p_limit integer, p_actor text, p_reason text DEFAULT NULL::text|integer|plpgsql|v|u|taskq_operator
 taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)|p_name text, p_definition jsonb, p_namespace text, p_source text, p_manifest_key text, p_display_name text, p_definition_hash text, p_overlap_policy text, p_max_lateness_seconds integer, p_actor text, p_expected_version bigint DEFAULT NULL::bigint|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
 taskq.put_schedule(text,jsonb,text,bigint)|p_name text, p_definition jsonb, p_actor text, p_expected_version bigint DEFAULT NULL::bigint|taskq.schedule_write_result|plpgsql|v|u|taskq_operator
@@ -695,6 +696,7 @@ PUBLIC_ERRORS = {
     "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)": frozenset({"TQ422"}),
     "taskq.metrics()": frozenset(),
     "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
+    "taskq.prune_queue_audit(integer)": frozenset({"TQ422"}),
     "taskq.purge_queued(text,integer,text,text)": frozenset({"TQ001", "TQ422"}),
     "taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)": frozenset(
         {"TQ001", "TQ409", "TQ422"}
@@ -761,7 +763,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.6.5"',
+    "contract_version": '"0.6.6"',
     "capabilities": (
         '{"active": ["admission_reservations", "circuit_breaker", "dependencies_workflows", '
         '"flow_control", "followups", "operator_schedule_list", "queue_counters", '

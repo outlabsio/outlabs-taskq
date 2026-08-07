@@ -36,7 +36,7 @@ def _target(environment: str = "staging") -> TargetIdentityProfile:
         binding_version=3,
         bound_at=datetime(2026, 8, 4, tzinfo=UTC),
         bound_by="operator:test",
-        contract_version="0.6.5",
+        contract_version="0.6.6",
         capabilities={"active": []},
     )
 
@@ -68,7 +68,7 @@ def _leaf_paths(group: click.Group, prefix: tuple[str, ...] = ()) -> set[str]:
 
 def test_command_registry_exactly_matches_click_leaves_and_is_agent_complete() -> None:
     assert _leaf_paths(cli) == set(COMMAND_SPECS)
-    assert len(COMMAND_SPECS) == 73
+    assert len(COMMAND_SPECS) == 74
     for path, spec in COMMAND_SPECS.items():
         metadata = spec.as_dict()
         assert metadata["path"] == path

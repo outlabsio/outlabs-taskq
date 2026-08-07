@@ -114,6 +114,7 @@ BEHAVIOR_GROUPS = {
         "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)",
         "taskq.get_scheduler_health()",
         "taskq.janitor()",
+        "taskq.prune_queue_audit(integer)",
         "taskq.schedule_error(uuid,uuid,bigint,text,integer)",
         "taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)",
         "taskq.tick(integer)",
@@ -280,7 +281,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.5"
+    assert meta["contract_version"] == "0.6.6"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",

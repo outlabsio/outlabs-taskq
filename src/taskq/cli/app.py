@@ -2393,6 +2393,16 @@ def maintenance_tick_command(state: CliState, reap_limit: int) -> None:
     _run(_transport_operation(state, "maintenance.tick", "MaintenanceTick", operation))
 
 
+@maintenance_group.command("prune-audit")
+@click.option("--older-than-hours", type=click.IntRange(min=1), required=True)
+@pass_state
+def maintenance_prune_audit_command(state: CliState, older_than_hours: int) -> None:
+    async def operation(transport: CliTransport) -> Any:
+        return {"deleted": await transport.prune_queue_audit(older_than_hours)}
+
+    _run(_transport_operation(state, "maintenance.prune-audit", "MaintenancePruneAudit", operation))
+
+
 @maintenance_group.command("janitor")
 @pass_state
 def maintenance_janitor_command(state: CliState) -> None:

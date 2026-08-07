@@ -239,16 +239,15 @@ claim-error backoff.
 6. Tighten one step if needed; re-watch. Stop at "good enough," not "maximally tight."
 7. Record what you set and why (there is no config-history view yet).
 
-## 11. Known operational gaps (as of 0.6.5)
+## 11. Known operational gaps (as of 0.6.6)
 
 - **Aging skips workflow continuations.**
-- **Audit log has no prune verb** — append-only and unbounded (low-volume operator
-  actions, so fine for now); a retention/prune pass is a follow-up.
 
 *Closed recently:* the `breaker_open` health verdict + breaker events (0.6.2, §9); the
 streak-only intermittent-failure blindness (0.6.3 — add a rate trip with `set-breaker-rate`, §1);
 slow-but-succeeding-downstream blindness (0.6.4 — add a latency trip with `set-breaker-latency`, §1);
-manual-verb transitions and config-history left no trace (0.6.5 — the queue audit log, §12).
+manual-verb transitions and config-history left no trace (0.6.5 — the queue audit log, §12);
+the audit log was unbounded (0.6.6 — prune with `maintenance prune-audit`, §12).
 
 See the vault's *TaskQ Flow Control Implementation Plan* (Known Gaps backlog) for the
 plan to close these.
@@ -271,3 +270,10 @@ taskq queue audit <queue> --before-id 1234   # page: entries with an id below 12
 SQL: `SELECT * FROM taskq.list_queue_audit('<queue>', 50, NULL);` (read access is
 `taskq_operator` + `taskq_observer`). A failed verb writes nothing — the audit row
 rolls back with the action, so the log only ever shows changes that actually landed.
+
+**Pruning.** The log is append-only; cap its growth with the maintenance verb
+(`taskq_housekeeper` or `taskq_operator`), safe to run on a schedule:
+```bash
+taskq maintenance prune-audit --older-than-hours 2160   # drop rows older than ~90 days
+```
+SQL: `SELECT taskq.prune_queue_audit(2160);` — returns the number of rows removed.
