@@ -242,14 +242,19 @@ class ScenarioContext:
     async def enqueue_many(
         self, producer: asyncpg.Connection, queue: str, task_name: str, prefix: str, count: int
     ) -> int:
-        specs = [
-            {"job_type": task_name, "payload": {"value": 1}, "idempotency_key": f"{prefix}-{i}"}
-            for i in range(count)
-        ]
-        rows = await producer.fetch(
-            "SELECT * FROM taskq.enqueue_many($1, $2::jsonb)", queue, json.dumps(specs)
-        )
-        return len(rows)
+        # taskq.enqueue_many caps a single call at 1000 specs; chunk so the full
+        # scale tier (cohort/contention in the thousands) seeds without tripping it.
+        total = 0
+        for start in range(0, count, 1000):
+            specs = [
+                {"job_type": task_name, "payload": {"value": 1}, "idempotency_key": f"{prefix}-{i}"}
+                for i in range(start, min(start + 1000, count))
+            ]
+            rows = await producer.fetch(
+                "SELECT * FROM taskq.enqueue_many($1, $2::jsonb)", queue, json.dumps(specs)
+            )
+            total += len(rows)
+        return total
 
     async def count_status(self, queue: str, statuses: tuple[str, ...]) -> int:
         value = await self.admin.fetchval(

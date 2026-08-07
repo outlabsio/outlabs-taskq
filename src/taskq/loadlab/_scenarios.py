@@ -526,9 +526,16 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
         plan.mode = "retryable"
         mark = time.monotonic()
         nudges = ctx.scale.nudge_jobs
+        # Bound the retryable-error window's DURATION (~2.5s) regardless of nudge
+        # count. The worker survives the window only while its consecutive
+        # claim-error streak stays under claim_fatal_threshold (8); a
+        # nudges-proportional window (0.15s each) accumulates >=8 errors at
+        # small/full and trips fail-closed here, before Phase 3's sustained
+        # corruption — which is the phase that is supposed to fail it closed.
+        gap = min(0.15, 2.5 / nudges)
         for index in range(nudges):
             await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-{index}", value=index)
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(gap)
         await asyncio.sleep(0.4)
         error_claims = ctx.instruments.error_claims(since=mark)
         survived_window = not worker.service.snapshot().fatal
@@ -922,7 +929,9 @@ async def _l10_rate_conformance(ctx: ScenarioContext) -> dict[str, Any]:
         "SELECT * FROM taskq.set_flow_limit($1,$2,$3,$4)", dry_key, 1, 1, "loadlab"
     )
     assert row is not None
-    pairs = max(8, ctx.scale.storm_workers * 3)
+    # pairs doubles as the single-claim batch below; claim_jobs caps batch at 50,
+    # so hold the key-cohort at <= 50 (still ample distinct keys for the fairness gate).
+    pairs = min(50, max(8, ctx.scale.storm_workers * 3))
     prod = await ctx.producer()
     try:
         for i in range(pairs):
@@ -1189,7 +1198,7 @@ async def _l7_resume_redrive_stampede(ctx: ScenarioContext) -> dict[str, Any]:
                     "$1,$2,$3::integer,NULL::text[],NULL::integer,NULL::text,NULL::uuid,false)",
                     queue,
                     "l7b-fail",
-                    cohort,
+                    min(50, cohort),  # claim_jobs caps batch at 50; the while-loop drains the rest
                 )
                 if batch is None or batch["state"] != "claimed":
                     break
@@ -1345,8 +1354,11 @@ async def _l3_schedule_codue(ctx: ScenarioContext) -> dict[str, Any]:
     transport = SqlTaskqTransport(
         engine, expected_environment=os.environ.get("TASKQ_EXPECTED_ENV", "benchmark")
     )
+    # claim_schedules caps limit at 100; cohort stays <= 100 across all scales
+    # (storm_workers*4 <= 80), so 100 still takes the whole due set in one claim —
+    # preserving the single-as_of invariant this scenario depends on.
     sched = SchedulerEngine(
-        transport, "l3-scheduler", claim_limit=cohort * 2 + 10, lease_seconds=120
+        transport, "l3-scheduler", claim_limit=min(100, cohort * 2 + 10), lease_seconds=120
     )
     claimed_total = 0
     try:
