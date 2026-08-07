@@ -999,6 +999,36 @@ def queue_set_breaker_rate_command(
     _run(_transport_operation(state, "queue.set-breaker-rate", "QueueControl", operation))
 
 
+@queue_group.command("set-breaker-latency")
+@click.argument("queue")
+@click.option(
+    "--threshold-ms",
+    type=click.IntRange(min=1),
+    help="average execution latency (ms) over the window that trips the breaker",
+)
+@click.option("--off", is_flag=True, help="disable latency tripping (keep streak/rate tripping)")
+@click.option("--window-seconds", type=click.IntRange(1, 86400), default=60, show_default=True)
+@click.option("--min-volume", type=click.IntRange(min=1), default=10, show_default=True)
+@pass_state
+def queue_set_breaker_latency_command(
+    state: CliState,
+    queue: str,
+    threshold_ms: int | None,
+    off: bool,
+    window_seconds: int,
+    min_volume: int,
+) -> None:
+    if off == (threshold_ms is not None):
+        raise click.UsageError("give exactly one of --threshold-ms or --off")
+
+    async def operation(transport: CliTransport) -> Any:
+        return await transport.queue_set_breaker_latency(
+            queue, None if off else threshold_ms, window_seconds, min_volume
+        )
+
+    _run(_transport_operation(state, "queue.set-breaker-latency", "QueueControl", operation))
+
+
 @queue_group.command("set-aging")
 @click.argument("queue")
 @click.option(

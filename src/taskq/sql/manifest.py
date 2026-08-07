@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.3.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.4.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.6.3"
+CONTRACT_VERSION = "0.6.4"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -79,7 +79,7 @@ TABLE_SHAPES = {
     "flow_limits": (5, "56fcabc78fdf06b02c62be3182bbcccf"),
     "flow_state": (3, "60f056634167b3b624b194567ca2a477"),
     "queue_counters": (10, "c2e43315895c6ddbac94394bd398a563"),
-    "queue_flow": (19, "bfac51350b933bc3882c050c4697686e"),
+    "queue_flow": (25, "a50954dfc4cd416492669b3f3eb4b395"),
     "queues": (23, "3a8dfd613184b7308c8e8fc53973e89b"),
     "schedule_decisions": (13, "ebb5c380a87c00d53e626db04a89f82c"),
     "schedule_occurrences": (7, "5ec90a35ba0383db811bf88020522004"),
@@ -108,7 +108,7 @@ CONSTRAINTS = {
     "flow_limits": (4, "998303160c2c6264e4e28c4e348dbfda"),
     "flow_state": (1, "16791e93a3b47960ea20095c4abb0f10"),
     "queue_counters": (2, "44835b2b8bfcc389728ec65520ee5e7c"),
-    "queue_flow": (10, "7cb7337f2f9808452741eb1a2f305496"),
+    "queue_flow": (13, "72e3a513948c93146646d45c4c39032d"),
     "queues": (16, "46680a8ecb4146dc9f2f6f90b3ff0959"),
     "schedule_decisions": (9, "21f272d0a93325771bf28c016c167f91"),
     "schedule_occurrences": (6, "7d7431666eaf79edefa9c3a26d0a122e"),
@@ -587,6 +587,7 @@ taskq.schedule_error(uuid,uuid,bigint,text,integer,boolean)|p_schedule_id uuid, 
 taskq.seal_workflow(uuid,text)|p_workflow_id uuid, p_actor text|taskq.workflow_result|plpgsql|v|u|taskq_producer
 taskq.set_flow_limit(text,integer,integer,text)|p_key text, p_rate_per_minute integer, p_burst integer DEFAULT NULL::integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_breaker_config(text,integer,integer,integer,text)|p_queue text, p_failure_threshold integer, p_cooldown_seconds integer DEFAULT 30, p_half_open_successes integer DEFAULT 1, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
+taskq.set_breaker_latency(text,integer,integer,integer,text)|p_queue text, p_threshold_ms integer, p_window_seconds integer DEFAULT 60, p_min_volume integer DEFAULT 10, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_breaker_rate(text,numeric,integer,integer,text)|p_queue text, p_failure_ratio numeric, p_window_seconds integer DEFAULT 60, p_min_volume integer DEFAULT 10, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.set_priority_aging(text,integer,text)|p_queue text, p_aging_seconds integer, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
 taskq.trip_breaker(text,text)|p_queue text, p_actor text DEFAULT NULL::text|text|plpgsql|v|u|taskq_operator
@@ -696,6 +697,9 @@ PUBLIC_ERRORS = {
     "taskq.set_breaker_config(text,integer,integer,integer,text)": frozenset(
         {"TQ422", "TQ501", "TQ001"}
     ),
+    "taskq.set_breaker_latency(text,integer,integer,integer,text)": frozenset(
+        {"TQ422", "TQ501", "TQ001"}
+    ),
     "taskq.set_priority_aging(text,integer,text)": frozenset({"TQ422", "TQ001"}),
     "taskq.trip_breaker(text,text)": frozenset({"TQ501", "TQ001"}),
     "taskq.force_close_breaker(text,text)": frozenset({"TQ501", "TQ001"}),
@@ -748,7 +752,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.6.3"',
+    "contract_version": '"0.6.4"',
     "capabilities": (
         '{"active": ["admission_reservations", "circuit_breaker", "dependencies_workflows", '
         '"flow_control", "followups", "operator_schedule_list", "queue_counters", '

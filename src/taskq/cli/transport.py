@@ -161,6 +161,19 @@ class CliTransport:
             )
         }
 
+    async def queue_set_breaker_latency(
+        self, queue: str, threshold_ms: int | None, window_seconds: int, min_volume: int
+    ) -> Any:
+        if self.mode != "sql":
+            raise TaskqCapabilityError(
+                details={"transport": "http", "command": "set_breaker_latency"}
+            )
+        return {
+            "outcome": await self.transport.set_breaker_latency(
+                queue, threshold_ms, window_seconds, min_volume, self._actor()
+            )
+        }
+
     async def queue_set_aging(self, queue: str, aging_seconds: int | None) -> Any:
         if self.mode != "sql":
             raise TaskqCapabilityError(

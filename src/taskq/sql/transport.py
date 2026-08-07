@@ -1906,6 +1906,38 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def set_breaker_latency(
+        self,
+        queue: str,
+        threshold_ms: int | None,
+        window_seconds: int = 60,
+        min_volume: int = 10,
+        actor: str | None = None,
+    ) -> str:
+        """Add (or clear, with ``threshold_ms=None``) a rolling-window average-latency
+        trip to a configured breaker. Trips when at least ``min_volume`` settles land
+        in the last ``window_seconds`` and their average execution latency reaches
+        ``threshold_ms`` — catching a downstream that is slow but still succeeding,
+        which neither the streak nor the failure-rate trigger detects. Requires an
+        already-configured breaker."""
+
+        async def operation(conn: AsyncConnection) -> str:
+            row = await self._one(
+                conn,
+                "SELECT taskq.set_breaker_latency(:queue, :threshold, :window, :min, :actor)"
+                " AS result",
+                {
+                    "queue": queue,
+                    "threshold": threshold_ms,
+                    "window": window_seconds,
+                    "min": min_volume,
+                    "actor": actor,
+                },
+            )
+            return str(row["result"])
+
+        return await self._run(operation)
+
     async def set_priority_aging(
         self, queue: str, aging_seconds: int | None, actor: str | None = None
     ) -> str:

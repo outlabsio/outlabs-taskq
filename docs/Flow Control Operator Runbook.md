@@ -1,6 +1,6 @@
 # TaskQ Flow Control — Operator Runbook
 
-How to operate the flow-control plane (SQL contracts 0.4.0–0.6.1): circuit breaker,
+How to operate the flow-control plane (SQL contracts 0.4.0–0.6.4): circuit breaker,
 rate limits, in-flight caps, slow-start ramps, job TTL, redrive/schedule smear, and
 priority aging. This is the *operational* companion to the design specs
 (`Task Queue 0.4/0.5/0.6 …`); it says **when to turn each knob, what to set it to,
@@ -34,16 +34,18 @@ successful probe closes it (and slow-starts via the ramp), a failing probe re-op
 hard-down (a provider API, a scraper proxy pool, a downstream service). The canonical
 case is the proxy-blip-burns-the-day's-scrape scenario.
 
-**Two trip triggers — pick per failure mode.** A configured breaker trips on
-**either**:
+**Three trip triggers — pick per failure mode.** A configured breaker trips on
+**any** of:
 - **Streak** (always on) — N *consecutive* terminal failures. Fast, catches a
   hard-down downstream. But a single success resets it, so it never catches a
   *flaky* downstream (fail, succeed, fail, succeed at a high rate).
 - **Rate** (optional, 0.6.3) — a sustained failure *ratio* over a rolling window.
   Add it for downstreams that fail intermittently rather than going hard-down.
-
-It is still blind to slow-but-succeeding downstreams (latency tripping is a
-documented follow-up).
+- **Latency** (optional, 0.6.4) — a rolling-window *average execution latency* over a
+  threshold. This is the one that catches a downstream that is **slow but still
+  succeeding** — neither streak nor rate sees it, because every settle succeeds. Note
+  a slow *success* still counts toward the latency window (unlike the rate window,
+  which only rises on failures), so degradation trips it even with a 0% failure rate.
 
 **Configure.**
 ```bash
@@ -51,12 +53,16 @@ taskq queue set-breaker <queue> --failure-threshold 5 --cooldown-seconds 30 --ha
 # Optional rate trip: trip if >=50% of the last 60s' settles failed (min 20 settles).
 taskq queue set-breaker-rate <queue> --failure-ratio 0.5 --window-seconds 60 --min-volume 20
 taskq queue set-breaker-rate <queue> --off     # remove the rate trip (keep streak)
+# Optional latency trip: trip if avg execution latency over the last 60s >= 2000ms (min 10 settles).
+taskq queue set-breaker-latency <queue> --threshold-ms 2000 --window-seconds 60 --min-volume 10
+taskq queue set-breaker-latency <queue> --off  # remove the latency trip (keep streak/rate)
 taskq queue set-breaker <queue> --off          # disable the whole breaker
 taskq queue trip-breaker <queue>               # force open (e.g. known maintenance)
 taskq queue close-breaker <queue>              # force closed + slow-start
 ```
-SQL: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>');`
-and `SELECT taskq.set_breaker_rate('<queue>', 0.5, 60, 20, '<actor>');`
+SQL: `SELECT taskq.set_breaker_config('<queue>', 5, 30, 1, '<actor>');`,
+`SELECT taskq.set_breaker_rate('<queue>', 0.5, 60, 20, '<actor>');`,
+and `SELECT taskq.set_breaker_latency('<queue>', 2000, 60, 10, '<actor>');`
 
 **Recommended starting points.**
 - `failure-threshold`: start **conservative (5–10)**. Too low false-trips a
@@ -68,8 +74,15 @@ and `SELECT taskq.set_breaker_rate('<queue>', 0.5, 60, 20, '<actor>');`
 - **Rate trip** (if used): `failure-ratio` = the fraction you consider "broken" (0.5
   is a reasonable start); `min-volume` high enough that a quiet queue's few failures
   don't trip (≥ 10–20); `window-seconds` a few multiples of the downstream's blip
-  duration. The `breaker_opened` event's `reason` field says which trigger fired
-  (`streak` vs `rate`).
+  duration.
+- **Latency trip** (if used): `threshold-ms` = the average execution latency you
+  consider "degraded" — set it well above the downstream's healthy p50 so normal
+  jitter doesn't trip; `min-volume` ≥ 10 so a couple of slow jobs on a quiet queue
+  don't trip; `window-seconds` a few multiples of a normal job's runtime. It measures
+  *average* latency per settle (`now() - claimed_at` for the settling attempt), so one
+  very slow job among many fast ones won't trip — sustained slowness will.
+- The `breaker_opened` event's `reason` field says which trigger fired
+  (`streak`, `rate`, or `latency`).
 
 **How to tell it's working.** A tripped breaker shows as the **`breaker_open`
 verdict** in `queue_health` (`taskq queue health <queue>`), with breaker state in the
@@ -226,17 +239,16 @@ claim-error backoff.
 6. Tighten one step if needed; re-watch. Stop at "good enough," not "maximally tight."
 7. Record what you set and why (there is no config-history view yet).
 
-## 11. Known operational gaps (as of 0.6.3)
+## 11. Known operational gaps (as of 0.6.4)
 
-- **Breaker is blind to slow-but-succeeding downstreams** — no latency-based tripping
-  yet (streak + rate cover consecutive and intermittent *failures*, not slowness).
 - **Manual trip/close emit no events** — only automatic transitions do; a queue-scoped
   audit table would cover manual verbs too.
 - **Aging skips workflow continuations.**
 - **No config-history view** — record changes yourself.
 
 *Closed recently:* the `breaker_open` health verdict + breaker events (0.6.2, §9); the
-streak-only intermittent-failure blindness (0.6.3 — add a rate trip with `set-breaker-rate`, §1).
+streak-only intermittent-failure blindness (0.6.3 — add a rate trip with `set-breaker-rate`, §1);
+slow-but-succeeding-downstream blindness (0.6.4 — add a latency trip with `set-breaker-latency`, §1).
 
 See the vault's *TaskQ Flow Control Implementation Plan* (Known Gaps backlog) for the
 plan to close these.

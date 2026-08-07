@@ -350,6 +350,7 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0033_priority_aging",
                 "0034_breaker_observability",
                 "0035_breaker_rate_tripping",
+                "0036_breaker_latency_tripping",
             ]
             report = await verify(conn)
             assert report.ok

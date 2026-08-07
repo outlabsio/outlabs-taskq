@@ -140,6 +140,13 @@ COMMAND_SPECS = {
             mutates=True,
         ),
         _s(
+            "queue.set-breaker-latency",
+            "Configure or disable a breaker average-latency trip",
+            _SQL,
+            role="taskq_operator",
+            mutates=True,
+        ),
+        _s(
             "queue.set-aging",
             "Configure or disable per-queue priority aging",
             _SQL,

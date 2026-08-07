@@ -29,7 +29,7 @@ def test_0018_follows_byte_immutable_0017() -> None:
         hashlib.sha256(by_name["0017_activate_workflow_continuations.sql"].sql.encode()).hexdigest()
         == EXPECTED_0017_CHECKSUM
     )
-    assert CONTRACT_VERSION == "0.6.3"
+    assert CONTRACT_VERSION == "0.6.4"
 
 
 def test_0_2_6_machine_surface_has_exact_effect_fence() -> None:
