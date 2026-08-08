@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a27`** uses SQL contract **`0.6.6`** and Protocol revision **`1.0.17`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migrations `0022`–`0042` add the per-queue flow-control plane — counters and health, rate/cap/key limits, schedule smear, circuit breaker, priority aging, and an operator audit log — all off by default.
+**Status:** alpha — **`0.1.0a28`** uses SQL contract **`0.6.6`** and Protocol revision **`1.0.17`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migrations `0022`–`0042` add the per-queue flow-control plane — counters and health, rate/cap/key limits, schedule smear, circuit breaker, priority aging, and an operator audit log — all off by default.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -19,6 +19,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a28.md`](docs/RELEASE-0.1.0a28.md) | 0.1.0a28 `taskq auth` CLI serialization fix — package-only, no schema change (contract 0.6.6) |
 | [`docs/RELEASE-0.1.0a27.md`](docs/RELEASE-0.1.0a27.md) | 0.1.0a27 flow-control plane (contract 0.6.6) release notes and rollout |
 | [`docs/RELEASE-0.1.0a26.md`](docs/RELEASE-0.1.0a26.md) | 0.1.0a26 production-integration closeout and rollout checklist |
 | [`docs/RELEASE-0.1.0a25.md`](docs/RELEASE-0.1.0a25.md) | 0.1.0a25 complete operator read model and CLI foundation |
@@ -34,7 +35,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a27
+pip install outlabs-taskq==0.1.0a28
 ```
 
 ## Credential handling
