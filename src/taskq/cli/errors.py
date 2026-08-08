@@ -17,6 +17,13 @@ class CliSafetyError(TaskqConfigError):
     """A locally refused mutation that has not crossed a transport boundary."""
 
 
+class CliTargetBindingRequired(CliSafetyError):
+    """A migration reached the intentional unbound-target activation barrier."""
+
+    def __init__(self) -> None:
+        super().__init__("database target binding is required before scheduler activation")
+
+
 class CliTimeoutError(TimeoutError):
     """A finite CLI wait condition was not reached."""
 
@@ -139,6 +146,16 @@ def normalize_error(
             4,
             {},
         )
+    elif isinstance(exc, CliTargetBindingRequired):
+        code, category, message, retryable, hint, exit_code, details = (
+            "CLI_TARGET_BINDING_REQUIRED",
+            "target_binding_required",
+            str(exc),
+            False,
+            "run target show, bind the reviewed identity, then create and apply a new plan",
+            2,
+            {},
+        )
     elif isinstance(exc, CliSafetyError):
         code, category, message, retryable, hint, exit_code, details = (
             "CLI_SAFETY",
@@ -227,4 +244,10 @@ def normalize_error(
     )
 
 
-__all__ = ["CliOperationError", "CliSafetyError", "CliTimeoutError", "normalize_error"]
+__all__ = [
+    "CliOperationError",
+    "CliSafetyError",
+    "CliTargetBindingRequired",
+    "CliTimeoutError",
+    "normalize_error",
+]

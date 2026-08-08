@@ -30,8 +30,11 @@ def _profile(*, environment: str = "staging", version: int = 1) -> TargetIdentit
 
 
 class _ReadTransport:
+    def __init__(self, environment: str = "staging") -> None:
+        self.environment = environment
+
     async def target(self) -> TargetIdentityProfile:
-        return _profile()
+        return _profile(environment=self.environment)
 
     async def meta(self) -> ContractMeta:
         return ContractMeta(
@@ -82,6 +85,34 @@ def test_target_show_uses_the_versioned_machine_envelope(
     assert payload["command"] == "target.show"
     assert payload["data"]["installation_id"] == str(_INSTALLATION_ID)
     assert payload["meta"]["target"]["environment"] == "staging"
+
+
+def test_target_show_allows_bootstrap_context_to_inspect_an_unbound_target(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    value = _ReadTransport(environment="unbound")
+
+    @asynccontextmanager
+    async def opened(_connection: object) -> AsyncIterator[_ReadTransport]:
+        yield value
+
+    monkeypatch.setattr("taskq.cli.app.open_cli_transport", opened)
+    code = main(
+        [
+            "target",
+            "show",
+            *_http_args(),
+            "--expected-environment",
+            "staging",
+            "-o",
+            "json",
+        ]
+    )
+    assert code == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["data"]["environment"] == "unbound"
+    assert payload["meta"]["target"]["environment"] == "unbound"
 
 
 def test_scheduler_doctor_is_a_read_only_machine_diagnostic(

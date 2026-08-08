@@ -103,6 +103,54 @@ def test_removed_alpha_grammar_has_no_compatibility_alias(
     assert json.loads(captured.err)["error"]["code"] == "CLI_CONFIG"
 
 
+def test_fresh_migration_reports_the_stable_target_binding_barrier(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    before = {
+        "plan_digest": "reviewed-before-binding",
+        "target": None,
+        "pending": [{"id": "0001_initial", "checksum": "one"}],
+    }
+    after = {
+        "plan_digest": "new-plan-required",
+        "target": _target("unbound").model_dump(mode="json"),
+        "pending": [{"id": "0020_standalone_scheduler", "checksum": "twenty"}],
+    }
+    plans = iter((before, after))
+    monkeypatch.setattr("taskq.cli.app._migration_plan", lambda _dsn: next(plans))
+
+    def binding_barrier(_dsn: str, _pending: object) -> list[str]:
+        raise RuntimeError("driver text must never enter the envelope")
+
+    monkeypatch.setattr("taskq.cli.app._runtime._run_migrate", binding_barrier)
+    code = main(
+        [
+            "db",
+            "migrate",
+            "--plan-digest",
+            "reviewed-before-binding",
+            "--dsn",
+            "postgresql://owner:secret@db/taskq",
+            "--expected-environment",
+            "staging",
+            "--actor",
+            "operator:test",
+            "--yes",
+            "-o",
+            "json",
+        ]
+    )
+    captured = capsys.readouterr()
+    assert code == 2 and captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CLI_TARGET_BINDING_REQUIRED"
+    assert payload["error"]["category"] == "target_binding_required"
+    assert payload["error"]["retryable"] is False
+    assert "secret" not in captured.err
+    assert "driver text" not in captured.err
+
+
 def test_context_file_is_secret_free_and_has_no_implicit_current_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
