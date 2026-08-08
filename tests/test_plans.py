@@ -280,10 +280,14 @@ _PLAN_BINDINGS = {
             "from taskq.jobs as j where j.queue = p_queue and j.status = 'queued'",
             "and j.scheduled_at <= now() and j.cancel_requested_at is null",
             "or not exists ( select 1 from taskq.workflows as w",
-            "order by j.priority - case when v_aging_seconds is null then 0 else "
-            "least(1000, floor(extract(epoch from (now() - j.scheduled_at)) "
-            "/ v_aging_seconds)::integer) end, j.scheduled_at, j.id "
+            # 0042 branches the claim order (review finding H1): unconfigured queues
+            # use the bare, jobs_claim_idx-matching order; only configured aging pays the
+            # age-offset order. Both branches must be present in the function body.
+            "order by j.priority, j.scheduled_at, j.id "
             "limit 1 for update of j skip locked",
+            "order by j.priority - least(1000, floor(extract(epoch from "
+            "(now() - j.scheduled_at)) / v_aging_seconds)::integer), "
+            "j.scheduled_at, j.id limit 1 for update of j skip locked",
         ),
     ),
     "dedup": PlanBinding(

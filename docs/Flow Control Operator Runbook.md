@@ -9,8 +9,13 @@ how to see it working, and how to respond when it misbehaves.**
 ## 0. First principles
 
 - **Everything here is off by default, per queue.** A queue that configures nothing
-  behaves exactly as it did before the flow-control plane existed. You opt in one
-  queue and one feature at a time. There is no global switch and no default policy.
+  gets the same control behavior it had before the flow-control plane — no verdict, no
+  throttle, no aging, no breaker; nothing declines its work. You opt in one queue and one
+  feature at a time. There is no global switch and no default policy. (One mechanical
+  caveat, not a control change: since 0.4 every queue keeps an exact `queue_counters`
+  accounting row updated on each status transition, so a single queue under many
+  simultaneous settles can briefly serialize on that counter row. It is bookkeeping the
+  health views rely on, not a gate — an unconfigured queue is never declined work.)
 - **The contract declines work with a typed verdict, never a guessed sleep.** When a
   gate says "not now," the claim returns `throttled` with `retry_after_seconds`, and
   the worker sleeps exactly that long (plus its own jitter). You do not tune worker

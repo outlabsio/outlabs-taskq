@@ -461,6 +461,7 @@ def main() -> None:
         "0039_queue_audit_prune",
         "0040_breaker_manual_window_reset",
         "0041_breaker_half_open_atomic",
+        "0042_claim_order_index_restore",
     ]
     assert len(FUNCTIONS) == 114
 

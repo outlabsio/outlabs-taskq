@@ -91,6 +91,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0039_queue_audit_prune",
                 "0040_breaker_manual_window_reset",
                 "0041_breaker_half_open_atomic",
+                "0042_claim_order_index_restore",
             ],
         ]
         async with engines[0].connect() as conn:
@@ -196,6 +197,7 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
                 "0039_queue_audit_prune",
                 "0040_breaker_manual_window_reset",
                 "0041_breaker_half_open_atomic",
+                "0042_claim_order_index_restore",
             ]
             report = await verify(conn)
             assert report.ok
@@ -316,6 +318,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0039_queue_audit_prune",
             "0040_breaker_manual_window_reset",
             "0041_breaker_half_open_atomic",
+            "0042_claim_order_index_restore",
         ]
         assert (
             await asyncio.to_thread(
@@ -362,6 +365,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0039_queue_audit_prune",
             "0040_breaker_manual_window_reset",
             "0041_breaker_half_open_atomic",
+            "0042_claim_order_index_restore",
         ]
         assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
         assert json.loads(capsys.readouterr().out)["data"]["ok"] is True

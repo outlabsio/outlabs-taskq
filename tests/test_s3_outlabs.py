@@ -17,6 +17,10 @@ import pytest
 from sqlalchemy.engine import make_url
 from starlette.requests import Request
 
+# Skip cleanly (rather than break collection) when installed without the `outlabs` extra,
+# e.g. a `--extra dev --extra http` dev setup.
+pytest.importorskip("outlabs_auth")
+
 from outlabs_auth import (
     AuthConfig,
     AuthDeps,
