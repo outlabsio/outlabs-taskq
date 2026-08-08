@@ -321,15 +321,24 @@ async def _representative_claim_plan(
     await _ensure_queue(operator, _CLAIM_PLAN_PROBE_QUEUE)
     await _bulk(producer, _CLAIM_PLAN_PROBE_QUEUE, "claim-plan-probe", 512)
     await admin.execute("ANALYZE taskq.jobs")
-    raw = await admin.fetchval(
-        f"""
-        EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)
-        SELECT id FROM taskq.jobs
-         WHERE queue = '{_CLAIM_PLAN_PROBE_QUEUE}' AND status = 'queued'
-           AND cancel_requested_at IS NULL AND scheduled_at <= now()
-         ORDER BY priority, scheduled_at, id LIMIT 1
-        """
-    )
+    # Even seeded + analysed, this gate was not fully deterministic across scenarios: rows
+    # another scenario left in taskq.jobs can skew the queue-filter selectivity estimate
+    # and flip the planner to a seq scan at toy/small scale (the B4/B13 flake family).
+    # enable_seqscan=off (transaction-scoped) removes that non-determinism and makes the
+    # probe test index *usability*: a claim ORDER BY that jobs_claim_idx cannot serve
+    # (e.g. the 0.6.1 folded `priority - 0`, review finding H1) still seq-scans under the
+    # penalty, so the gate below still fails loudly on the regression that matters.
+    async with admin.transaction():
+        await admin.execute("SET LOCAL enable_seqscan = off")
+        raw = await admin.fetchval(
+            f"""
+            EXPLAIN (ANALYZE, BUFFERS, WAL, FORMAT JSON)
+            SELECT id FROM taskq.jobs
+             WHERE queue = '{_CLAIM_PLAN_PROBE_QUEUE}' AND status = 'queued'
+               AND cancel_requested_at IS NULL AND scheduled_at <= now()
+             ORDER BY priority, scheduled_at, id LIMIT 1
+            """
+        )
     assert isinstance(raw, str)
     document = json.loads(raw)
     plan = document[0]["Plan"]
@@ -343,9 +352,12 @@ async def _representative_claim_plan(
         if node.get("Node Type") == "Seq Scan" and node.get("Relation Name") == "jobs":
             sequential_jobs_scan = True
         pending.extend(node.get("Plans", ()))
-    assert "jobs_claim_idx" in indexes
-    assert not sequential_jobs_scan
-    assert plan["Actual Rows"] <= 1
+    if "jobs_claim_idx" not in indexes or sequential_jobs_scan or plan["Actual Rows"] > 1:
+        raise AssertionError(
+            "claim-plan probe: the claim candidate query is not served by jobs_claim_idx "
+            f"(indexes={sorted(indexes)}, seq_scan_jobs={sequential_jobs_scan}, "
+            f"actual_rows={plan['Actual Rows']}).\n" + _explain_diagnostic(document)
+        )
     return {
         "query": "claim_candidate",
         "expected_index_family": "jobs_claim_idx",
@@ -386,6 +398,24 @@ def _walk_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
     return result
 
 
+def _explain_diagnostic(document: list[dict[str, Any]]) -> str:
+    """Render a captured EXPLAIN plan for an AssertionError message, so a plan-probe
+    failure is diagnosable from the traceback alone instead of needing a re-run."""
+    lines: list[str] = []
+    for node in _walk_plan(document[0]["Plan"]):
+        parts: list[str] = [str(node.get("Node Type", "?"))]
+        if node.get("Relation Name"):
+            parts.append(f"on {node['Relation Name']}")
+        if node.get("Index Name"):
+            parts.append(f"using {node['Index Name']}")
+        if node.get("Sort Key"):
+            parts.append(f"sort_key={node['Sort Key']}")
+        if "Actual Rows" in node:
+            parts.append(f"rows={node['Actual Rows']}")
+        lines.append("  " + " ".join(parts))
+    return "captured plan:\n" + "\n".join(lines) + "\nplan json: " + json.dumps(document)[:2000]
+
+
 async def _b9_view_plan(
     admin: asyncpg.Connection,
     view: str,
@@ -415,9 +445,12 @@ async def _b9_view_plan(
         default=0,
     )
     bounded = not jobs_seq_scan and not sorts and candidate_rows <= 101
-    if view == "ready" and enforce_gate:
-        assert "jobs_claim_idx" in indexes
-        assert bounded
+    if view == "ready" and enforce_gate and ("jobs_claim_idx" not in indexes or not bounded):
+        raise AssertionError(
+            "b9 ready-view gate: expected a bounded jobs_claim_idx plan "
+            f"(indexes={indexes}, jobs_seq_scan={jobs_seq_scan}, sorts={sorts}, "
+            f"candidate_rows={candidate_rows}).\n" + _explain_diagnostic(document)
+        )
     return {
         "view": view,
         "indexes": indexes,
