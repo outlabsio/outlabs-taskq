@@ -739,6 +739,25 @@ def test_cli_report_is_deterministic_and_prints_wildcard_policy(capsys: Any) -> 
     assert "super-secret-value" not in output
 
 
+def test_auth_plan_digest_serializes_provisioning_report() -> None:
+    """Regression for 0.1.0a27: ``taskq auth plan``/``apply`` hash the report through
+    ``_plan_digest`` -> ``jsonable`` -> ``json.dumps``. A frozen-dataclass report must
+    serialize to a dict instead of falling through ``jsonable`` and raising
+    ``TypeError: Object of type ProvisioningReport is not JSON serializable``, which
+    broke the entire ``auth`` command group in the shipped a27 wheel."""
+    from taskq.cli.app import _plan_digest
+
+    target = SimpleNamespace(installation_id=uuid4(), binding_version=3)
+    report = ProvisioningReport(
+        mode="report",
+        created=("permission:taskq:run",),
+        existing=("role:taskq-worker",),
+    )
+    digest = _plan_digest(target, report)
+    assert isinstance(digest, str) and len(digest) == 64
+    assert digest == _plan_digest(target, report)
+
+
 def test_auth_cli_renders_the_real_password_for_the_owned_connection() -> None:
     rendered = _asyncpg_dsn(
         make_url("postgresql://installer:p%40ss%2Fword@db.example.test/taskq?ssl=require")
