@@ -283,8 +283,7 @@ _PLAN_BINDINGS = {
             # 0042 branches the claim order (review finding H1): unconfigured queues
             # use the bare, jobs_claim_idx-matching order; only configured aging pays the
             # age-offset order. Both branches must be present in the function body.
-            "order by j.priority, j.scheduled_at, j.id "
-            "limit 1 for update of j skip locked",
+            "order by j.priority, j.scheduled_at, j.id limit 1 for update of j skip locked",
             "order by j.priority - least(1000, floor(extract(epoch from "
             "(now() - j.scheduled_at)) / v_aging_seconds)::integer), "
             "j.scheduled_at, j.id limit 1 for update of j skip locked",
