@@ -90,6 +90,24 @@ async def test_unconfigured_claim_order_is_index_backed(taskq_dsn: str) -> None:
         # documented O(ready-depth) cost paid only by queues that opt into aging.
         _, aged_sort, _ = await _plan(probe, _AGED_ORDER)
         assert aged_sort, "aged claim order is expected to sort (documented cost)"
+
+        # Tether to the live function, not just these hand-written shapes. An EXPLAIN-only
+        # gate passes even against a reverted function body (0042 re-review finding #1 --
+        # the same "gate tests a proxy" flaw that let H1 through), so assert both branch
+        # orders appear verbatim in _claim_jobs_unattested. Changing the claim order fails
+        # this until the strings are updated in lockstep.
+        functiondef = await probe.fetchval(
+            "SELECT pg_get_functiondef('taskq._claim_jobs_unattested"
+            "(text,text,integer,text[],integer,text,uuid,boolean)'::regprocedure)"
+        )
+        body = " ".join(functiondef.lower().split())
+        assert "order by j.priority, j.scheduled_at, j.id" in body, (
+            "bare (unconfigured) order missing"
+        )
+        assert (
+            "order by j.priority - least(1000, floor(extract(epoch from "
+            "(now() - j.scheduled_at)) / v_aging_seconds)::integer), j.scheduled_at, j.id"
+        ) in body, "aged order missing"
     finally:
         for conn in (op, prod, probe):
             if conn is not None:
