@@ -35,6 +35,7 @@ from taskq.http import (
 )
 from taskq.http.runtime import _require_supported_sql_contract
 from taskq.protocol import ContractMeta, ScheduleClaim, ScheduleClaimResult
+from taskq.sql.manifest import CONTRACT_VERSION
 
 
 class _Transport:
@@ -518,6 +519,14 @@ async def test_worker_presence_runtime_requires_0_2_4_and_exact_capability() -> 
     await active.start()
     assert active.state is TaskqRuntimeState.RUNNING
     await active.stop()
+
+    latest = _runtime(
+        _Transport(version=CONTRACT_VERSION, capabilities={"active": ["worker_presence"]}),
+        options=options,
+    )
+    await latest.start()
+    assert latest.state is TaskqRuntimeState.RUNNING
+    await latest.stop()
 
 
 async def test_schedule_runtime_requires_exact_gate_and_settles_each_claim() -> None:
