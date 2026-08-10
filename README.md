@@ -104,6 +104,26 @@ subscribe to multiple queues; TaskQ does not require one container per worker,
 queue, task, or schedule. Prefer existing local worker hosts unless a particular
 task has a documented cloud availability, latency, or network requirement.
 
+### Concurrency model
+
+TaskQ does not serialize independent jobs. A job without a `concurrency_key` may
+run alongside any other claim, up to the explicit `WorkerOptions.concurrency`
+and any configured queue flow cap. Worker concurrency defaults to one as a safe
+deployment setting; applications that have parallel-safe handlers must size it
+deliberately.
+
+Use a `concurrency_key` only to name a real shared resource such as a browser
+session, licensed renderer, or rate-limited provider. Jobs with different keys
+do not block each other. A named key with no registered limit is conservatively
+capped at one; raise that cross-worker cap with `set_concurrency_limit` when the
+resource safely supports more than one user. Do not stamp unrelated stages with
+one host-wide key: process lanes and task-name claim filters provide isolation,
+while resource keys provide cross-worker mutual exclusion.
+
+Priority controls which eligible job is claimed first; it does not create
+parallel capacity and cannot bypass worker, queue, flow-key, or concurrency-key
+limits. Keep ordering policy and resource capacity as separate decisions.
+
 Every recurring source manifest must set `catchup: fire_once` or
 `catchup: fire_all` explicitly. Do not rely on the current `skip` default: the
 released SQL contract intentionally accepts only zero occurrences for that
