@@ -229,6 +229,46 @@ async def test_notification_wakes_claim_before_poll_deadline() -> None:
     await service.aclose()
 
 
+async def test_paused_queue_uses_bounded_probe_and_ignores_nudges() -> None:
+    clock = ManualClock()
+    notifications = ScriptedNotifications()
+    transport = ScriptedTransport()
+    transport.script(
+        "claim",
+        ClaimResult(state=ClaimState.PAUSED),
+        ClaimResult(state=ClaimState.CLAIMED, jobs=(_claim("alpha"),)),
+    )
+    service = WorkerService(
+        transport,  # type: ignore[arg-type]
+        _registry("alpha"),
+        "worker-1",
+        options=WorkerServiceOptions(
+            queues=("alpha",),
+            poll_interval=0.1,
+            paused_poll_interval=10,
+            poll_jitter=0,
+        ),
+        notifications=notifications,
+        clock=clock,
+    )
+    await service.start()
+    await _spin_until(lambda: [call.command for call in transport.calls].count("claim") == 1)
+
+    for _ in range(10):
+        notifications.nudge()
+        await asyncio.sleep(0)
+    assert [call.command for call in transport.calls].count("claim") == 1
+    assert service.ready
+
+    clock.advance(9.9)
+    await asyncio.sleep(0)
+    assert [call.command for call in transport.calls].count("claim") == 1
+    clock.advance(0.1)
+    await _spin_until(lambda: any(call.command == "complete" for call in transport.calls))
+    assert [call.command for call in transport.calls].count("claim") == 2
+    await service.aclose()
+
+
 async def test_hot_queue_rotates_before_claiming_again() -> None:
     release = asyncio.Event()
     transport = ScriptedTransport()

@@ -200,6 +200,7 @@ class WorkerServiceOptions(BaseModel):
     claim_backoff_base: float = Field(default=0.25, gt=0)
     claim_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
     claim_fatal_threshold: int = Field(default=8, ge=1, le=100)
+    paused_poll_interval: float = Field(default=5.0, ge=0.1, le=3600)
     nudge_quiet_base: float = Field(default=0.05, gt=0, le=10)
     nudge_quiet_cap: float = Field(default=2.0, gt=0, le=60)
     adaptive_batch: bool = True
@@ -623,6 +624,21 @@ class WorkerService:
                             1 + self._rng.uniform(0.0, 0.3)
                         )
                         self._claim_retry_at[queue] = self.clock.monotonic() + delay
+                    elif result.state is ClaimState.PAUSED:
+                        # A paused queue is an operator-controlled idle state, not
+                        # an unavailable transport. Keep it out of the hot claim
+                        # path (including notification nudges) until a bounded
+                        # probe is due. This also prevents low consumer poll
+                        # intervals from rate-limiting an HTTP control plane while
+                        # a rollout deliberately holds queues closed.
+                        delay = max(
+                            self.options.paused_poll_interval,
+                            float(result.retry_after_seconds or 0),
+                        )
+                        if self.options.poll_jitter > 0:
+                            delay *= 1 + self._rng.uniform(0.0, self.options.poll_jitter)
+                        self._claim_retry_at[queue] = self.clock.monotonic() + delay
+                        self._observe_claim_result(0, batch)
                     elif result.state in (ClaimState.UNKNOWN_QUEUE, ClaimState.UNAVAILABLE):
                         raise WorkerInvariantError(
                             f"unexpected claim state for subscribed queue: {result.state.value}"
