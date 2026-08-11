@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from taskq.errors import (
     InvalidFollowupError,
+    TaskqBackpressureError,
     TaskqCapabilityError,
     TaskqConflictError,
     TaskqConfigError,
@@ -114,6 +115,7 @@ class WorkerOptions(BaseModel):
     settle_max_attempts: int = Field(default=5, ge=1, le=100)
     settle_backoff_base: float = Field(default=0.25, gt=0)
     settle_backoff_cap: float = Field(default=5.0, gt=0)
+    settle_backpressure_max_elapsed: float = Field(default=120.0, gt=0, le=3600)
     no_handler_delay_seconds: int = Field(default=60, ge=0, le=86400)
     unsupported_policy_delay_seconds: int = Field(default=60, ge=0, le=86400)
     effect_request_max_bytes: int = Field(default=8192, ge=1024, le=8_388_608)
@@ -162,6 +164,7 @@ class JobRunReport(BaseModel):
     outcome: JobRunOutcome
     settlement_command: str | None = None
     settlement_outcome: str | None = None
+    settlement_error_code: str | None = None
     cancellation_reason: CancellationReason | None = None
     requires_process_exit: bool = False
     fatal: bool = False
@@ -737,9 +740,11 @@ class WorkerService:
             self._fail_service(
                 WorkerInvariantError(
                     "fatal job "
+                    f"job_id={report.job_id} "
                     f"outcome={report.outcome.value} "
                     f"settlement_command={report.settlement_command or 'none'} "
-                    f"settlement_outcome={settlement_outcome}"
+                    f"settlement_outcome={settlement_outcome} "
+                    f"settlement_error_code={report.settlement_error_code or 'none'}"
                 )
             )
         elif report.outcome is JobRunOutcome.UNSUPPORTED_CONTINUATION_POLICY:
@@ -1685,9 +1690,15 @@ class WorkerSupervisor:
         *,
         control: _RunControl | None = None,
     ) -> JobRunReport:
-        for attempt in range(1, self.options.settle_max_attempts + 1):
+        started_at = self.clock.monotonic()
+        attempt = 0
+        last_error_code: str | None = None
+        while True:
+            attempt += 1
             if control is not None and control.ownership_lost.is_set():
                 return self._ownership_lost_report(job_id, control)
+            retry_after = 0.0
+            backpressure = False
             try:
                 result = await operation()
             except asyncio.CancelledError:
@@ -1704,9 +1715,11 @@ class WorkerSupervisor:
             except TaskqError as exc:
                 if not exc.retryable:
                     return self._runtime_failure(job_id, command)
-                retryable = True
+                last_error_code = exc.code.value
+                retry_after = exc.retry_after_seconds or 0.0
+                backpressure = isinstance(exc, TaskqBackpressureError)
             except (TimeoutError, ConnectionError):
-                retryable = True
+                last_error_code = "transport"
             except Exception:
                 return self._runtime_failure(job_id, command)
             else:
@@ -1714,21 +1727,31 @@ class WorkerSupervisor:
                     return self._runtime_failure(job_id, command)
                 return self._report_from_settle(job_id, command.value, result)
 
-            if retryable and attempt < self.options.settle_max_attempts:
-                delay = self._rng.uniform(
-                    0.0,
-                    min(
-                        self.options.settle_backoff_base * (2 ** (attempt - 1)),
-                        self.options.settle_backoff_cap,
-                    ),
-                )
-                if await self._settle_delay(delay, control):
-                    return self._ownership_lost_report(job_id, control)
+            elapsed = max(0.0, self.clock.monotonic() - started_at)
+            if backpressure:
+                retry_allowed = elapsed < self.options.settle_backpressure_max_elapsed
+            else:
+                retry_allowed = attempt < self.options.settle_max_attempts
+            if not retry_allowed:
+                break
+
+            upper = min(
+                self.options.settle_backoff_base * (2 ** min(attempt - 1, 30)),
+                self.options.settle_backoff_cap,
+            )
+            delay = max(retry_after, self._rng.uniform(0.0, upper))
+            if backpressure and attempt >= self.options.settle_max_attempts:
+                delay = max(delay, min(self.options.settle_backoff_base, upper))
+            if backpressure and elapsed + delay > self.options.settle_backpressure_max_elapsed:
+                break
+            if await self._settle_delay(delay, control):
+                return self._ownership_lost_report(job_id, control)
         return JobRunReport(
             job_id=job_id,
             state=JobRunState.RUNTIME_FAILED,
             outcome=JobRunOutcome.SETTLEMENT_UNKNOWN,
             settlement_command=command.value,
+            settlement_error_code=last_error_code,
             fatal=True,
         )
 

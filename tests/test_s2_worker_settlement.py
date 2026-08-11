@@ -25,6 +25,7 @@ from taskq import (
     WorkerSupervisor,
 )
 from taskq.errors import (
+    TaskqBackpressureError,
     TaskqCapabilityError,
     TaskqConflictError,
     TaskqUnavailableError,
@@ -95,6 +96,10 @@ def _supervisor(
     handler: object | None,
     *,
     attempts: int = 5,
+    backpressure_max_elapsed: float = 120.0,
+    concurrency: int = 1,
+    backoff_base: float = 0.25,
+    backoff_cap: float = 5.0,
 ) -> WorkerSupervisor:
     registry = TaskRegistry()
     if handler is not None:
@@ -125,7 +130,13 @@ def _supervisor(
         transport,  # type: ignore[arg-type]
         registry,
         "worker-1",
-        options=WorkerOptions(settle_max_attempts=attempts),
+        options=WorkerOptions(
+            concurrency=concurrency,
+            settle_max_attempts=attempts,
+            settle_backoff_base=backoff_base,
+            settle_backoff_cap=backoff_cap,
+            settle_backpressure_max_elapsed=backpressure_max_elapsed,
+        ),
         clock=clock,
     )
 
@@ -247,6 +258,101 @@ async def test_retry_exhaustion_is_settlement_unknown_and_stops_heartbeat() -> N
     assert report.fatal
     assert [call.command for call in transport.calls] == ["complete"] * 3
     assert clock.sleeping == 0
+    await supervisor.aclose()
+
+
+async def test_backpressure_retries_beyond_attempt_limit_and_honors_retry_after() -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        TaskqBackpressureError(retry_after_seconds=10),
+        TaskqBackpressureError(retry_after_seconds=10),
+    )
+    supervisor = _supervisor(
+        transport,
+        clock,
+        complete_handler,
+        attempts=1,
+        backpressure_max_elapsed=30,
+    )
+    running = asyncio.create_task(supervisor.run_job(_claim()))
+    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 2)
+    clock.advance(10)
+    await _spin_until(
+        lambda: (
+            len([call for call in transport.calls if call.command == "complete"]) == 2
+            and clock.sleeping >= 2
+        )
+    )
+    clock.advance(10)
+    report = await running
+    assert report.outcome is JobRunOutcome.SETTLED
+    assert not report.fatal
+    assert [call.command for call in transport.calls].count("complete") == 3
+    await supervisor.aclose()
+
+
+async def test_backpressure_horizon_exhaustion_retains_typed_diagnostic() -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        TaskqBackpressureError(retry_after_seconds=10),
+        TaskqBackpressureError(retry_after_seconds=10),
+    )
+    supervisor = _supervisor(
+        transport,
+        clock,
+        complete_handler,
+        attempts=1,
+        backpressure_max_elapsed=15,
+    )
+    running = asyncio.create_task(supervisor.run_job(_claim()))
+    await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 2)
+    clock.advance(10)
+    report = await running
+    assert report.outcome is JobRunOutcome.SETTLEMENT_UNKNOWN
+    assert report.settlement_error_code == "TQ429"
+    assert report.fatal
+    assert [call.command for call in transport.calls].count("complete") == 2
+    await supervisor.aclose()
+
+
+async def test_concurrent_backpressured_settlements_recover_without_worker_fatal() -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        *(TaskqBackpressureError(retry_after_seconds=1) for _ in range(25)),
+    )
+    supervisor = _supervisor(
+        transport,
+        clock,
+        complete_handler,
+        attempts=1,
+        backpressure_max_elapsed=10,
+        concurrency=5,
+        backoff_base=0.01,
+        backoff_cap=0.01,
+    )
+    running = [asyncio.create_task(supervisor.run_job(_claim())) for _ in range(5)]
+    expected_complete_calls = 5
+    for _ in range(5):
+        await _spin_until(
+            lambda: (
+                len([call for call in transport.calls if call.command == "complete"])
+                == expected_complete_calls
+            )
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+        clock.advance(1)
+        expected_complete_calls += 5
+    reports = await asyncio.gather(*running)
+    assert all(report.outcome is JobRunOutcome.SETTLED for report in reports)
+    assert all(not report.fatal for report in reports)
+    assert [call.command for call in transport.calls].count("complete") == 30
     await supervisor.aclose()
 
 

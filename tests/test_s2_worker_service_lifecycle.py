@@ -229,7 +229,8 @@ async def test_fatal_job_report_auto_stops_service(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     transport = ScriptedTransport()
-    transport.script("claim", ClaimResult(state=ClaimState.CLAIMED, jobs=(_claim("alpha"),)))
+    claim = _claim("alpha")
+    transport.script("claim", ClaimResult(state=ClaimState.CLAIMED, jobs=(claim,)))
     transport.script("complete", TaskqConflictError())
     service = WorkerService(
         transport,  # type: ignore[arg-type]
@@ -250,8 +251,8 @@ async def test_fatal_job_report_auto_stops_service(
     ]
     assert fatal_messages == [
         "worker.fatal error_type=WorkerInvariantError "
-        "detail=fatal job outcome=runtime_error "
-        "settlement_command=complete settlement_outcome=none"
+        f"detail=fatal job job_id={claim.job_id} outcome=runtime_error "
+        "settlement_command=complete settlement_outcome=none settlement_error_code=none"
     ]
 
 

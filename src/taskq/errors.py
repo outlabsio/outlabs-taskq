@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import math
 from typing import Any
 
 from taskq.protocol import TQ_ERROR_REGISTRY, TqCode
@@ -31,10 +32,19 @@ class TaskqError(Exception):
         *,
         details: Mapping[str, Any] | None = None,
         cause: BaseException | None = None,
+        retry_after_seconds: float | None = None,
     ) -> None:
         self.details = _safe_details(details)
         self.cause = cause
         self.retryable = TQ_ERROR_REGISTRY[self.code].retryable
+        normalized_retry_after = None if retry_after_seconds is None else float(retry_after_seconds)
+        self.retry_after_seconds = (
+            normalized_retry_after
+            if normalized_retry_after is not None
+            and math.isfinite(normalized_retry_after)
+            and normalized_retry_after > 0
+            else None
+        )
         super().__init__(f"{self.code}: {TQ_ERROR_REGISTRY[self.code].category}")
 
     def __repr__(self) -> str:
@@ -103,6 +113,7 @@ def taskq_error_from_code(
     code: TqCode | str,
     *,
     details: Mapping[str, Any] | None = None,
+    retry_after_seconds: float | None = None,
 ) -> TaskqError:
     """Construct a stable public error from a Protocol error code."""
 
@@ -110,7 +121,10 @@ def taskq_error_from_code(
         normalized = code if isinstance(code, TqCode) else TqCode(code)
     except ValueError:
         normalized = TqCode.INTERNAL
-    return _ERROR_TYPES[normalized](details=details)
+    return _ERROR_TYPES[normalized](
+        details=details,
+        retry_after_seconds=retry_after_seconds,
+    )
 
 
 def _exception_chain(exc: BaseException) -> list[BaseException]:

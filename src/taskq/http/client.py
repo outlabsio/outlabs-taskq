@@ -305,7 +305,11 @@ def _decode_envelope(
             or envelope.error.retryable != TQ_ERROR_REGISTRY[envelope.error.code].retryable
         ):
             raise TaskqInternalError(details={"reason": "error_status_mismatch"})
-        raise taskq_error_from_code(envelope.error.code, details=envelope.error.details)
+        raise taskq_error_from_code(
+            envelope.error.code,
+            details=envelope.error.details,
+            retry_after_seconds=_retry_after_seconds(response) or None,
+        )
 
     try:
         envelope = CommandEnvelope[dict[str, Any]].model_validate(raw)

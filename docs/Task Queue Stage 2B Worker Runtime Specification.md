@@ -219,9 +219,9 @@ The failure threshold is the normative constant three, not a user option.
 
 ## 8. Verb-aware settlement retry policy
 
-Only the chosen fenced verb may be retried, always with identical semantic arguments and the same attempt id. Retryable `TaskqError` values (`TQ500`/`TQ503`) and transport timeouts use bounded exponential backoff on `WorkerClock`. Non-retryable exceptions fail immediately.
+Only the chosen fenced verb may be retried, always with identical semantic arguments and the same attempt id. Retryable `TaskqError` values (`TQ429`/`TQ500`/`TQ503`) and transport timeouts use bounded exponential backoff on `WorkerClock`. Non-retryable exceptions fail immediately. An HTTP transport preserves a bounded numeric `Retry-After` hint on the typed error so the worker never retries earlier than the server requested.
 
-`WorkerOptions` defaults to five settle attempts, 0.25-second base, and 5-second cap. Tests use a manual clock; production does not use random jitter inside a single worker because database-side job backoff is a separate concern.
+`WorkerOptions` defaults to five settle attempts, 0.25-second base, and 5-second cap. Ordinary transient errors retain that attempt bound. Authorization/server backpressure has a separate 120-second maximum elapsed horizon because a legitimate sliding rate-limit window can outlast five short attempts; the heartbeat remains live throughout that horizon and ownership loss always stops further settlement. Retries use full jitter plus any larger server hint so a fleet does not synchronize on one retry boundary. Tests use a manual clock.
 
 Outcome rules:
 
@@ -229,7 +229,7 @@ Outcome rules:
 - `lost` means ownership loss and is never converted to success;
 - `settle_conflict` is a cross-verb invariant failure, causes supervisor soft stop, and never triggers another verb;
 - a value outside that command's protocol-owned outcome set is `TQ500` at the transport boundary;
-- exhausted transient retries stop heartbeating, report `settlement_unknown`, soft-stop the supervisor, and let lease expiry provide the only recovery.
+- exhausted ordinary transient retries or an exhausted backpressure horizon stop heartbeating, report `settlement_unknown` with the safe typed error code, soft-stop the supervisor, and let lease expiry provide the only recovery.
 
 Programmable lost-response injection applies the scripted command once, drops its response, then lets the identical retry observe `already_settled`. The harness asserts the handler ran once and only one semantic command was selected.
 
