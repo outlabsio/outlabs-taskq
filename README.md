@@ -50,7 +50,7 @@ process environment using a secret manager, container secret, or service supervi
 DSN from commands. A context stores only the environment-variable name:
 
 ```bash
-# TASKQ_STAGING_DSN is supplied by the deployment environment.
+# TASKQ_STAGING_DSN is the short-lived owner/migration DSN supplied by the deployment environment.
 taskq --context staging db plan -o json
 taskq --context staging db verify
 
@@ -60,7 +60,9 @@ taskq --dsn-env TASKQ_STAGING_DSN \
   db verify -o json
 ```
 
-`taskq db migrate` requires a superuser or a managed database-owner role with
+`taskq db plan`, `taskq db migrate`, and `taskq db verify` require a superuser or a managed
+database-owner role with access to the private migration ledger and exact catalog. Migration also
+requires
 `CREATEROLE`. On PostgreSQL 16/18, the installer bootstraps `taskq_owner` and
 retains owner membership on that migration role so later owner-only binding
 and upgrades work. This must be a dedicated owner/migration credential: never

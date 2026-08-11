@@ -78,6 +78,10 @@ def test_command_registry_exactly_matches_click_leaves_and_is_agent_complete() -
         assert metadata["examples"]
         assert set(metadata["exit_codes"]) == {"0", "1", "2", "3", "4", "5", "130"}
 
+    assert COMMAND_SPECS["db.plan"].role == "taskq_owner"
+    assert COMMAND_SPECS["db.migrate"].role == "taskq_owner"
+    assert COMMAND_SPECS["db.verify"].role == "taskq_owner"
+
 
 def test_discovery_and_schema_are_versioned_and_need_no_connection(
     capsys: pytest.CaptureFixture[str],
