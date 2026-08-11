@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 import pytest
@@ -224,7 +225,9 @@ async def test_hard_stop_cannot_close_intake_before_claim_admission() -> None:
     assert service.stopped
 
 
-async def test_fatal_job_report_auto_stops_service() -> None:
+async def test_fatal_job_report_auto_stops_service(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     transport = ScriptedTransport()
     transport.script("claim", ClaimResult(state=ClaimState.CLAIMED, jobs=(_claim("alpha"),)))
     transport.script("complete", TaskqConflictError())
@@ -235,10 +238,19 @@ async def test_fatal_job_report_auto_stops_service() -> None:
         options=WorkerServiceOptions(queues=("alpha",), listen=False),
         clock=ManualClock(),
     )
-    await service.start()
-    await _spin_until(lambda: service.stopped)
+    with caplog.at_level(logging.ERROR, logger="taskq.worker"):
+        await service.start()
+        await _spin_until(lambda: service.stopped)
     assert service.snapshot().fatal
     assert not service.ready
+    fatal_messages = [
+        record.getMessage() for record in caplog.records if record.message.startswith("worker.fatal")
+    ]
+    assert fatal_messages == [
+        "worker.fatal error_type=WorkerInvariantError "
+        "detail=fatal job outcome=runtime_error "
+        "settlement_command=complete settlement_outcome=none"
+    ]
 
 
 async def test_external_run_cancellation_cleans_up_and_reraises() -> None:

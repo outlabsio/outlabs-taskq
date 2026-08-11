@@ -731,7 +731,19 @@ class WorkerService:
             self._fail_service(exc)
             return
         if report.fatal:
-            self._fail_service(WorkerInvariantError(f"fatal job outcome: {report.outcome.value}"))
+            settlement_outcome = (
+                report.settlement_outcome.value
+                if report.settlement_outcome is not None
+                else "none"
+            )
+            self._fail_service(
+                WorkerInvariantError(
+                    "fatal job "
+                    f"outcome={report.outcome.value} "
+                    f"settlement_command={report.settlement_command or 'none'} "
+                    f"settlement_outcome={settlement_outcome}"
+                )
+            )
         elif report.outcome is JobRunOutcome.UNSUPPORTED_CONTINUATION_POLICY:
             logger.error(
                 "worker.unsupported_continuation_policy",
@@ -742,13 +754,22 @@ class WorkerService:
             self._ensure_stop_task()
 
     def _fail_service(self, error: BaseException) -> None:
-        if self._fatal_error is None:
+        first_fatal = self._fatal_error is None
+        if first_fatal:
             self._fatal_error = error
         self._state = WorkerServiceState.FAILED
-        logger.error(
-            "worker.fatal",
-            extra={"worker_id": self.worker_id, "error_type": type(error).__name__},
-        )
+        if first_fatal:
+            error_type = type(error).__name__
+            if isinstance(error, TaskqError):
+                message = f"worker.fatal error_type={error_type} error_code={error.code.value}"
+            elif isinstance(error, WorkerInvariantError):
+                message = f"worker.fatal error_type={error_type} detail={error}"
+            else:
+                message = f"worker.fatal error_type={error_type}"
+            logger.error(
+                message,
+                extra={"worker_id": self.worker_id, "error_type": error_type},
+            )
         self._stop_requested.set()
         self._nudge.nudge()
         self._ensure_stop_task()
