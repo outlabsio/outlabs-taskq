@@ -141,12 +141,18 @@ def _latency_summary(seconds: Sequence[float]) -> dict[str, float]:
 
 
 def _git_sha() -> str:
-    result = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        # Installed wheels commonly run in slim images with neither a Git
+        # executable nor a checkout. Provenance remains explicitly unknown;
+        # benchmark/loadlab evidence must still run and carry package version.
+        return "unknown"
     return result.stdout.strip() if result.returncode == 0 else "unknown"
 
 
