@@ -702,7 +702,7 @@ wheels = [
 
 [[package]]
 name = "outlabs-taskq"
-version = "0.1.0a32"
+version = "0.1.0a33"
 source = { editable = "." }
 dependencies = [
     { name = "asyncpg" },
