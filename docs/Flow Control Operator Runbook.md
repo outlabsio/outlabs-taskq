@@ -1,5 +1,10 @@
 # TaskQ Flow Control — Operator Runbook
 
+This runbook assumes the consumer has already passed
+[Consumer Rollout Safety](Consumer%20Rollout%20Safety.md). Flow-control changes
+do not substitute for package, database-contract, authorization, or runtime
+artifact attestation.
+
 How to operate the flow-control plane (SQL contracts 0.4.0–0.6.6): circuit breaker,
 rate limits, in-flight caps, slow-start ramps, job TTL, redrive/schedule smear, and
 priority aging. This is the *operational* companion to the design specs
