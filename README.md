@@ -13,6 +13,7 @@ Start here:
 | Doc | What it is |
 |---|---|
 | [`docs/CLI.md`](docs/CLI.md) | Operator/agent CLI contract, contexts, output, safety, and command catalog |
+| [`docs/Consumer Rollout Safety.md`](docs/Consumer%20Rollout%20Safety.md) | **Mandatory consumer gate** — package, DB contract, authorization, immutable artifact, queue ownership, admission, and restart safety |
 | [`docs/CLI-MIGRATION.md`](docs/CLI-MIGRATION.md) | Intentional alpha grammar migration; there are no compatibility aliases |
 | [`docs/adr/`](docs/adr/README.md) | Accepted reusable architecture decisions |
 | [`docs/Task Queue 0.1 Function Manifest.md`](docs/Task%20Queue%200.1%20Function%20Manifest.md) | **Canonical 0.1 SQL surface** — migration 0001 derives from this |

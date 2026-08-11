@@ -1,5 +1,8 @@
 # Operator CLI Access — Direct SQL vs a Mounted Facade
 
+For package/schema upgrades and consumer deployment ordering, first apply
+[Consumer Rollout Safety](Consumer%20Rollout%20Safety.md).
+
 The packaged `taskq` CLI is a complete operator and read surface, but it speaks
 **one specific wire contract per transport**. A consumer that exposes TaskQ over
 its own HTTP routes instead of the packaged facade will find the CLI cannot talk
