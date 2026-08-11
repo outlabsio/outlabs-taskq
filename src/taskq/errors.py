@@ -37,9 +37,7 @@ class TaskqError(Exception):
         self.details = _safe_details(details)
         self.cause = cause
         self.retryable = TQ_ERROR_REGISTRY[self.code].retryable
-        normalized_retry_after = (
-            None if retry_after_seconds is None else float(retry_after_seconds)
-        )
+        normalized_retry_after = None if retry_after_seconds is None else float(retry_after_seconds)
         self.retry_after_seconds = (
             normalized_retry_after
             if normalized_retry_after is not None

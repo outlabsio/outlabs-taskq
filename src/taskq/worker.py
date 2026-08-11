@@ -1742,10 +1742,7 @@ class WorkerSupervisor:
             delay = max(retry_after, self._rng.uniform(0.0, upper))
             if backpressure and attempt >= self.options.settle_max_attempts:
                 delay = max(delay, min(self.options.settle_backoff_base, upper))
-            if (
-                backpressure
-                and elapsed + delay > self.options.settle_backpressure_max_elapsed
-            ):
+            if backpressure and elapsed + delay > self.options.settle_backpressure_max_elapsed:
                 break
             if await self._settle_delay(delay, control):
                 return self._ownership_lost_report(job_id, control)

@@ -280,8 +280,10 @@ async def test_backpressure_retries_beyond_attempt_limit_and_honors_retry_after(
     await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 2)
     clock.advance(10)
     await _spin_until(
-        lambda: len([call for call in transport.calls if call.command == "complete"]) == 2
-        and clock.sleeping >= 2
+        lambda: (
+            len([call for call in transport.calls if call.command == "complete"]) == 2
+            and clock.sleeping >= 2
+        )
     )
     clock.advance(10)
     report = await running
@@ -338,10 +340,10 @@ async def test_concurrent_backpressured_settlements_recover_without_worker_fatal
     expected_complete_calls = 5
     for _ in range(5):
         await _spin_until(
-            lambda: len(
-                [call for call in transport.calls if call.command == "complete"]
+            lambda: (
+                len([call for call in transport.calls if call.command == "complete"])
+                == expected_complete_calls
             )
-            == expected_complete_calls
         )
         for _ in range(5):
             await asyncio.sleep(0)
