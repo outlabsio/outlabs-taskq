@@ -732,9 +732,7 @@ class WorkerService:
             return
         if report.fatal:
             settlement_outcome = (
-                report.settlement_outcome.value
-                if report.settlement_outcome is not None
-                else "none"
+                report.settlement_outcome.value if report.settlement_outcome is not None else "none"
             )
             self._fail_service(
                 WorkerInvariantError(

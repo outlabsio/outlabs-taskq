@@ -244,7 +244,9 @@ async def test_fatal_job_report_auto_stops_service(
     assert service.snapshot().fatal
     assert not service.ready
     fatal_messages = [
-        record.getMessage() for record in caplog.records if record.message.startswith("worker.fatal")
+        record.getMessage()
+        for record in caplog.records
+        if record.message.startswith("worker.fatal")
     ]
     assert fatal_messages == [
         "worker.fatal error_type=WorkerInvariantError "
