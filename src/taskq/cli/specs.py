@@ -64,7 +64,12 @@ COMMAND_SPECS = {
             mutates=True,
             destructive=True,
         ),
-        _s("db.verify", "Verify exact TaskQ catalog and migration drift", _SQL),
+        _s(
+            "db.verify",
+            "Verify exact TaskQ catalog and migration drift",
+            _SQL,
+            role="taskq_owner",
+        ),
         _s("target.show", "Show the safe target fingerprint", _BOTH, role="taskq_observer"),
         _s(
             "target.bind",

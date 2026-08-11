@@ -38,8 +38,8 @@ client for the packaged facade.
 For operators and boxes that can reach the queue database — which every worker
 host already can — **direct SQL is the simplest and most robust operator
 transport.** It needs no HTTP surface, no authorizer wiring, and no
-facade/CLI version alignment, and it exposes the full operator/read surface:
-`db verify`, `target show`, `scheduler doctor`, `job list`, `queue health`,
+facade/CLI version alignment, and it exposes the full runtime operator/read surface:
+`target show`, `scheduler doctor`, `job list`, `queue health`,
 `queue list`, pause/resume, redrive, reprioritize, and the rest.
 
 Contexts never store secrets — only the **name** of the environment variable
@@ -62,7 +62,6 @@ actor = "operator:<your-name>"          # required for SQL mutations
 # The DSN stays out of shell history / process args — supplied via the env var.
 export TASKQ_DIVERSE_DSN='postgresql://taskq_operator:…@host:5432/diverse'
 
-taskq --context diverse-prod db verify -o json
 taskq --context diverse-prod target show -o json
 taskq --context diverse-prod scheduler doctor -o json
 taskq --context diverse-prod job list <queue> --view running -o json
@@ -70,6 +69,9 @@ taskq --context diverse-prod queue health -o json
 ```
 
 Notes:
+- `db plan`, `db migrate`, and `db verify` inspect the private migration ledger and exact catalog.
+  Run all three through a separate, short-lived owner/migration context during a serialized release;
+  never point them at an operator, observer, scheduler, or housekeeper DSN.
 - Read/diagnostic commands only need the `taskq_observer` role. Operator
   mutations (pause/resume, redrive, reprioritize) need `taskq_operator` and an
   `--actor`. Never hand an operator the owner/migration credential.
