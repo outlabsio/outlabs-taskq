@@ -11,7 +11,12 @@ from uuid import uuid4
 import httpx
 import pytest
 
-from taskq.errors import TaskqCapabilityError, TaskqConfigError, TaskqUnavailableError
+from taskq.errors import (
+    TaskqBackpressureError,
+    TaskqCapabilityError,
+    TaskqConfigError,
+    TaskqUnavailableError,
+)
 from taskq.http import AsyncTaskqHttpClient, TaskqHttpClient
 from taskq.protocol import (
     AdmissionReservedResult,
@@ -53,14 +58,18 @@ def _error(
     *,
     status: int,
     retryable: bool = False,
+    retry_after: str | None = None,
 ) -> httpx.Response:
     request_id = request.headers["Taskq-Request-Id"]
+    headers = {
+        "Taskq-Protocol-Version": "1",
+        "Taskq-Request-Id": request_id,
+    }
+    if retry_after is not None:
+        headers["Retry-After"] = retry_after
     return httpx.Response(
         status,
-        headers={
-            "Taskq-Protocol-Version": "1",
-            "Taskq-Request-Id": request_id,
-        },
+        headers=headers,
         json={
             "protocol_version": 1,
             "request_id": request_id,
@@ -335,6 +344,27 @@ async def test_unkeyed_enqueue_and_settlement_are_never_inner_retried() -> None:
     assert getattr(enqueue_error.value, "code", None) == "TQ503"
     assert getattr(settle_error.value, "code", None) == "TQ503"
     assert counts == {"enqueue": 1, "complete": 1}
+
+
+async def test_settlement_backpressure_preserves_bounded_retry_after_hint() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _error(
+            request,
+            "TQ429",
+            status=429,
+            retryable=True,
+            retry_after="7",
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://example.test", transport=httpx.MockTransport(handler)
+    ) as raw:
+        client = AsyncTaskqHttpClient(
+            "https://example.test", bearer_token="secret", client=raw, max_retries=0
+        )
+        with pytest.raises(TaskqBackpressureError) as caught:
+            await client.complete(uuid4(), uuid4(), "worker-1")
+    assert caught.value.retry_after_seconds == 7
 
 
 async def test_both_http_clients_serialize_the_exact_closed_followup_shape() -> None:

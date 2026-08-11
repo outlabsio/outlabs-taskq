@@ -83,6 +83,23 @@ wait for zero running leases, restart the lane, prove its identity, then resume.
 If emergency shutdown leaves leases behind, observe them through expiry and
 bound replay risk with idempotent, small members.
 
+### Worker credential request budget is a capacity contract
+
+Worker concurrency is not the same as authorization request rate. One logical
+job can consume a claim, one or more trusted-effect writes, settlement,
+heartbeats, and presence traffic. Multiple processes that copy the same API key
+share that key's rate-limit bucket even when their TaskQ worker IDs are unique.
+
+Before a multi-process ramp, measure requests per completed job at the accepted
+workload, include idle claims and heartbeat/presence overhead, and prove that the
+credential's configured per-minute budget covers the intended shard count plus
+a reviewed safety margin. Then deliberately provision either a suitably bounded
+fleet credential or distinct least-privilege process credentials. Do not raise a
+host limit to hide worker fatal behavior: TaskQ must recover safely from `TQ429`,
+and the consumer must still size and monitor its authorization budget. A clean
+staging gate includes deliberate 429 injection and sustained traffic below the
+accepted credential ceiling.
+
 ### Queue ownership is a separate release decision
 
 Everything runs concurrently only when separate queues have accepted worker
@@ -102,4 +119,3 @@ Keep these values outside terminal scrollback and exclude credentials:
 - scheduler singleton and worker identity/concurrency;
 - queue states before and after, workflow key/ID, terminal counts, committed
   side effects, and rollback artifact/command.
-
