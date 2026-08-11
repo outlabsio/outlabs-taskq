@@ -4,5 +4,5 @@ from taskq import __version__
 
 
 def test_version_is_prealpha() -> None:
-    assert __version__ == "0.1.0a32"
+    assert __version__ == "0.1.0a33"
     assert version("outlabs-taskq") == __version__
