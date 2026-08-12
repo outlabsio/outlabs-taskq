@@ -127,7 +127,7 @@ class CancellationReason(StrEnum):
 
 Reason precedence is `LEASE_LOST > OPERATOR > SHUTDOWN`; a later stronger signal replaces a weaker one and a weaker signal never masks a stronger one.
 
-`JobContext` exposes `job_id`, queue, canonical job type, payload model, initial/latest progress, attempt number, failure/max-attempt counts, headers, and the cancellation token. Its repr and serialization omit the attempt id. The fence remains privately accessible only to the supervisor.
+`JobContext` exposes `job_id`, queue, canonical job type, payload model, initial/latest progress, attempt number, failure/max-attempt counts, headers, and the cancellation token. Its repr and serialization omit the attempt id. The fence remains privately accessible only to the supervisor. `attempt_number` is the lifetime claim ordinal and is not reset by operator redrive; `failure_count` is the retry budget consumed before the current attempt and is reset by redrive. Consumers deciding whether a budget-consuming failure would exhaust the current generation use `failure_would_exhaust_retry_budget`, never `attempt_number >= max_attempts`. A non-retryable failure is terminal regardless of this helper, while release and snooze do not consume the failure budget.
 
 Context operations:
 

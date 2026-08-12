@@ -523,6 +523,74 @@ async def test_operator_transport_complete_surface(
     assert expired.matched == 1 and expired.reaped == 1 and expired.skipped == 0
 
 
+async def test_redrive_preserves_lifetime_attempts_and_resets_failure_budget(
+    pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    queue = "s2_redrive_budget"
+    worker = "redrive-worker"
+    await _queue(transports, queue)
+    created = await transports["producer"].enqueue(
+        EnqueueCommand(
+            queue=queue,
+            job_type="tests.redrive_budget",
+            payload={"value": 1},
+            max_attempts=3,
+            backoff_mode="fixed",
+            backoff_base=1,
+        )
+    )
+
+    for expected_attempt, expected_failures in ((1, 0), (2, 1), (3, 2)):
+        claimed = await transports["runner"].claim(queue, worker, job_id=created.job_id)
+        assert claimed.state is ClaimState.CLAIMED
+        job = claimed.jobs[0]
+        assert (job.attempt_number, job.failure_count, job.max_attempts) == (
+            expected_attempt,
+            expected_failures,
+            3,
+        )
+        settled = await transports["runner"].fail(
+            job.job_id,
+            job.attempt_id,
+            worker,
+            "synthetic failure",
+            retryable=True,
+            retry_after_seconds=0,
+        )
+        expected_result = (
+            SettleOutcome.DEAD if expected_attempt == 3 else SettleOutcome.RETRY_SCHEDULED
+        )
+        assert settled.result is expected_result
+
+    failed = await transports["observer"].get_job(created.job_id)
+    assert failed is not None
+    assert (failed.status.value, failed.attempt_count, failed.failure_count) == ("failed", 3, 3)
+    assert await transports["operator"].redrive(created.job_id, "s2-test") is True
+
+    reclaimed = await transports["runner"].claim(queue, worker, job_id=created.job_id)
+    assert reclaimed.state is ClaimState.CLAIMED
+    redriven = reclaimed.jobs[0]
+    assert (redriven.attempt_number, redriven.failure_count, redriven.max_attempts) == (4, 0, 3)
+
+    settled = await transports["runner"].fail(
+        redriven.job_id,
+        redriven.attempt_id,
+        worker,
+        "synthetic post-redrive failure",
+        retryable=True,
+        retry_after_seconds=0,
+    )
+    assert settled.result is SettleOutcome.RETRY_SCHEDULED
+    retried = await transports["observer"].get_job(created.job_id)
+    assert retried is not None
+    assert (retried.status.value, retried.attempt_count, retried.failure_count) == (
+        "queued",
+        4,
+        1,
+    )
+
+
 async def test_owned_and_borrowed_engine_close_semantics(sqlalchemy_dsn: str) -> None:
     borrowed_engine = create_async_engine(sqlalchemy_dsn)
     borrowed = SqlTaskqTransport(borrowed_engine)
