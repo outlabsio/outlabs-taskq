@@ -136,6 +136,36 @@ async def test_workflow_routes_are_absent_until_runtime_gate_and_openapi_is_exac
         await transport.aclose()
 
 
+async def test_http_create_workflow_oversized_params_returns_typed_422(
+    sqlalchemy_dsn: str,
+) -> None:
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport, workflow_enabled=True), authorizer=no_auth_for_tests()
+        )
+    )
+    client = httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test")
+    try:
+        response = await client.post(
+            "/taskq/v1/workflows",
+            json={
+                "workflow_key": f"oversized-{uuid4()}",
+                "kind": "batch",
+                "params": {"blob": "x" * 65600},
+                "declared_queues": ["workflow_oversized"],
+            },
+            headers={"Authorization": "Bearer test-only"},
+        )
+        assert response.status_code == 422
+        body = response.json()
+        assert body["error"]["code"] == "TQ422"
+        assert "x" * 64 not in response.text
+    finally:
+        await client.aclose()
+        await transport.aclose()
+
+
 async def test_http_workflow_replay_dependency_promotion_and_raw_state(
     pg: asyncpg.Connection,
     operator: asyncpg.Connection,

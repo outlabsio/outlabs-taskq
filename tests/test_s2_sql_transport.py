@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import json
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
@@ -13,7 +14,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, create_async_engine
 
-from taskq import TaskqCapabilityError, TaskqInternalError, TaskqTransport
+from taskq import TaskqCapabilityError, TaskqInternalError, TaskqTransport, TaskqValidationError
 from taskq.protocol import (
     COMMAND_SPECS,
     ENQUEUE_RESULT_ADAPTER,
@@ -27,6 +28,7 @@ from taskq.protocol import (
     ScheduleDefinition,
     SettleOutcome,
     WorkflowKind,
+    _json_size,
 )
 from taskq.sql.manifest import (
     FUNCTIONS,
@@ -589,6 +591,74 @@ async def test_redrive_preserves_lifetime_attempts_and_resets_failure_budget(
         4,
         1,
     )
+
+
+async def test_create_workflow_oversized_params_preflight_covers_both_overloads(
+    pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    sentinel = f"sentinel-{uuid4()}"
+    params = {"property_ids": [sentinel] + ["x" * 64] * 1100}
+    assert _json_size(params) > 65536
+    for continuation in ({}, {"member_limit": 10}):
+        with pytest.raises(TaskqValidationError) as excinfo:
+            await transports["producer"].create_workflow(
+                f"oversized-{uuid4()}",
+                "batch",
+                params=params,
+                declared_queues=["s2_wf_never_created"],
+                actor="s2-test",
+                **continuation,
+            )
+        error = excinfo.value
+        assert error.details == {
+            "field": "params",
+            "actual_bytes": _json_size(params),
+            "max_bytes": 65536,
+        }
+        assert error.retryable is False
+        assert sentinel not in f"{error!r}{error.details!r}{error}"
+
+
+async def test_create_workflow_translates_live_sql_validation_rejection(
+    pg: object, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    queue = "s2_wf_translate"
+    await _queue(transports, queue)
+    with pytest.raises(TaskqValidationError) as excinfo:
+        await transports["producer"].create_workflow(
+            f"dup-queues-{uuid4()}",
+            "batch",
+            params={"small": True},
+            declared_queues=[queue, queue],
+            actor="s2-test",
+        )
+    error = excinfo.value
+    assert "actual_bytes" not in error.details
+    assert error.retryable is False
+
+
+async def test_create_workflow_oversized_params_rejected_by_sql_in_both_overloads(
+    pg: asyncpg.Connection, transports: dict[str, SqlTaskqTransport]
+) -> None:
+    queue = "s2_wf_sql_fence"
+    await _queue(transports, queue)
+    oversized = json.dumps({"blob": "x" * 65600})
+    statements = (
+        (
+            "SELECT * FROM taskq.create_workflow($1,'batch',$2::jsonb,ARRAY[$3],'s2-test')",
+            (f"sql-fence-{uuid4()}", oversized, queue),
+        ),
+        (
+            "SELECT * FROM taskq.create_workflow($1,'batch',$2::jsonb,ARRAY[$3],'s2-test',10,$4)",
+            (f"sql-fence-{uuid4()}", oversized, queue, "ab" * 32),
+        ),
+    )
+    for statement, args in statements:
+        with pytest.raises(asyncpg.PostgresError) as excinfo:
+            await pg.fetchrow(statement, *args)
+        assert excinfo.value.sqlstate == "TQ422"
 
 
 async def test_owned_and_borrowed_engine_close_semantics(sqlalchemy_dsn: str) -> None:
