@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a34`** uses SQL contract **`0.6.6`** and Protocol revision **`1.0.17`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migrations `0022`–`0042` add the per-queue flow-control plane — counters and health, rate/cap/key limits, schedule smear, circuit breaker, priority aging, and an operator audit log — all off by default.
+**Status:** alpha — **`0.1.0a35`** uses SQL contract **`0.6.6`** and Protocol revision **`1.0.17`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migrations `0022`–`0042` add the per-queue flow-control plane — counters and health, rate/cap/key limits, schedule smear, circuit breaker, priority aging, and an operator audit log — all off by default.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -20,6 +20,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a35.md`](docs/RELEASE-0.1.0a35.md) | 0.1.0a35 deploy-safe availability posture — outages keep workers alive-unready, bare 5xx classified unavailable; package-only (contract 0.6.6) |
 | [`docs/RELEASE-0.1.0a34.md`](docs/RELEASE-0.1.0a34.md) | 0.1.0a34 consumer-safety fixes — redrive retry-budget helper, oversized workflow-params normalization; package-only (contract 0.6.6) |
 | [`docs/RELEASE-0.1.0a33.md`](docs/RELEASE-0.1.0a33.md) | 0.1.0a33 installed-harness provenance fallback — package-only, no schema change (contract 0.6.6) |
 | [`docs/RELEASE-0.1.0a32.md`](docs/RELEASE-0.1.0a32.md) | 0.1.0a32 lease-aware settlement backpressure recovery — package-only, no schema change (contract 0.6.6) |
@@ -42,7 +43,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a34
+pip install outlabs-taskq==0.1.0a35
 ```
 
 ## Credential handling
