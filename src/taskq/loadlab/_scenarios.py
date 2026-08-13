@@ -492,7 +492,9 @@ async def _l4_admission_vs_drain(ctx: ScenarioContext) -> dict[str, Any]:
 
 async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
     """Post-P1b posture: claim errors back off, one misclassification survives,
-    sustained corruption still fails closed within the bounded threshold."""
+    a sustained availability outage leaves the worker alive but unready and it
+    recovers when the dependency returns, while sustained corruption still
+    fails closed within the bounded threshold."""
 
     queue, task_name = "load_l5", "load.noop5"
     await ctx.ensure_queue(queue)
@@ -526,12 +528,10 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
         plan.mode = "retryable"
         mark = time.monotonic()
         nudges = ctx.scale.nudge_jobs
-        # Bound the retryable-error window's DURATION (~2.5s) regardless of nudge
-        # count. The worker survives the window only while its consecutive
-        # claim-error streak stays under claim_fatal_threshold (8); a
-        # nudges-proportional window (0.15s each) accumulates >=8 errors at
-        # small/full and trips fail-closed here, before Phase 3's sustained
-        # corruption — which is the phase that is supposed to fail it closed.
+        # Bound the retryable-error window's DURATION (~2.5s) regardless of
+        # nudge count so the backoff-cadence measurement stays comparable
+        # across scales. Availability errors no longer trip fail-closed at any
+        # streak; Phase 1b below proves the long-outage posture explicitly.
         gap = min(0.15, 2.5 / nudges)
         for index in range(nudges):
             await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-{index}", value=index)
@@ -542,11 +542,32 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
         plan.mode = "clean"
         await ctx.wait_settled(queue, nudges)
 
+        # Phase 1b — a sustained availability outage far past the bounded
+        # claim_fatal_threshold leaves the worker alive but unready (a rolling
+        # deployment must never become a process restart), and claims resume
+        # once the dependency returns.
+        plan.mode = "retryable"
+        outage_mark = time.monotonic()
+        await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-outage", value=99997)
+
+        async def _outage_streak_reached() -> bool:
+            return ctx.instruments.error_claims(since=outage_mark) >= 12
+
+        await wait_until(
+            _outage_streak_reached,
+            timeout=25.0,
+            message="sustained availability outage never accumulated a 12-error streak",
+        )
+        survived_outage = not worker.service.snapshot().fatal
+        plan.mode = "clean"
+        await ctx.wait_settled(queue, nudges + 1)
+        recovered_after_outage = not worker.service.snapshot().fatal
+
         # Phase 2 — a single misclassified non-retryable claim error is ridden
         # out through the same backoff instead of killing the worker.
         plan.arm_fatal()
         await ctx.enqueue_one(producer, queue, task_name, f"l5-{ctx.seed}-trigger2", value=99998)
-        await ctx.wait_settled(queue, nudges + 1)
+        await ctx.wait_settled(queue, nudges + 2)
         survived_single_fatal = not worker.service.snapshot().fatal
 
         # Phase 3 — sustained corruption-shaped errors still fail closed within
@@ -570,17 +591,17 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
             listen=True,
         )
         await recovered.service.start()
-        await ctx.wait_settled(queue, nudges + 2)
+        await ctx.wait_settled(queue, nudges + 3)
         attempts = await ctx.attempts_per_job(queue)
         backoff_active = 1 <= error_claims <= max(3, int(nudges * 0.6))
         checks = [
             _check(
                 "all_jobs_delivered",
-                await ctx.count_status(queue, ("succeeded",)) == nudges + 2,
+                await ctx.count_status(queue, ("succeeded",)) == nudges + 3,
             ),
             _check(
                 "no_duplicate_attempts",
-                attempts == {1: nudges + 2},
+                attempts == {1: nudges + 3},
                 **{"attempts": {str(k): v for k, v in attempts.items()}},
             ),
             _check(
@@ -590,6 +611,8 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
                 nudges=nudges,
             ),
             _check("survived_retryable_window", survived_window),
+            _check("sustained_outage_stays_alive_unready", survived_outage),
+            _check("outage_recovery_resumes_claims", recovered_after_outage),
             _check("survived_single_nonretryable", survived_single_fatal),
             _check("sustained_corruption_fails_closed", went_fatal),
         ]
@@ -602,9 +625,11 @@ async def _l5_claim_error_posture(ctx: ScenarioContext) -> dict[str, Any]:
             "invariant_checks": checks,
             "defect_observations": {
                 "claim_backoff_active": backoff_active,
+                "sustained_outage_stays_alive_unready": survived_outage,
+                "outage_recovery_resumes_claims": recovered_after_outage,
                 "single_nonretryable_survived": survived_single_fatal,
                 "sustained_corruption_fails_closed": went_fatal,
-                "expected_posture": "post-P1b",
+                "expected_posture": "post-P1b deploy-safe",
             },
         }
     finally:
