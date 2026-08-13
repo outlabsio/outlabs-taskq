@@ -275,6 +275,17 @@ def main() -> None:
         assert importlib.util.find_spec("outlabs_auth") is None
         import fastapi  # noqa: F401
         import taskq.http  # noqa: F401
+
+        try:
+            import taskq.http.outlabs  # noqa: F401
+        except ModuleNotFoundError as exc:
+            assert str(exc) == (
+                "taskq.http.outlabs requires the OutLabs extra: install 'outlabs-taskq[outlabs]'"
+            )
+        else:
+            raise AssertionError(
+                "http-only taskq.http.outlabs import must name the missing OutLabs extra"
+            )
     else:
         assert importlib.util.find_spec("fastapi") is not None
         assert importlib.util.find_spec("outlabs_auth") is not None
