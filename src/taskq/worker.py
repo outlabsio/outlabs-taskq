@@ -50,6 +50,7 @@ from taskq.protocol import (
     ClaimedJob,
     ClaimState,
     CommandName,
+    TqCode,
     SettleOutcome,
     SettleResult,
 )
@@ -203,6 +204,7 @@ class WorkerServiceOptions(BaseModel):
     claim_backoff_base: float = Field(default=0.25, gt=0)
     claim_backoff_cap: float = Field(default=30.0, gt=0, le=3600)
     claim_fatal_threshold: int = Field(default=8, ge=1, le=100)
+    unavailable_fatal_threshold: int | None = Field(default=None, ge=1, le=1000)
     paused_poll_interval: float = Field(default=5.0, ge=0.1, le=3600)
     nudge_quiet_base: float = Field(default=0.05, gt=0, le=10)
     nudge_quiet_cap: float = Field(default=2.0, gt=0, le=60)
@@ -681,18 +683,31 @@ class WorkerService:
             self._batch_target = max(1, self._batch_target // 2)
 
     def _note_claim_error(self, queue: str, error: TaskqError) -> None:
-        """Bounded-retry-then-fatal for EVERY claim-path error class.
+        """Bounded-retry-then-fatal for every non-availability claim error.
 
         Contention is exactly where error classification is least reliable, so
         no TaskqError is instantly fatal here: each backs the queue off with
-        jittered exponential delay, and only a persistent consecutive streak
-        fails the service closed (loudly). Truly unexpected non-taskq
-        exceptions and invariant claim states remain instantly fatal.
+        jittered exponential delay, and a persistent consecutive streak fails
+        the service closed (loudly). Availability-shaped errors (TQ503) are
+        the exception: a rolling API deployment or dependency outage must
+        leave the worker alive but unready - claiming nothing, backing off at
+        the capped cadence - for as long as the outage lasts, because a
+        process exit turns a transient deploy window into a restart loop or a
+        dead fleet replica. Set ``unavailable_fatal_threshold`` to restore a
+        bounded-then-fatal posture for availability errors. Truly unexpected
+        non-taskq exceptions and invariant claim states remain instantly
+        fatal.
         """
 
         streak = self._claim_error_streaks.get(queue, 0) + 1
         self._claim_error_streaks[queue] = streak
-        if streak >= self.options.claim_fatal_threshold:
+        availability = error.code is TqCode.UNAVAILABLE
+        threshold = (
+            self.options.unavailable_fatal_threshold
+            if availability
+            else self.options.claim_fatal_threshold
+        )
+        if threshold is not None and streak >= threshold:
             logger.error(
                 "claim.failing",
                 extra={
@@ -704,8 +719,20 @@ class WorkerService:
             )
             self._fail_service(error)
             return
+        if availability and streak == self.options.claim_fatal_threshold:
+            # The point the bounded posture would have died: escalate once so a
+            # persisting outage is loud while the worker stays alive-but-unready.
+            logger.error(
+                "claim.outage_persisting",
+                extra={
+                    "worker_id": self.worker_id,
+                    "queue": queue,
+                    "error_code": error.code.value,
+                    "consecutive_errors": streak,
+                },
+            )
         delay = min(
-            self.options.claim_backoff_base * (2 ** (streak - 1)),
+            self.options.claim_backoff_base * (2 ** min(streak - 1, 20)),
             self.options.claim_backoff_cap,
         )
         delay *= 0.5 + self._rng.random()

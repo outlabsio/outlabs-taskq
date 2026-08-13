@@ -277,6 +277,16 @@ def _decode_envelope(
     sent_request_id: str,
 ) -> tuple[str, dict[str, Any], str]:
     if response.headers.get("Taskq-Protocol-Version") != str(PROTOCOL_MAJOR):
+        if response.status_code in (502, 503, 504):
+            # An intermediary answered during a deploy or outage window; the
+            # service behind it never spoke. Availability, not protocol drift.
+            raise TaskqUnavailableError(
+                details={
+                    "reason": "upstream_unavailable",
+                    "status": response.status_code,
+                },
+                retry_after_seconds=_retry_after_seconds(response) or None,
+            )
         raise TaskqInternalError(details={"reason": "missing_or_invalid_protocol_header"})
     try:
         raw = response.json()
