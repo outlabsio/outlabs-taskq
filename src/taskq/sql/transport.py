@@ -79,6 +79,7 @@ from taskq.protocol import (
     WorkflowPage,
     WorkflowResult,
     WorkerPresencePage,
+    _json_size,
 )
 from taskq.continuations import (
     ContinuationClaimWireOptions,
@@ -178,6 +179,9 @@ def _json(value: Any) -> Any:
     if isinstance(value, str):
         return json.loads(value)
     return value
+
+
+_WORKFLOW_PARAMS_MAX_BYTES = 65536
 
 
 def _json_param(value: Any) -> str | None:
@@ -520,6 +524,18 @@ class SqlTaskqTransport:
         continuation_policy_hash: str | None = None,
         connection: AsyncConnection | None = None,
     ) -> WorkflowResult:
+        params_bytes = _json_size(params or {})
+        if params_bytes > _WORKFLOW_PARAMS_MAX_BYTES:
+            # Mirror the wire-model params bound so direct-SQL producers fail with
+            # typed byte diagnostics before SQL; the octet_length fence inside
+            # taskq.create_workflow stays authoritative for serialization skew.
+            raise TaskqValidationError(
+                details={
+                    "field": "params",
+                    "actual_bytes": params_bytes,
+                    "max_bytes": _WORKFLOW_PARAMS_MAX_BYTES,
+                }
+            )
         continuation = (
             None
             if member_limit is None and continuation_policy_hash is None
