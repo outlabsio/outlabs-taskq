@@ -205,6 +205,12 @@ class JobContext:
         )
 
     @property
+    def failure_would_exhaust_retry_budget(self) -> bool:
+        """Whether one additional budget-consuming failure exhausts this generation."""
+
+        return self.failure_count + 1 >= self.max_attempts
+
+    @property
     def progress(self) -> dict[str, Any] | None:
         with self._checkpoint_lock:
             return deepcopy(self._progress)

@@ -102,7 +102,9 @@ async def test_direct_context_run_sync_checks_cancellation_around_blocking_work(
     assert exc_info.value.reason is CancellationReason.OPERATOR
 
 
-def _context() -> JobContext:
+def _context(
+    *, attempt_number: int = 1, failure_count: int = 0, max_attempts: int = 5
+) -> JobContext:
     return JobContext(
         job_id=uuid4(),
         queue="worker",
@@ -110,10 +112,19 @@ def _context() -> JobContext:
         payload=Input(value=2),
         headers={"trace": "private"},
         progress={"cursor": 0},
-        attempt_number=1,
-        failure_count=0,
-        max_attempts=5,
+        attempt_number=attempt_number,
+        failure_count=failure_count,
+        max_attempts=max_attempts,
     )
+
+
+def test_context_retry_budget_terminality_uses_failures_not_lifetime_attempts() -> None:
+    redriven = _context(attempt_number=4, failure_count=0, max_attempts=3)
+    assert redriven.attempt_number >= redriven.max_attempts
+    assert redriven.failure_would_exhaust_retry_budget is False
+
+    final_budgeted_attempt = _context(attempt_number=6, failure_count=2, max_attempts=3)
+    assert final_budgeted_attempt.failure_would_exhaust_retry_budget is True
 
 
 async def test_context_checkpoint_generation_never_discards_a_newer_value() -> None:
