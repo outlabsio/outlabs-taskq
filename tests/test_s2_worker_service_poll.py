@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -107,6 +108,34 @@ class ScriptedNotifications:
     async def aclose(self) -> None:
         self.closed = True
         self._disconnected.set()
+
+
+class FlakyNotifications(ScriptedNotifications):
+    """Notification source whose first `failures` connects fail (None: all)."""
+
+    def __init__(self, *, failures: int | None) -> None:
+        super().__init__()
+        self._remaining_failures = failures
+
+    async def connect(self, channels: Sequence[str], nudge: Callable[[], None]) -> None:
+        if self._remaining_failures is None or self._remaining_failures > 0:
+            if self._remaining_failures is not None:
+                self._remaining_failures -= 1
+            self.connect_count += 1
+            raise OSError("connection refused")
+        await super().connect(channels, nudge)
+
+
+async def _advance_until(
+    clock: ManualClock, predicate: Callable[[], bool], *, step: float, turns: int = 200
+) -> None:
+    for _ in range(turns):
+        if predicate():
+            return
+        clock.advance(step)
+        for _ in range(5):
+            await asyncio.sleep(0)
+    assert predicate()
 
 
 @pytest.mark.parametrize(
@@ -290,6 +319,84 @@ async def test_hot_queue_rotates_before_claiming_again() -> None:
     claim_queues = [call.arguments["queue"] for call in transport.calls if call.command == "claim"]
     assert claim_queues == ["alpha", "beta"]
     release.set()
+    await service.aclose()
+
+
+async def test_initial_ready_transition_stays_info(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    service = WorkerService(
+        ScriptedTransport(),  # type: ignore[arg-type]
+        _registry("alpha"),
+        "worker-1",
+        options=WorkerServiceOptions(queues=("alpha",), listen=False),
+        clock=ManualClock(),
+    )
+    with caplog.at_level(logging.INFO, logger="taskq.worker"):
+        await service.start()
+    assert service.ready
+    ready_levels = [record.levelno for record in caplog.records if record.message == "worker.ready"]
+    assert ready_levels == [logging.INFO]
+    await service.aclose()
+
+
+async def test_startup_listener_failure_and_recovery_are_visible_at_warning(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = ManualClock()
+    notifications = FlakyNotifications(failures=1)
+    service = WorkerService(
+        ScriptedTransport(),  # type: ignore[arg-type]
+        _registry("alpha"),
+        "worker-1",
+        options=WorkerServiceOptions(queues=("alpha",)),
+        notifications=notifications,
+        clock=clock,
+    )
+    with caplog.at_level(logging.WARNING, logger="taskq.worker"):
+        await service.start()
+        assert service.state is WorkerServiceState.DEGRADED
+        await _advance_until(clock, lambda: service.ready, step=0.25)
+    assert notifications.connect_count == 2
+    warnings = [record for record in caplog.records if record.levelno == logging.WARNING]
+    messages = [record.message for record in warnings]
+    assert "worker.degraded" in messages
+    assert "worker.ready" in messages
+    error = next(record for record in warnings if record.message == "listener.error")
+    assert error.error == "OSError: connection refused"
+    assert error.suppressed_errors == 0
+    await service.aclose()
+
+
+async def test_listener_connect_errors_warn_throttled_to_backoff_cap(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = ManualClock()
+    notifications = FlakyNotifications(failures=None)
+    service = WorkerService(
+        ScriptedTransport(),  # type: ignore[arg-type]
+        _registry("alpha"),
+        "worker-1",
+        options=WorkerServiceOptions(
+            queues=("alpha",), listener_backoff_base=0.25, listener_backoff_cap=60
+        ),
+        notifications=notifications,
+        clock=clock,
+    )
+    with caplog.at_level(logging.WARNING, logger="taskq.worker"):
+        await service.start()
+        assert notifications.connect_count == 1
+        await _advance_until(clock, lambda: notifications.connect_count >= 3, step=0.25)
+        errors = [record for record in caplog.records if record.message == "listener.error"]
+        assert len(errors) == 1  # repeats inside the cap window are suppressed
+        clock.advance(60)
+        logged = notifications.connect_count
+        await _advance_until(clock, lambda: notifications.connect_count > logged, step=0.25)
+    errors = [record for record in caplog.records if record.message == "listener.error"]
+    assert len(errors) == 2
+    assert errors[0].suppressed_errors == 0
+    assert errors[1].suppressed_errors == notifications.connect_count - 2
+    assert service.state is WorkerServiceState.DEGRADED
     await service.aclose()
 
 

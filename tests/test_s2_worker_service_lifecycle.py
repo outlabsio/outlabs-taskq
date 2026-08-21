@@ -61,7 +61,9 @@ async def test_initial_remote_shutdown_never_claims() -> None:
     assert [call.command for call in transport.calls] == ["worker_heartbeat"]
 
 
-async def test_presence_failure_degrades_then_success_recovers() -> None:
+async def test_presence_failure_degrades_then_success_recovers(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     clock = ManualClock()
     transport = ScriptedTransport()
     transport.script("worker_heartbeat", TaskqUnavailableError(), False)
@@ -74,15 +76,23 @@ async def test_presence_failure_degrades_then_success_recovers() -> None:
         ),
         clock=clock,
     )
-    await service.start()
-    assert service.state is WorkerServiceState.DEGRADED
-    await _spin_until(lambda: clock.sleeping >= 2)
-    clock.advance(5)
-    await _spin_until(
-        lambda: [call.command for call in transport.calls].count("worker_heartbeat") == 2
-    )
+    with caplog.at_level(logging.WARNING, logger="taskq.worker"):
+        await service.start()
+        assert service.state is WorkerServiceState.DEGRADED
+        await _spin_until(lambda: clock.sleeping >= 2)
+        clock.advance(5)
+        await _spin_until(
+            lambda: [call.command for call in transport.calls].count("worker_heartbeat") == 2
+        )
     assert service.ready
     assert service.snapshot().presence_failures == 1
+    # The recovery edge is as loud as the degrade it clears: both must show
+    # under default WARNING-level logging.
+    warning_messages = [
+        record.message for record in caplog.records if record.levelno == logging.WARNING
+    ]
+    assert "worker.degraded" in warning_messages
+    assert "worker.ready" in warning_messages
     await service.aclose()
 
 

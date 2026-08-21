@@ -362,6 +362,8 @@ class WorkerService:
         self._claimed_jobs = 0
         self._submitted_jobs = 0
         self._listener_reconnects = 0
+        self._listener_error_logged_at: float | None = None
+        self._listener_errors_suppressed = 0
         self._presence_failures = 0
         self._fatal_error: BaseException | None = None
         self._queue_index = 0
@@ -538,8 +540,9 @@ class WorkerService:
                 await self.notifications.wait_disconnected()
             except asyncio.CancelledError:
                 raise
-            except Exception:
+            except Exception as exc:
                 self._listener_attempted.set()
+                self._log_listener_error(exc)
             finally:
                 if self._listener_connected:
                     logger.warning("listener.disconnected", extra={"worker_id": self.worker_id})
@@ -549,6 +552,28 @@ class WorkerService:
                 break
             await self._sleep_or_stop(self._rng.uniform(0.0, backoff))
             backoff = min(backoff * 2, self.options.listener_backoff_cap)
+
+    def _log_listener_error(self, error: BaseException) -> None:
+        # Reconnect attempts start at sub-second delays, so a failing listener
+        # is throttled to one WARNING per backoff-cap window: diagnosable
+        # without flooding the log, and never silent.
+        now = self.clock.monotonic()
+        if (
+            self._listener_error_logged_at is not None
+            and now - self._listener_error_logged_at < self.options.listener_backoff_cap
+        ):
+            self._listener_errors_suppressed += 1
+            return
+        logger.warning(
+            "listener.error",
+            extra={
+                "worker_id": self.worker_id,
+                "error": _safe_handler_error(error),
+                "suppressed_errors": self._listener_errors_suppressed,
+            },
+        )
+        self._listener_error_logged_at = now
+        self._listener_errors_suppressed = 0
 
     async def _claim_loop(self) -> None:
         try:
@@ -957,8 +982,12 @@ class WorkerService:
         )
         self._state = WorkerServiceState.DEGRADED if degraded else WorkerServiceState.RUNNING
         if self._state is not old_state:
+            # Recovery out of DEGRADED pairs with the WARNING that opened it,
+            # so default WARNING-level logs show both edges; only the initial
+            # STARTING transition to RUNNING stays INFO.
+            recovered = old_state is WorkerServiceState.DEGRADED
             logger.log(
-                logging.WARNING if degraded else logging.INFO,
+                logging.WARNING if degraded or recovered else logging.INFO,
                 "worker.degraded" if degraded else "worker.ready",
                 extra={"worker_id": self.worker_id},
             )
