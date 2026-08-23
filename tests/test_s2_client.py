@@ -158,6 +158,57 @@ async def test_bulk_is_ordered_canonical_and_delegated_once() -> None:
     assert [item.max_attempts for item in items] == [1, 1]
 
 
+async def test_bulk_compiles_workflow_members_and_runtime_overrides() -> None:
+    task = _task(retry=RetryStrategy(max_attempts=7, mode="fixed", base_seconds=10))
+    transport = FakeTransport()
+    app = TaskQ(transport, registry=TaskRegistry([task]))  # type: ignore[arg-type]
+    workflow_id = uuid4()
+
+    await app.enqueue_many(
+        task,
+        [{"value": 1}, {"value": 2}],
+        idempotency_keys=["member-one", "member-two"],
+        workflow_id=workflow_id,
+        step_keys=["batch-000001", "batch-000002"],
+        priority=3,
+        max_attempts=2,
+        concurrency_key="provider:example",
+        headers={"source": "planner"},
+        ttl_seconds=3600,
+        flow_key="provider:example",
+    )
+
+    _, items = transport.bulk[0]
+    assert [item.workflow_id for item in items] == [workflow_id, workflow_id]
+    assert [item.step_key for item in items] == ["batch-000001", "batch-000002"]
+    assert [item.priority for item in items] == [3, 3]
+    assert [item.max_attempts for item in items] == [2, 2]
+    assert [item.concurrency_key for item in items] == ["provider:example"] * 2
+    assert [item.headers for item in items] == [{"source": "planner"}] * 2
+    assert [item.ttl_seconds for item in items] == [3600, 3600]
+    assert [item.flow_key for item in items] == ["provider:example"] * 2
+
+
+async def test_bulk_workflow_shape_fails_before_transport_delegation() -> None:
+    task = _task()
+    transport = FakeTransport()
+    app = TaskQ(transport, registry=TaskRegistry([task]))  # type: ignore[arg-type]
+
+    with pytest.raises(TaskqConfigError, match="requires step_keys"):
+        await app.enqueue_many(task, [{"value": 1}], workflow_id=uuid4())
+    with pytest.raises(TaskqConfigError, match="require workflow_id"):
+        await app.enqueue_many(task, [{"value": 1}], step_keys=["one"])
+    with pytest.raises(TaskqConfigError, match="match payload count"):
+        await app.enqueue_many(
+            task,
+            [{"value": 1}, {"value": 2}],
+            workflow_id=uuid4(),
+            step_keys=["one"],
+        )
+
+    assert transport.bulk == []
+
+
 async def test_raw_enqueue_is_explicitly_opted_out_of_registry_validation() -> None:
     transport = FakeTransport()
     guarded = TaskQ(transport)  # type: ignore[arg-type]

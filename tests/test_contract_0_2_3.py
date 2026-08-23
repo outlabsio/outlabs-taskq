@@ -249,7 +249,7 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
             report = await verify(conn)
             assert report.ok, report
             meta = (await conn.exec_driver_sql("SELECT * FROM taskq.get_contract_meta()")).one()
-            assert meta.contract_version == "0.6.6"
+            assert meta.contract_version == "0.6.7"
             assert meta.capabilities["active"] == [
                 "admission_reservations",
                 "circuit_breaker",
@@ -269,6 +269,7 @@ async def test_0011_backfills_counts_and_full_verify(taskq_dsn: str) -> None:
                 "schedules",
                 "target_attestation",
                 "worker_presence",
+                "workflow_bulk_admission",
                 "workflow_continuations",
             ]
     finally:

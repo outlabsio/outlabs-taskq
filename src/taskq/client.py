@@ -354,6 +354,17 @@ class TaskQ:
         scheduled_at: datetime | None = None,
         priority: int | None = None,
         lease_seconds: int | None = None,
+        concurrency_key: str | None = None,
+        affinity_key: str | None = None,
+        max_attempts: int | None = None,
+        backoff_mode: str | None = None,
+        backoff_base: int | None = None,
+        backoff_cap: int | None = None,
+        headers: Mapping[str, Any] | None = None,
+        workflow_id: UUID | None = None,
+        step_keys: Sequence[str] | None = None,
+        ttl_seconds: int | None = None,
+        flow_key: str | None = None,
         session: AsyncSession | None = None,
         connection: AsyncConnection | None = None,
     ) -> list[EnqueueResult]:
@@ -361,7 +372,24 @@ class TaskQ:
         keys = tuple(idempotency_keys) if idempotency_keys is not None else (None,) * len(payloads)
         if len(keys) != len(payloads):
             raise TaskqConfigError("idempotency_keys must match payload count")
+        if workflow_id is None:
+            if step_keys is not None:
+                raise TaskqConfigError("step_keys require workflow_id")
+            steps: tuple[str | None, ...] = (None,) * len(payloads)
+        else:
+            if step_keys is None:
+                raise TaskqConfigError("workflow_id requires step_keys")
+            steps = tuple(step_keys)
+            if len(steps) != len(payloads):
+                raise TaskqConfigError("step_keys must match payload count")
         retry = self._retry_fields(registered)
+        retry_overrides = {
+            "max_attempts": max_attempts,
+            "backoff_mode": backoff_mode,
+            "backoff_base": backoff_base,
+            "backoff_cap": backoff_cap,
+        }
+        retry.update({key: value for key, value in retry_overrides.items() if value is not None})
         items = ENQUEUE_MANY_ITEMS_ADAPTER.validate_python(
             [
                 {
@@ -373,6 +401,13 @@ class TaskQ:
                     "lease_seconds": (
                         lease_seconds if lease_seconds is not None else registered.lease_seconds
                     ),
+                    "concurrency_key": concurrency_key,
+                    "affinity_key": affinity_key,
+                    "headers": dict(headers) if headers is not None else None,
+                    "workflow_id": workflow_id,
+                    "step_key": steps[index],
+                    "ttl_seconds": ttl_seconds,
+                    "flow_key": flow_key,
                     **retry,
                 }
                 for index, payload in enumerate(payloads)
