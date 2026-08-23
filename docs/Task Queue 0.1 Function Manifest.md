@@ -230,7 +230,7 @@ END $$;
 | Function | Body | Raises | Tests |
 |---|---|---|---|
 | `taskq.enqueue(...)` (no `p_internal`) | spec §5.2 (v1.6) | TQ001, TQ422, TQ429, TQ500 | T2-ENQ, T3-DEDUP |
-| `taskq.enqueue_many(p_queue, p_jobs jsonb)` | below | TQ001, TQ422, TQ429, TQ500 | T2-BULK, T3-BULK, B2 |
+| `taskq.enqueue_many(p_queue, p_jobs jsonb)` | below + 0.6.7 amendment | TQ001, TQ409, TQ422, TQ429, TQ500 | T2-BULK, T3-BULK, B2 |
 | `taskq.reserve_admission(p_queue, p_idempotency_key, p_intent_hash, p_handle, p_reservation_ttl_seconds, p_receipt_ttl_seconds)` | §14 / Durable Admission Specification §4.1 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
 | `taskq.finish_admission(p_queue, p_idempotency_key, p_handle, p_job, p_receipt)` | §14 / Durable Admission Specification §4.2 | TQ001, TQ409, TQ422, TQ429, TQ500 | T2-ADM, T3-ADM-RACE |
 | `taskq.cancel_admission(p_queue, p_idempotency_key, p_handle)` | §14 / Durable Admission Specification §4.3 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
@@ -263,6 +263,15 @@ BEGIN
     RETURN;
 END $$;
 ```
+
+**SQL 0.6.7 amendment (migration 0043).** Bulk items may carry paired
+`workflow_id` and `step_key` values when every item targets the same planning
+workflow and queue. Workflow bulk remains dependency-free. Exact step replays
+resolve before sealed/depth checks; mismatched intent, mixed workflows,
+duplicate workflow keys, sealed membership, or lifetime-member overflow rolls
+back the whole call. Membership is reserved once and rows/events are inserted
+set-wise. Both single and bulk depth checks use `queue_counters` when active,
+retaining the historical probe only as a pre-counter compatibility fallback.
 
 ## 3. Runner functions — EXEC `taskq_runner`
 

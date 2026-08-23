@@ -21,7 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, field_validator, model_validator
 
 PROTOCOL_MAJOR: Final = 1
-PROTOCOL_DOCUMENT_REVISION: Final = "1.0.17"
+PROTOCOL_DOCUMENT_REVISION: Final = "1.0.18"
 T = TypeVar("T")
 
 
@@ -300,6 +300,30 @@ class EnqueueManyItem(BaseModel):
     backoff_base: int | None = None
     backoff_cap: int | None = None
     headers: dict[str, Any] | None = None
+    workflow_id: UUID | None = None
+    step_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$",
+    )
+    ttl_seconds: int | None = Field(default=None, ge=1, le=31536000)
+    flow_key: str | None = Field(default=None, min_length=1, max_length=120)
+
+    @model_validator(mode="after")
+    def _workflow_shape(self) -> EnqueueManyItem:
+        if (self.workflow_id is None) != (self.step_key is None):
+            raise ValueError("workflow_id and step_key must be supplied together")
+        if self.workflow_id is not None and self.workflow_id.int == 0:
+            raise ValueError("workflow_id must be non-nil")
+        return self
+
+    @field_validator("step_key")
+    @classmethod
+    def _step_key_bytes(cls, value: str | None) -> str | None:
+        if value is not None and len(value.encode("utf-8")) > 64:
+            raise ValueError("step_key exceeds 64 UTF-8 bytes")
+        return value
 
 
 ENQUEUE_MANY_ITEMS_ADAPTER: Final[TypeAdapter[list[EnqueueManyItem]]] = TypeAdapter(
@@ -1793,7 +1817,13 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.enqueue_many(text,jsonb)",
             _PRODUCER,
             tuple(item.value for item in EnqueueStatus),
-            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.BACKPRESSURE, TqCode.INTERNAL),
+            (
+                TqCode.NOT_FOUND,
+                TqCode.CONFLICT,
+                TqCode.VALIDATION,
+                TqCode.BACKPRESSURE,
+                TqCode.INTERNAL,
+            ),
         ),
         CommandName.CREATE_WORKFLOW: _spec(
             "taskq.create_workflow(text,text,jsonb,text[],text)",

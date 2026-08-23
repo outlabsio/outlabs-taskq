@@ -2,6 +2,13 @@
 
 > **Status:** Tier-3 implementation design — 2026-07-18. This document specifies S2-01..03 only. The Tier-0 Transport Protocol v1 and 0.1 Function Manifest, followed by accepted ADRs, win every conflict. Round-3 findings must be processed before runtime implementation; a contract question stops implementation and enters the docs-first process.
 
+> **0.6.7 amendment (2026-08-23):** `enqueue_many` accepts paired
+> `workflow_id` / `step_key` values for up to 1,000 dependency-free members of
+> one planning workflow and queue. The server validates all members, reserves
+> workflow lifetime capacity once, inserts set-wise, and returns ordered typed
+> outcomes. Dependencies remain single-enqueue only. Caller-owned transaction
+> semantics are unchanged.
+
 ## 1. Outcome and boundary
 
 Stage 2A makes the smallest useful Python path complete:

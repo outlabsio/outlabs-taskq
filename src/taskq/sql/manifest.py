@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.6.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.7.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.6.6"
+CONTRACT_VERSION = "0.6.7"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -657,7 +657,7 @@ PUBLIC_ERRORS = {
     "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)": frozenset(
         {"TQ001", "TQ409", "TQ422", "TQ501"}
     ),
-    "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ422", "TQ429", "TQ500"}),
+    "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}),
     "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
         {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
     ),
@@ -763,7 +763,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.6.6"',
+    "contract_version": '"0.6.7"',
     "capabilities": (
         '{"active": ["admission_reservations", "circuit_breaker", "dependencies_workflows", '
         '"flow_control", "followups", "operator_schedule_list", "queue_counters", '
@@ -771,7 +771,8 @@ META_SEEDS = {
         '"read_model_list_finished", "read_model_list_ready", '
         '"read_model_list_running", "read_model_workflow", '
         '"read_model_workflow_list", "scheduler_v2", "schedules", '
-        '"target_attestation", "worker_presence", "workflow_continuations"]}'
+        '"target_attestation", "worker_presence", "workflow_bulk_admission", '
+        '"workflow_continuations"]}'
     ),
 }
 SCHEDULE_SEED = {

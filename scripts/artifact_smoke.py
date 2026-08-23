@@ -48,8 +48,9 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.6.6"
+            == "0.6.7"
         )
+        assert await conn.fetchval("SELECT taskq.has_capability('workflow_bulk_admission')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('queue_counters')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('scheduler_v2')") is True
@@ -256,7 +257,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a36"
+    assert taskq.__version__ == "0.1.0a37"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -306,7 +307,7 @@ def main() -> None:
         "payload": {},
         "headers": {},
     }
-    assert PROTOCOL_DOCUMENT_REVISION == "1.0.17"
+    assert PROTOCOL_DOCUMENT_REVISION == "1.0.18"
 
     class ArtifactInput(BaseModel):
         value: int
@@ -473,6 +474,7 @@ def main() -> None:
         "0040_breaker_manual_window_reset",
         "0041_breaker_half_open_atomic",
         "0042_claim_order_index_restore",
+        "0043_workflow_bulk_admission",
     ]
     assert len(FUNCTIONS) == 114
 

@@ -68,6 +68,12 @@ Rates are tick-cadence (default ~5s window), computed from monotonic cumulative 
 
 `enqueue`/`enqueue_many`/workflow admission replace the `OFFSET`-existence probe with `queue_counters.blocked + queued >= max_depth` when the capability is active (falling back to the probe when not). Same advisory semantics, narrower race window, O(1). Behavior-compatible: TQ429 shape unchanged. (The replay-of-existing-key-at-cap finding from L4 is **not** fixed here — check ordering belongs to Wave 2b's enqueue verdict, S4 decision 3 territory.)
 
+**Conformance closure (SQL 0.6.7, migration 0043):** the counter tables and
+health reads shipped in 0.4.0, but the live `enqueue`/`enqueue_many` bodies
+retained the historical `OFFSET` probe. Migration 0043 closes that
+implementation drift and adds a real 10,000-member workflow-bulk performance
+gate. The fallback remains only for compatibility with a pre-counter schema.
+
 ## 3. Activation gates (migration 0023)
 
 0023 activates the `queue_counters` capability only after, on **both** PostgreSQL majors:
