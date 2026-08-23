@@ -108,6 +108,22 @@ then open upload/render/agent/property lanes independently. Package deployment
 must not silently place workers, resume queues, raise concurrency, or enable
 provider spend.
 
+A queue is an operational control boundary, not a table or job-type boundary.
+Unrelated controllers must not share a queue merely because their jobs touch
+the same application tables: pause, drain, flow limits, breakers, depth, and
+redrive are queue-wide. Conversely, related task types may share a queue when
+one owner deliberately controls their complete lifecycle. Apply the decision
+test and integration-test matrix in [Queue Boundary Design](Queue%20Boundary%20Design.md).
+
+Catalog reconciliation must preserve every existing queue's current open or
+paused state. It may create the new queue paused; it must not pause unrelated
+queues as a bootstrap side effect.
+
+Unattended workers belong on always-on hosts under an external service
+supervisor with restart policy. A laptop power assertion is not an availability
+strategy: it does not survive a closed lid, exhausted battery, process crash,
+logout, or reboot.
+
 ## Evidence packet
 
 Keep these values outside terminal scrollback and exclude credentials:
