@@ -358,6 +358,7 @@ async def test_followups_transition_only_at_0008(taskq_dsn: str) -> None:
                 "0041_breaker_half_open_atomic",
                 "0042_claim_order_index_restore",
                 "0043_workflow_bulk_admission",
+                "0044_continuation_flow_inheritance",
             ]
             report = await verify(conn)
             assert report.ok

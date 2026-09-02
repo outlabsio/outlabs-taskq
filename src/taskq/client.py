@@ -107,6 +107,8 @@ class TaskQ:
         workflow_id: UUID | None,
         step_key: str | None,
         depends_on: Sequence[UUID] | None,
+        ttl_seconds: int | None,
+        flow_key: str | None,
     ) -> EnqueueCommand:
         registered = self.registry.require(task)
         fields = self._retry_fields(registered)
@@ -137,6 +139,8 @@ class TaskQ:
             workflow_id=workflow_id,
             step_key=step_key,
             depends_on=tuple(depends_on) if depends_on is not None else None,
+            ttl_seconds=ttl_seconds,
+            flow_key=flow_key,
             **fields,
         )
 
@@ -176,6 +180,8 @@ class TaskQ:
         workflow_id: UUID | None = None,
         step_key: str | None = None,
         depends_on: Sequence[UUID] | None = None,
+        ttl_seconds: int | None = None,
+        flow_key: str | None = None,
         session: AsyncSession | None = None,
         connection: AsyncConnection | None = None,
     ) -> EnqueueResult:
@@ -196,6 +202,8 @@ class TaskQ:
             workflow_id=workflow_id,
             step_key=step_key,
             depends_on=depends_on,
+            ttl_seconds=ttl_seconds,
+            flow_key=flow_key,
         )
         supplied = self._supplied_sql_object(session, connection)
         if supplied is None:
