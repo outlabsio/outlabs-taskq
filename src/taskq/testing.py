@@ -1359,6 +1359,7 @@ class FakeTaskQClient:
                 max_attempts=followup.max_attempts,
                 lease_seconds=followup.lease_seconds,
                 headers=deepcopy(followup.headers),
+                flow_key=(job.command.flow_key if followup.workflow_member is True else None),
                 workflow_id=(job.command.workflow_id if followup.workflow_member is True else None),
                 # The public producer grammar deliberately excludes the
                 # engine-owned ``c:`` namespace.  Validate the public shape

@@ -99,6 +99,8 @@ async def test_typed_enqueue_compiles_canonical_metadata_once() -> None:
         idempotency_key="request-1",
         priority=9,
         headers={"trace": "safe"},
+        ttl_seconds=3600,
+        flow_key="provider:example",
     )
     assert isinstance(result, EnqueueCreatedResult)
     assert len(transport.commands) == 1
@@ -111,6 +113,8 @@ async def test_typed_enqueue_compiles_canonical_metadata_once() -> None:
     assert command.max_attempts == 7
     assert command.backoff_mode == "fixed"
     assert command.backoff_base == 10 and command.backoff_cap == 20
+    assert command.ttl_seconds == 3600
+    assert command.flow_key == "provider:example"
 
 
 @pytest.mark.parametrize(
