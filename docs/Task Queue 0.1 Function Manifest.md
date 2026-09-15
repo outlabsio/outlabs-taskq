@@ -5,6 +5,30 @@
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
 
+## Unreleased additive 0.6.9 terminal effect fence
+
+[ADR-038](adr/ADR-038-terminal-host-effect-fence.md) and migration
+`0045_terminal_effect_fence.sql` define the additional public SQL identity
+`taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)`, returning
+`TABLE(status text, outcome text, finished_at timestamptz, payload jsonb, workflow_id uuid)`.
+EXEC: `taskq_producer` only. Raises: `TQ422` for invalid parameters or target
+attestation mismatch. Missing/nonterminal/wrong queue/type returns no row.
+Caller-owned transaction holds the exact terminal job row lock until commit or
+rollback, serializing with operator redrive/retention. Headers, fences and raw
+errors are excluded; host tenant/generation/payload authorization stays host-owned.
+No HTTP command or new role/table grants. The machine manifest is updated to
+0.6.9; earlier sections below retain their historical version-specific scope.
+
+## Unreleased additive 0.6.10 queue admission owner
+
+[ADR-039](adr/ADR-039-queue-admission-owner.md) and migration
+`0046_queue_admission_owner.sql` add immutable database-role admission ownership
+for a queue. `taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)` is
+operator-only and one-shot; `taskq.get_queue_admission_owner(text)` is an
+observer read. Bound terminal jobs cannot be generically redriven, while
+unfinished retry transitions remain unchanged. No runner bypass, tenant/API-key
+identity, or HTTP command is added. The machine manifest is updated to 0.6.10.
+
 ## 0. Manifest conventions (apply to every entry)
 
 Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.

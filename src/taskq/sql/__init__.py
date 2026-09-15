@@ -57,8 +57,10 @@ from taskq.errors import TaskqConfigError
 from taskq.sql import manifest as _manifest
 from taskq.sql.effects import (
     ActiveEffectAttempt,
+    TerminalEffectJob,
     WorkflowEffectCounts,
     lock_active_effect_attempt,
+    lock_terminal_effect_job,
 )
 
 if TYPE_CHECKING:
@@ -80,6 +82,8 @@ __all__ = [
     "migrate",
     "migrate_sync",
     "lock_active_effect_attempt",
+    "lock_terminal_effect_job",
+    "TerminalEffectJob",
     "plan_pending",
     "split_sql_statements",
     "verify",

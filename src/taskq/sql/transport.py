@@ -1331,6 +1331,41 @@ class SqlTaskqTransport:
 
         return await self._run(operation)
 
+    async def get_queue_admission_owner(self, queue: str) -> dict[str, object] | None:
+        async def operation(conn: AsyncConnection) -> dict[str, object] | None:
+            result = await conn.execute(
+                text("SELECT * FROM taskq.get_queue_admission_owner(:queue)"), {"queue": queue}
+            )
+            row = result.mappings().first()
+            return dict(row) if row is not None else None
+
+        return await self._run(operation)
+
+    async def bind_queue_admission_owner(
+        self,
+        queue: str,
+        owner_role: str,
+        expected_environment: str,
+        expected_installation_id: UUID,
+        *,
+        allow_production: bool = False,
+    ) -> None:
+        async def operation(conn: AsyncConnection) -> None:
+            await conn.execute(
+                text(
+                    "SELECT taskq.bind_queue_admission_owner(:queue,:owner,:environment,:installation,:allow_production)"
+                ),
+                {
+                    "queue": queue,
+                    "owner": owner_role,
+                    "environment": expected_environment,
+                    "installation": expected_installation_id,
+                    "allow_production": allow_production,
+                },
+            )
+
+        await self._run(operation)
+
     async def get_scheduler_health(self) -> SchedulerHealth:
         async def operation(conn: AsyncConnection) -> SchedulerHealth:
             row = await self._one(conn, "SELECT * FROM taskq.get_scheduler_health()")
@@ -1443,7 +1478,7 @@ class SqlTaskqTransport:
                 return "missing", None, None
             return (
                 str(row["result"]),
-                (QueueProfile.model_validate(profile_row) if profile_row else None),
+                (QueueProfile.model_validate(dict(profile_row)) if profile_row else None),
                 int(row["current_version"]),
             )
 

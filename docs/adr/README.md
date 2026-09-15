@@ -26,4 +26,6 @@ superseded. Supersession happens by writing a new ADR, never by silently editing
 | [036](./ADR-036-trusted-effect-fence.md) | Trusted host-effect fence | SQL contract 0.2.6 |
 | [037](./ADR-037-standalone-scheduler-and-target-attestation.md) | Standalone scheduler and database-attested target identity | owner-approved scheduler build |
 
+Candidate implementations (not yet released): [ADR-038](./ADR-038-terminal-host-effect-fence.md), transaction-bound terminal host-effect fence, SQL contract 0.6.9; [ADR-039](./ADR-039-queue-admission-owner.md), immutable queue admission owner, SQL contract 0.6.10.
+
 Format: Status / Resolves / Context / Decision / Consequences. Supersession happens by writing a new ADR, never by editing an accepted one.

@@ -48,7 +48,7 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.6.8"
+            == "0.6.10"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_bulk_admission')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
@@ -257,7 +257,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a38"
+    assert taskq.__version__ == "0.1.0a39"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -476,8 +476,15 @@ def main() -> None:
         "0042_claim_order_index_restore",
         "0043_workflow_bulk_admission",
         "0044_continuation_flow_inheritance",
+        "0045_terminal_effect_fence",
+        "0046_queue_admission_owner",
     ]
-    assert len(FUNCTIONS) == 114
+    assert len(FUNCTIONS) == 119
+    assert {
+        "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)",
+        "taskq.get_queue_admission_owner(text)",
+        "taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)",
+    } <= set(FUNCTIONS)
 
     if args.mode != "core":
         return

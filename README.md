@@ -2,6 +2,14 @@
 
 Postgres-native durable task queue for Python services.
 
+**Unreleased source candidate (2026-09-10):** package `0.1.0a39`, additive SQL
+contracts 0.6.9/0.6.10 and migrations 0045/0046 add an installation-bound
+terminal host-effect row lock and immutable database-role queue admission owner.
+See [ADR-038](docs/adr/ADR-038-terminal-host-effect-fence.md) and
+[ADR-039](docs/adr/ADR-039-queue-admission-owner.md). Candidate artifact
+publication and downstream release pins remain pending; the released a38
+description below remains historical release truth.
+
 **Status:** alpha — **`0.1.0a38`** uses SQL contract **`0.6.8`** and Protocol revision **`1.0.18`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migration `0044` makes policy-bearing workflow continuations inherit their parent's provider flow key; migrations `0022`–`0043` provide the flow-control and workflow-safe admission plane.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.

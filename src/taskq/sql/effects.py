@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -101,7 +102,78 @@ async def lock_active_effect_attempt(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class TerminalEffectJob:
+    """Admitted terminal identity held under the caller's transaction row lock."""
+
+    status: str
+    outcome: str | None
+    finished_at: datetime
+    payload: dict[str, Any]
+    workflow_id: UUID | None
+
+
+async def lock_terminal_effect_job(
+    connection: AsyncConnection,
+    *,
+    job_id: UUID,
+    queue: str,
+    job_type: str,
+    expected_environment: str,
+    expected_installation_id: UUID,
+    allow_production: bool = False,
+) -> TerminalEffectJob | None:
+    """Fence a host reconciliation against redrive/retention, never commit for it.
+
+    A trusted producer must bind the returned admitted payload to its own tenant,
+    generation and domain checkpoint before writing. This is SQL-only: it does
+    not expose payloads to runners, observers or HTTP callers. The caller must
+    already own a transaction; release of that transaction releases the lock.
+    """
+    if not connection.in_transaction():
+        raise ValueError("terminal effect fence requires a caller-owned transaction")
+    try:
+        result = await connection.execute(
+            text(
+                "SELECT * FROM taskq.lock_terminal_effect_job("
+                ":job_id,:queue,:job_type,:expected_environment,:expected_installation_id,:allow_production)"
+            ),
+            {
+                "job_id": job_id,
+                "queue": queue,
+                "job_type": job_type,
+                "expected_environment": expected_environment,
+                "expected_installation_id": expected_installation_id,
+                "allow_production": allow_production,
+            },
+        )
+        row = result.mappings().first()
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        raise taskq_error_from_exception(exc) from exc
+    if row is None:
+        return None
+    if (
+        row["status"] not in {"succeeded", "failed", "cancelled"}
+        or not isinstance(row["finished_at"], datetime)
+        or not isinstance(row["payload"], Mapping)
+        or (row["outcome"] is not None and not isinstance(row["outcome"], str))
+        or (row["workflow_id"] is not None and not isinstance(row["workflow_id"], UUID))
+    ):
+        raise TaskqInternalError()
+    return TerminalEffectJob(
+        status=row["status"],
+        outcome=row["outcome"],
+        finished_at=row["finished_at"],
+        payload=dict(row["payload"]),
+        workflow_id=row["workflow_id"],
+    )
+
+
 __all__ = [
+    "TerminalEffectJob",
+    "lock_terminal_effect_job",
     "ActiveEffectAttempt",
     "WorkflowEffectCounts",
     "lock_active_effect_attempt",
