@@ -96,6 +96,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0044_continuation_flow_inheritance",
                 "0045_terminal_effect_fence",
                 "0046_queue_admission_owner",
+                "0047_queue_admission_owner_upgrade",
             ],
         ]
         async with engines[0].connect() as conn:
@@ -206,6 +207,7 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
                 "0044_continuation_flow_inheritance",
                 "0045_terminal_effect_fence",
                 "0046_queue_admission_owner",
+                "0047_queue_admission_owner_upgrade",
             ]
             report = await verify(conn)
             assert report.ok
@@ -219,7 +221,9 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
         await admin.close()
 
 
-def test_cli_migrate_and_verify_success(taskq_dsn: str, capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_migrate_and_verify_success(
+    taskq_dsn: str, migrated: None, capsys: pytest.CaptureFixture[str]
+) -> None:
     assert main(["db", "plan", "--dsn", taskq_dsn, "-o", "json"]) == 0
     plan = json.loads(capsys.readouterr().out)["data"]
     assert plan["changes"] is False
@@ -331,6 +335,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0044_continuation_flow_inheritance",
             "0045_terminal_effect_fence",
             "0046_queue_admission_owner",
+            "0047_queue_admission_owner_upgrade",
         ]
         assert (
             await asyncio.to_thread(
@@ -382,6 +387,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0044_continuation_flow_inheritance",
             "0045_terminal_effect_fence",
             "0046_queue_admission_owner",
+            "0047_queue_admission_owner_upgrade",
         ]
         assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
         assert json.loads(capsys.readouterr().out)["data"]["ok"] is True

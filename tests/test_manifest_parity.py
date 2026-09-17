@@ -162,6 +162,7 @@ def test_manifest_coverage_ledgers_are_closed() -> None:
         "TQ403",
         "TQ409",
         "TQ422",
+        "TQ425",
         "TQ429",
         "TQ500",
         "TQ501",
@@ -285,7 +286,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.10"
+    assert meta["contract_version"] == "0.6.11"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",

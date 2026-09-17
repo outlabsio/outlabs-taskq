@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.10.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.11.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.6.10"
+CONTRACT_VERSION = "0.6.11"
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -646,7 +646,7 @@ PUBLIC_FUNCTIONS = frozenset(identity for identity, spec in FUNCTIONS.items() if
 # exception outcome. R3-F04's executable vectors assert this map is complete.
 PUBLIC_ERRORS = {
     "taskq.attest_target(text,uuid,boolean)": frozenset({"TQ422"}),
-    "taskq.cancel_admission(text,text,uuid)": frozenset({"TQ001", "TQ409", "TQ422"}),
+    "taskq.cancel_admission(text,text,uuid)": frozenset({"TQ001", "TQ409", "TQ422", "TQ425"}),
     "taskq.cancel_workflow(uuid,text,text)": frozenset({"TQ001", "TQ422"}),
     "taskq.cancel_job(uuid,text,text)": frozenset({"TQ001"}),
     "taskq.cancel_running_job(uuid,uuid,text,text)": frozenset(),
@@ -655,27 +655,29 @@ PUBLIC_ERRORS = {
         {"TQ422", "TQ501"}
     ),
     "taskq.claim_schedules(text,integer,integer)": frozenset({"TQ422"}),
-    "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)": frozenset({"TQ422", "TQ501"}),
+    "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)": frozenset({"TQ422", "TQ425", "TQ501"}),
     "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb,text)": frozenset(
-        {"TQ409", "TQ422", "TQ500", "TQ501"}
+        {"TQ409", "TQ422", "TQ425", "TQ500", "TQ501"}
     ),
     "taskq.create_workflow(text,text,jsonb,text[],text)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)": frozenset(
         {"TQ001", "TQ409", "TQ422", "TQ501"}
     ),
-    "taskq.enqueue_many(text,jsonb)": frozenset({"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}),
+    "taskq.enqueue_many(text,jsonb)": frozenset(
+        {"TQ001", "TQ409", "TQ422", "TQ425", "TQ429", "TQ500"}
+    ),
     "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
-        {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
+        {"TQ001", "TQ409", "TQ422", "TQ425", "TQ429", "TQ500"}
     ),
     "taskq.ensure_queue(text,jsonb,text)": frozenset({"TQ422"}),
     "taskq.expire_job(uuid,text)": frozenset({"TQ001"}),
     "taskq.expire_worker_leases(text,text)": frozenset(),
     "taskq.fail_job(uuid,uuid,text,text,boolean,integer,jsonb,jsonb)": frozenset({"TQ422"}),
     "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)": frozenset(
-        {"TQ001", "TQ422", "TQ500"}
+        {"TQ001", "TQ422", "TQ425", "TQ500"}
     ),
     "taskq.finish_admission(text,text,uuid,jsonb,jsonb)": frozenset(
-        {"TQ001", "TQ409", "TQ422", "TQ429", "TQ500"}
+        {"TQ001", "TQ409", "TQ422", "TQ425", "TQ429", "TQ500"}
     ),
     "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)": frozenset(
         {"TQ001", "TQ403", "TQ409", "TQ422", "TQ500"}
@@ -704,7 +706,9 @@ PUBLIC_ERRORS = {
     ),
     "taskq.list_workflows(text,integer,jsonb)": frozenset({"TQ422", "TQ501"}),
     "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)": frozenset({"TQ422"}),
-    "taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)": frozenset({"TQ422"}),
+    "taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)": frozenset(
+        {"TQ422", "TQ425"}
+    ),
     "taskq.metrics()": frozenset(),
     "taskq.pause_queue(text,text,text)": frozenset({"TQ001"}),
     "taskq.prune_queue_audit(integer)": frozenset({"TQ422"}),
@@ -730,14 +734,14 @@ PUBLIC_ERRORS = {
     ),
     "taskq.set_schedule_smear(text,integer,text)": frozenset({"TQ422", "TQ001"}),
     "taskq.try_enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)": frozenset(
-        {"TQ422", "TQ501"}
+        {"TQ422", "TQ425", "TQ501"}
     ),
     "taskq.redrive_job(uuid,text,boolean)": frozenset({"TQ001", "TQ409"}),
     "taskq.release_job(uuid,uuid,text,text,integer,jsonb)": frozenset({"TQ422"}),
     "taskq.reprioritize(uuid,smallint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.retire_schedule(text,bigint,text)": frozenset({"TQ001", "TQ409", "TQ422"}),
     "taskq.reserve_admission(text,text,text,uuid,integer,integer)": frozenset(
-        {"TQ001", "TQ409", "TQ422"}
+        {"TQ001", "TQ409", "TQ422", "TQ425"}
     ),
     "taskq.request_worker_shutdown(text,text,text)": frozenset(),
     "taskq.resume_queue(text,text)": frozenset({"TQ001"}),
@@ -774,7 +778,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.6.10"',
+    "contract_version": '"0.6.11"',
     "capabilities": (
         '{"active": ["admission_reservations", "circuit_breaker", '
         '"continuation_flow_inheritance", "dependencies_workflows", '

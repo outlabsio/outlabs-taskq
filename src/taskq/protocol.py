@@ -77,8 +77,10 @@ class Followup(BaseModel):
 
 class TqCode(StrEnum):
     NOT_FOUND = "TQ001"
+    OPERATOR_DENIED = "TQ403"
     CONFLICT = "TQ409"
     VALIDATION = "TQ422"
+    QUEUE_OWNER_DENIED = "TQ425"
     VERSION = "TQ426"
     BACKPRESSURE = "TQ429"
     INTERNAL = "TQ500"
@@ -99,11 +101,17 @@ TQ_ERROR_REGISTRY: Final = MappingProxyType(
         TqCode.NOT_FOUND: TqErrorSpec(
             http_status=404, retryable=False, category="resource not found"
         ),
+        TqCode.OPERATOR_DENIED: TqErrorSpec(
+            http_status=403, retryable=False, category="operator authorization denied"
+        ),
         TqCode.CONFLICT: TqErrorSpec(
             http_status=409, retryable=False, category="durable state conflict"
         ),
         TqCode.VALIDATION: TqErrorSpec(
             http_status=422, retryable=False, category="invalid command"
+        ),
+        TqCode.QUEUE_OWNER_DENIED: TqErrorSpec(
+            http_status=403, retryable=False, category="queue admission owner denied"
         ),
         TqCode.VERSION: TqErrorSpec(
             http_status=426, retryable=False, category="unsupported version"
@@ -1781,7 +1789,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.reserve_admission(text,text,text,uuid,integer,integer)",
             _PRODUCER,
             tuple(item.value for item in AdmissionReserveOutcome),
-            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION, TqCode.QUEUE_OWNER_DENIED),
         ),
         CommandName.FINISH_ADMISSION: _spec(
             "taskq.finish_admission(text,text,uuid,jsonb,jsonb)",
@@ -1793,13 +1801,14 @@ COMMAND_SPECS: Final = MappingProxyType(
                 TqCode.VALIDATION,
                 TqCode.BACKPRESSURE,
                 TqCode.INTERNAL,
+                TqCode.QUEUE_OWNER_DENIED,
             ),
         ),
         CommandName.CANCEL_ADMISSION: _spec(
             "taskq.cancel_admission(text,text,uuid)",
             _PRODUCER,
             tuple(item.value for item in AdmissionCancelOutcome),
-            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION),
+            (TqCode.NOT_FOUND, TqCode.CONFLICT, TqCode.VALIDATION, TqCode.QUEUE_OWNER_DENIED),
         ),
         CommandName.ENQUEUE: _spec(
             "taskq.enqueue(text,text,jsonb,smallint,timestamp with time zone,text,text,text,smallint,integer,text,integer,integer,uuid[],uuid,text,uuid,jsonb,integer,text)",
@@ -1811,6 +1820,7 @@ COMMAND_SPECS: Final = MappingProxyType(
                 TqCode.VALIDATION,
                 TqCode.BACKPRESSURE,
                 TqCode.INTERNAL,
+                TqCode.QUEUE_OWNER_DENIED,
             ),
         ),
         CommandName.ENQUEUE_MANY: _spec(
@@ -1823,6 +1833,7 @@ COMMAND_SPECS: Final = MappingProxyType(
                 TqCode.VALIDATION,
                 TqCode.BACKPRESSURE,
                 TqCode.INTERNAL,
+                TqCode.QUEUE_OWNER_DENIED,
             ),
         ),
         CommandName.CREATE_WORKFLOW: _spec(
@@ -1853,7 +1864,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.complete_job(uuid,uuid,text,jsonb,jsonb,jsonb)",
             _RUNNER,
             ("ok", "already_settled", "settle_conflict", "lost"),
-            (TqCode.VALIDATION, TqCode.CAPABILITY),
+            (TqCode.VALIDATION, TqCode.CAPABILITY, TqCode.QUEUE_OWNER_DENIED),
             _FENCED,
         ),
         CommandName.FAIL: _spec(
@@ -2040,7 +2051,7 @@ COMMAND_SPECS: Final = MappingProxyType(
             "taskq.fire_schedule(uuid,uuid,bigint,timestamp with time zone[],timestamp with time zone)",
             _HOUSEKEEPER,
             ("initialized", "fired", "skipped", "stale"),
-            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.INTERNAL),
+            (TqCode.NOT_FOUND, TqCode.VALIDATION, TqCode.INTERNAL, TqCode.QUEUE_OWNER_DENIED),
         ),
         CommandName.SCHEDULE_ERROR: _spec(
             "taskq.schedule_error(uuid,uuid,bigint,text,integer)",

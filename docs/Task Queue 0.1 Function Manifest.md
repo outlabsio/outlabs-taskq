@@ -12,7 +12,8 @@
 `taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)`, returning
 `TABLE(status text, outcome text, finished_at timestamptz, payload jsonb, workflow_id uuid)`.
 EXEC: `taskq_producer` only. Raises: `TQ422` for invalid parameters or target
-attestation mismatch. Missing/nonterminal/wrong queue/type returns no row.
+attestation mismatch, and `TQ425` (added by the 0.6.11 corrective queue-owner
+amendment) when queue admission ownership denies the caller. Missing/nonterminal/wrong queue/type returns no row.
 Caller-owned transaction holds the exact terminal job row lock until commit or
 rollback, serializing with operator redrive/retention. Headers, fences and raw
 errors are excluded; host tenant/generation/payload authorization stays host-owned.
@@ -22,16 +23,30 @@ No HTTP command or new role/table grants. The machine manifest is updated to
 ## Unreleased additive 0.6.10 queue admission owner
 
 [ADR-039](adr/ADR-039-queue-admission-owner.md) and migration
-`0046_queue_admission_owner.sql` add immutable database-role admission ownership
-for a queue. `taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)` is
-operator-only and one-shot; `taskq.get_queue_admission_owner(text)` is an
-observer read. Bound terminal jobs cannot be generically redriven, while
-unfinished retry transitions remain unchanged. No runner bypass, tenant/API-key
-identity, or HTTP command is added. The machine manifest is updated to 0.6.10.
+`0046_queue_admission_owner.sql` defines immutable database-role admission
+ownership for a queue, including the operator-only one-shot
+`taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)` and observer
+`taskq.get_queue_admission_owner(text)` identities. Unauthorized binding raises
+`TQ403` (HTTP 403). Migration 0046 remains immutable history and its original
+behavior remains recorded at SQL contract 0.6.10; corrected admission denial,
+terminal-fence ordering, and provenance-safe continuation enforcement begin in
+migration 0047 / SQL contract 0.6.11. No tenant/API-key identity or HTTP command
+is added. The machine manifest is updated to 0.6.10.
+
+## Unreleased corrective 0.6.11 queue admission owner upgrade
+
+Migration `0047_queue_admission_owner_upgrade.sql` requires SQL contract 0.6.10
+and advances metadata to 0.6.11. It runs in place on databases that already
+applied 0046: no queue column, trigger, binding, row, receipt, profile, target
+identity, role, ACL, or public function identity is recreated. It replaces
+published function bodies with the accepted row-lock owner guard, provenance-
+safe continuation guard, terminal fence check, and admission checks. The
+0046 ledger row remains unchanged; normal repeated packaged migration is a
+no-op.
 
 ## 0. Manifest conventions (apply to every entry)
 
-Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ409/TQ422/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
+Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ403/TQ409/TQ422/TQ425/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.
 
 **Restore-stable verifier amendment (ADR-034).** Catalog verification remains
 closed and exact, but it compares a relation's constraint digest against a
@@ -253,11 +268,11 @@ END $$;
 
 | Function | Body | Raises | Tests |
 |---|---|---|---|
-| `taskq.enqueue(...)` (no `p_internal`) | spec §5.2 (v1.6) | TQ001, TQ422, TQ429, TQ500 | T2-ENQ, T3-DEDUP |
-| `taskq.enqueue_many(p_queue, p_jobs jsonb)` | below + 0.6.7 amendment | TQ001, TQ409, TQ422, TQ429, TQ500 | T2-BULK, T3-BULK, B2 |
-| `taskq.reserve_admission(p_queue, p_idempotency_key, p_intent_hash, p_handle, p_reservation_ttl_seconds, p_receipt_ttl_seconds)` | §14 / Durable Admission Specification §4.1 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
-| `taskq.finish_admission(p_queue, p_idempotency_key, p_handle, p_job, p_receipt)` | §14 / Durable Admission Specification §4.2 | TQ001, TQ409, TQ422, TQ429, TQ500 | T2-ADM, T3-ADM-RACE |
-| `taskq.cancel_admission(p_queue, p_idempotency_key, p_handle)` | §14 / Durable Admission Specification §4.3 | TQ001, TQ409, TQ422 | T2-ADM, T3-ADM-RACE |
+| `taskq.enqueue(...)` (no `p_internal`) | spec §5.2 (v1.6) | TQ001, TQ422, TQ425, TQ429, TQ500 | T2-ENQ, T3-DEDUP |
+| `taskq.enqueue_many(p_queue, p_jobs jsonb)` | below + 0.6.7 amendment | TQ001, TQ409, TQ422, TQ425, TQ429, TQ500 | T2-BULK, T3-BULK, B2 |
+| `taskq.reserve_admission(p_queue, p_idempotency_key, p_intent_hash, p_handle, p_reservation_ttl_seconds, p_receipt_ttl_seconds)` | §14 / Durable Admission Specification §4.1 | TQ001, TQ409, TQ422, TQ425 | T2-ADM, T3-ADM-RACE |
+| `taskq.finish_admission(p_queue, p_idempotency_key, p_handle, p_job, p_receipt)` | §14 / Durable Admission Specification §4.2 | TQ001, TQ409, TQ422, TQ425, TQ429, TQ500 | T2-ADM, T3-ADM-RACE |
+| `taskq.cancel_admission(p_queue, p_idempotency_key, p_handle)` | §14 / Durable Admission Specification §4.3 | TQ001, TQ409, TQ422, TQ425 | T2-ADM, T3-ADM-RACE |
 
 ```sql
 -- One transaction, one queue, ≤1000 specs, no deps, one depth probe, one NOTIFY,
@@ -303,7 +318,7 @@ retaining the historical probe only as a pre-counter compatibility fallback.
 |---|---|---|---|
 | `taskq.claim_jobs(...) RETURNS taskq.claim_batch` | spec §5.3 wrapped per H-01: resolve queue first (`unknown_queue`/`paused` states), targeted claim miss → `unavailable`, else SKIP-LOCKED batch → `claimed`/`empty`; input bounds validated (batch 1–50, lease 15–86400) | TQ422 | T2-CLAIM, T3-RACE, B3 |
 | `taskq.heartbeat(...)` | spec §5.4 + lease-override bounds (TQ422) | TQ422 | T2-HB |
-| `taskq.complete_job(...)` | spec §5.5 (v1.6), ADR-007/024 lossless follow-ups, verb-aware replay (H-03) | TQ422; TQ500 only for an inconsistent derived-key holder; TQ501 only when connected to a supported pre-0008 database | T2-COMPLETE, T3-SETTLE, T3-FOLLOWUP |
+| `taskq.complete_job(...)` | spec §5.5 (v1.6), ADR-007/024 lossless follow-ups, verb-aware replay (H-03) | TQ422, TQ425; TQ500 only for an inconsistent derived-key holder; TQ501 only when connected to a supported pre-0008 database | T2-COMPLETE, T3-SETTLE, T3-FOLLOWUP |
 | `taskq.fail_job(...)` | spec §5.6 (v1.6) + verb-aware replay | TQ422 | T2-FAIL |
 | `taskq.snooze_job(...)` | spec §5.7 + reject negative delay (TQ422, replacing silent clamp) | TQ422 | T2-SNOOZE |
 | `taskq.release_job(...)` | below | TQ422 | T2-RELEASE |
@@ -1186,7 +1201,7 @@ no schedule relations before changing anything.
      arguments: p_schedule_id, p_token, p_definition_version,
                 p_occurrences, p_next_fire_at
      RETURNS taskq.schedule_action_result
-     EXEC taskq_housekeeper; raises TQ001, TQ422, TQ500
+     EXEC taskq_housekeeper; raises TQ001, TQ422, TQ425, TQ500
 
    taskq.schedule_error(uuid,uuid,bigint,text,integer)
      arguments: p_schedule_id, p_token, p_definition_version, p_error,
@@ -1641,7 +1656,7 @@ evidence; the migration activates only that capability.
      final argument p_continuation_policy_hash
      RETURNS taskq.settle_result
      EXEC taskq_runner
-     raises TQ001, TQ409, TQ422, TQ500, TQ501
+     raises TQ001, TQ409, TQ422, TQ425, TQ500, TQ501
    ```
 
    All are owner-owned, `SECURITY DEFINER`, pinned to

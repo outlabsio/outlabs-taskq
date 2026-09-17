@@ -220,6 +220,7 @@ jobs:
           tests/test_t1_unit.py
           tests/test_version.py
           tests/test_s2_registry.py
+          tests/test_pr52_error_contract.py
           tests/test_s2_client.py
           tests/test_s2_worker_execution.py
           tests/test_s2_worker_supervision.py
@@ -275,6 +276,17 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - run: uv sync --extra dev --extra outlabs
+      - name: Ownership boundaries must pass without skips
+        run: |
+          test -n "$TASKQ_TEST_DSN"
+          uv run pytest tests/test_pr52_ownership.py tests/test_pr52_error_contract.py tests/test_pr52_upgrade.py -q --junitxml="$RUNNER_TEMP/ownership.xml"
+          uv run python - <<'PY'
+          import os
+          import xml.etree.ElementTree as ET
+          suites = ET.parse(os.path.join(os.environ['RUNNER_TEMP'], 'ownership.xml')).getroot().findall('testsuite')
+          assert suites and sum(int(s.attrib['tests']) for s in suites) > 0
+          assert all(int(s.attrib['skipped']) == 0 for s in suites), 'ownership regressions must not skip'
+          PY
       - run: uv run pytest tests/ -q
 
   fresh-cluster-security:
