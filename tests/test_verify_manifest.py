@@ -316,7 +316,7 @@ def _failed_check(report: object, name: str) -> object:
 
 
 def test_machine_manifest_has_closed_0_5_0_function_surface() -> None:
-    assert len(FUNCTIONS) == 119
+    assert len(FUNCTIONS) == 124
     assert "taskq.queue_health(text)" in FUNCTIONS
     assert "taskq.truncate_utf8(text,integer)" in FUNCTIONS
     assert "taskq.list_jobs(text,text,integer,jsonb)" in FUNCTIONS
@@ -339,6 +339,9 @@ def test_machine_manifest_has_closed_0_5_0_function_surface() -> None:
     assert "taskq.create_workflow(text,text,jsonb,text[],text,integer,text)" in FUNCTIONS
     assert "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)" in FUNCTIONS
     assert "taskq.attest_target(text,uuid,boolean)" in FUNCTIONS
+    assert "taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)" in FUNCTIONS
+    assert "taskq.get_queue_admission_owner_identity(text)" in FUNCTIONS
+    assert "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)" in FUNCTIONS
     assert (
         "taskq.put_managed_schedule(text,jsonb,text,text,text,text,text,text,integer,text,bigint)"
         in FUNCTIONS

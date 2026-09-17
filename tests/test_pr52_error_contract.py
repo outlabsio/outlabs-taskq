@@ -91,3 +91,13 @@ def test_issue4_every_manifest_error_has_public_exception_mapping():
         "TQ425" in PUBLIC_ERRORS["taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)"]
     )
     assert "TQ403" in PUBLIC_ERRORS["taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)"]
+    assert (
+        "TQ403"
+        in PUBLIC_ERRORS["taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)"]
+    )
+    assert (
+        "TQ403"
+        in PUBLIC_ERRORS[
+            "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)"
+        ]
+    )

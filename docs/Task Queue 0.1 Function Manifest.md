@@ -44,6 +44,34 @@ safe continuation guard, terminal fence check, and admission checks. The
 0046 ledger row remains unchanged; normal repeated packaged migration is a
 no-op.
 
+## Unreleased corrective 0.6.12 ownership closure and recovery
+
+Migration `0048_queue_admission_owner_recovery.sql` requires SQL contract
+0.6.11 and advances metadata to 0.6.12 without changing migrations 0045–0047.
+It stores each queue owner's PostgreSQL role OID while retaining the original
+role name as a diagnostic snapshot. Admission uses membership in that stable
+identity, so a role rename preserves access and a missing role fails closed with
+`TQ425`. `FOR KEY SHARE` queue locks serialize owner changes against admission
+without blocking ordinary pause/configuration updates.
+
+Every public replay path performs the owner check before returning an existing
+job or workflow member. A standalone `taskq_housekeeper` can fire into a bound
+queue only when the matching schedule occurrence was created in the same
+transaction and the schedule carries the queue's owner OID. Callers cannot
+supply that provenance through job headers alone.
+
+The existing one-shot bind remains limited to a completely empty queue. The
+operator-only functions
+`taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)` and
+`taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)` cover
+existing queues and credential recovery. Both require target attestation, a
+paused queue, no active jobs or reserved admissions, and no active schedules;
+retained terminal history is allowed. They write `queue_audit` with the actor,
+reason, and old/new identities. The observer function
+`taskq.get_queue_admission_owner_identity(text)` exposes the current role name,
+OID, presence flag, configured maximum depth, and active depth. No HTTP command,
+host-domain authorization identity, or direct table grant is added.
+
 ## 0. Manifest conventions (apply to every entry)
 
 Every function: `LANGUAGE plpgsql` (or `sql` where noted), `SECURITY DEFINER`, **owner `taskq_owner`**, `SET search_path = pg_catalog, taskq, pg_temp`, fully qualified references, `REVOKE EXECUTE ... FROM PUBLIC` in the creating migration, `GRANT EXECUTE` exactly as the entry's **EXEC** line says (ADR-010/011). Public-boundary validation raises use `USING ERRCODE` from the protocol registry (TQ001/TQ403/TQ409/TQ422/TQ425/TQ429/TQ500/TQ501). Omission invokes a declared default; explicit `NULL` for a documented non-null domain raises `TQ422` (ADR-012). Entries marked **spec** have their normative body in the Unified Spec section cited (with the v1.6 fixes and manifest amendments applied); entries with SQL here are the previously missing bodies. Test ids reference the harness suites.

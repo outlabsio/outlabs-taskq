@@ -2,9 +2,12 @@
 
 Postgres-native durable task queue for Python services.
 
-**Unreleased source candidate (2026-09-10):** package `0.1.0a39`, additive SQL
-contracts 0.6.9/0.6.10 and migrations 0045/0046 add an installation-bound
-terminal host-effect row lock and immutable database-role queue admission owner.
+**Unreleased source candidate (2026-09-17):** package `0.1.0a40`, additive SQL
+contracts 0.6.9–0.6.12 and migrations 0045–0048 add an installation-bound
+terminal host-effect row lock and database-role queue admission owner. The
+0.6.12 correction closes replay and standalone-scheduler admission paths, stores
+role identity by OID, removes owner checks from the queue-row lock path, and adds
+audited adoption and rotation for paused, quiesced queues.
 See [ADR-038](docs/adr/ADR-038-terminal-host-effect-fence.md) and
 [ADR-039](docs/adr/ADR-039-queue-admission-owner.md). Candidate artifact
 publication and downstream release pins remain pending; the released a38
@@ -29,6 +32,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a40.md`](docs/RELEASE-0.1.0a40.md) | Unreleased queue-admission ownership correction, recovery, and staged rollout (contract 0.6.12) |
 | [`docs/RELEASE-0.1.0a38.md`](docs/RELEASE-0.1.0a38.md) | 0.1.0a38 workflow-continuation flow inheritance (contract 0.6.8) |
 | [`docs/RELEASE-0.1.0a37.md`](docs/RELEASE-0.1.0a37.md) | 0.1.0a37 workflow-safe bulk admission and O(1) admission depth checks (contract 0.6.7) |
 | [`docs/RELEASE-0.1.0a36.md`](docs/RELEASE-0.1.0a36.md) | 0.1.0a36 worker degraded-recovery and listener-error log visibility — package-only (contract 0.6.6) |

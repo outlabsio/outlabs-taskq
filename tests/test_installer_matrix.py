@@ -97,6 +97,7 @@ async def test_clean_concurrent_installers_serialize_to_one_chain(taskq_dsn: str
                 "0045_terminal_effect_fence",
                 "0046_queue_admission_owner",
                 "0047_queue_admission_owner_upgrade",
+                "0048_queue_admission_owner_recovery",
             ],
         ]
         async with engines[0].connect() as conn:
@@ -208,6 +209,7 @@ async def test_managed_owner_bootstraps_and_retains_owner_membership(
                 "0045_terminal_effect_fence",
                 "0046_queue_admission_owner",
                 "0047_queue_admission_owner_upgrade",
+                "0048_queue_admission_owner_recovery",
             ]
             report = await verify(conn)
             assert report.ok
@@ -336,6 +338,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0045_terminal_effect_fence",
             "0046_queue_admission_owner",
             "0047_queue_admission_owner_upgrade",
+            "0048_queue_admission_owner_recovery",
         ]
         assert (
             await asyncio.to_thread(
@@ -388,6 +391,7 @@ async def test_sync_psycopg_cli_preserves_literal_percent_migration_sql(
             "0045_terminal_effect_fence",
             "0046_queue_admission_owner",
             "0047_queue_admission_owner_upgrade",
+            "0048_queue_admission_owner_recovery",
         ]
         assert await asyncio.to_thread(main, ["db", "verify", "--dsn", dsn, "-o", "json"]) == 0
         assert json.loads(capsys.readouterr().out)["data"]["ok"] is True

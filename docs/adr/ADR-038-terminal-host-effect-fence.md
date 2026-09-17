@@ -30,12 +30,16 @@ RETURNS TABLE(
 Only `taskq_producer` receives EXECUTE. The function is owned by `taskq_owner`,
 SECURITY DEFINER, VOLATILE, with pinned `pg_catalog, taskq, pg_temp` search path
 and no PUBLIC EXECUTE. Existing table/role grants and historical SQL stay intact.
-On SQL contract 0.6.11, corrective migration 0047 first calls the shared
-queue-admission owner guard; 0047 requires the already-applied 0.6.10 state. A
+On SQL contract 0.6.12, corrective migrations 0047/0048 first call the shared
+queue-admission owner guard. Migration 0048 requires the already-applied 0.6.11 state. A
 producer on a bound queue must be a member of that immutable owner role; denial
-is `TQ425` before any payload-bearing job lookup or job-row lock. Migration 0047 replaces the 0045 body after the 0046 guard exists,
+is `TQ425` before any payload-bearing job lookup or job-row lock. Migration 0048
+uses the owner's PostgreSQL role OID and a `FOR KEY SHARE` queue row lock,
+which preserves the security boundary without blocking ordinary queue updates.
+Migration 0047 replaces the 0045 body after the 0046 guard exists,
 preserving function identity and leaving 0.6.9 installs with their original
-unbound behavior. Migration 0046 remains unchanged history. Continuation
+unbound behavior; 0048 replaces it again without changing identity. Migrations
+0045–0047 remain unchanged history. Continuation
 provenance checks are not a bypass for this direct fence call.
 Required installation UUID plus environment/production opt-in use existing target
 attestation. Database-role ownership and target identity are not a domain tenant
@@ -67,12 +71,12 @@ recovery policy.
 ## Compatibility and verification
 
 Package source baseline: `0.1.0a38` / `5a622cd530c88db9aa92ad9e8e64c31aa883e4df`.
-The candidate package is `0.1.0a39` and unpublished; artifact publication and explicit
-downstream pins remain release gates. The candidate runtime accepts 0.6.9, 0.6.10, and 0.6.11 alongside its prior
+The candidate package is `0.1.0a40` and unpublished; artifact publication and explicit
+downstream pins remain release gates. The candidate runtime accepts 0.6.9 through 0.6.12 alongside its prior
 contracts. Deploy the reviewed runtime everywhere BEFORE forward-only migrations
-0045/0046/0047; 0045 requires 0.6.8, 0046 requires 0.6.9, and 0047 requires
-0.6.10, so a37 installations also need unchanged 0044 before this chain. A 0.6.9
-installation remains valid and unbound-compatible; applying 0046 then 0047
+0045/0046/0047/0048; each migration requires its immediate predecessor, so a37
+installations also need unchanged 0044 before this chain. A 0.6.9 installation
+remains valid and unbound-compatible; applying 0046 through 0048
 installs owner enforcement without changing the 0045 function identity.
 
 `tests/test_contract_0_6_9.py` proves exact identity, environment/install rejection,

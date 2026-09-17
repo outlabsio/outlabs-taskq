@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-__version__ = "0.1.0a39"
+__version__ = "0.1.0a40"
 
 from taskq.errors import (
     InvalidFollowupError,

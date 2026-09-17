@@ -23,6 +23,7 @@ from taskq.http.facade import TaskqFacadeTransports
 from taskq.http.hub import ClaimWaitHub
 from taskq.registry import TaskRegistry
 from taskq.scheduler import SchedulerEngine
+from taskq.sql.manifest import SUPPORTED_SQL_CONTRACT_VERSIONS
 from taskq.sql.notifications import PostgresNotificationSource
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.transport import HousekeeperTransport
@@ -31,47 +32,9 @@ from taskq.worker import WorkerOptions, WorkerService, WorkerServiceOptions
 logger = logging.getLogger("taskq.runtime")
 
 
-# ADR-020: this bridge is deliberately a closed compatibility set, not a range.
-# Set membership alone exposes no newly added capability surface; it only lets
-# an already-deployed runtime survive additive metadata revisions while each
-# later transport/facade surface remains separately gated.
-SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
-    {
-        "0.1.2",
-        "0.1.3",
-        "0.1.4",
-        "0.1.5",
-        "0.2.0",
-        "0.2.1",
-        "0.2.2",
-        "0.2.3",
-        "0.2.4",
-        "0.2.5",
-        "0.2.6",
-        "0.2.7",
-        "0.3.0",
-        "0.3.1",
-        "0.4.0",
-        "0.4.1",
-        "0.4.2",
-        "0.4.3",
-        "0.5.0",
-        "0.5.1",
-        "0.5.2",
-        "0.6.0",
-        "0.6.1",
-        "0.6.2",
-        "0.6.3",
-        "0.6.4",
-        "0.6.5",
-        "0.6.6",
-        "0.6.7",
-        "0.6.8",
-        "0.6.9",
-        "0.6.10",
-        "0.6.11",
-    }
-)
+# ADR-020: the base bridge is a closed set imported from the SQL manifest so
+# release tooling can enforce it without importing optional HTTP dependencies.
+# Capability-specific surfaces below remain separately gated.
 ADMISSION_SQL_CONTRACT_VERSIONS = frozenset(
     {
         "0.1.5",
@@ -104,6 +67,7 @@ ADMISSION_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.9",
         "0.6.10",
         "0.6.11",
+        "0.6.12",
     }
 )
 WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset(
@@ -136,6 +100,7 @@ WORKFLOW_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.9",
         "0.6.10",
         "0.6.11",
+        "0.6.12",
     }
 )
 WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset(
@@ -166,6 +131,7 @@ WORKFLOW_READ_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.9",
         "0.6.10",
         "0.6.11",
+        "0.6.12",
     }
 )
 SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset(
@@ -191,6 +157,7 @@ SCHEDULE_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.9",
         "0.6.10",
         "0.6.11",
+        "0.6.12",
     }
 )
 WORKER_PRESENCE_SQL_CONTRACT_VERSIONS = frozenset(
@@ -220,6 +187,7 @@ WORKER_PRESENCE_SQL_CONTRACT_VERSIONS = frozenset(
         "0.6.9",
         "0.6.10",
         "0.6.11",
+        "0.6.12",
     }
 )
 

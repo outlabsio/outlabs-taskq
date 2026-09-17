@@ -72,6 +72,7 @@ BEHAVIOR_GROUPS = {
     },
     "observer": {
         "taskq.get_queue_admission_owner(text)",
+        "taskq.get_queue_admission_owner_identity(text)",
         "taskq.get_authorization_projection(uuid)",
         "taskq.get_contract_meta()",
         "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
@@ -87,6 +88,7 @@ BEHAVIOR_GROUPS = {
         "taskq.queue_health(text)",
     },
     "operator": {
+        "taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
         "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)",
         "taskq.cancel_job(uuid,text,text)",
         "taskq.ensure_queue(text,jsonb,text)",
@@ -100,6 +102,7 @@ BEHAVIOR_GROUPS = {
         "taskq.request_worker_shutdown(text,text,text)",
         "taskq.resume_queue(text,text)",
         "taskq.run_now(uuid,text)",
+        "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
         "taskq.set_concurrency_limit(text,integer,text)",
         "taskq.set_flow_limit(text,integer,integer,text)",
         "taskq.set_priority_aging(text,integer,text)",
@@ -286,7 +289,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.11"
+    assert meta["contract_version"] == "0.6.12"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",

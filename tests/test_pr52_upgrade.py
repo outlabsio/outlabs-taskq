@@ -10,6 +10,7 @@ import pytest
 
 from scripts.artifact_smoke import (
     _OLD_OWNER_SHA256,
+    _OWNER_RECOVERY_ID,
     _OWNER_UPGRADE_ID,
     _drop_owner_upgrade,
     _exercise_owner_upgrade,
@@ -32,9 +33,10 @@ def test_original_0046_is_immutable_and_forward_migration_is_packaged():
         ).hexdigest()
         == _OLD_OWNER_SHA256
     )
-    assert migrations[-1].id == _OWNER_UPGRADE_ID
-    assert len(migrations) == 47
-    assert CONTRACT_VERSION == "0.6.11"
+    assert migrations[-2].id == _OWNER_UPGRADE_ID
+    assert migrations[-1].id == _OWNER_RECOVERY_ID
+    assert len(migrations) == 48
+    assert CONTRACT_VERSION == "0.6.12"
     for name in (
         "SUPPORTED",
         "ADMISSION",
@@ -43,7 +45,7 @@ def test_original_0046_is_immutable_and_forward_migration_is_packaged():
         "SCHEDULE",
         "WORKER_PRESENCE",
     ):
-        assert {"0.6.10", "0.6.11"} <= getattr(runtime, name + "_SQL_CONTRACT_VERSIONS")
+        assert {"0.6.10", "0.6.11", "0.6.12"} <= getattr(runtime, name + "_SQL_CONTRACT_VERSIONS")
 
 
 @pytest.mark.taskq_sql

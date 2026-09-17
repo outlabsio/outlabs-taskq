@@ -3,6 +3,7 @@
 import asyncio
 import json
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -25,6 +26,8 @@ RESERVE = "SELECT * FROM taskq.reserve_admission($1,$2,$3,$4)"
 FINISH = "SELECT * FROM taskq.finish_admission($1,$2,$3,$4::jsonb,$5::jsonb)"
 CANCEL = "SELECT * FROM taskq.cancel_admission($1,$2,$3)"
 BIND = "SELECT taskq.bind_queue_admission_owner($1,$2,'test',$3,false)"
+ADOPT = "SELECT taskq.adopt_queue_admission_owner($1,$2,$3,$4,'test',$5,false)"
+ROTATE = "SELECT taskq.rotate_queue_admission_owner($1,$2,$3,$4,'test',$5,false)"
 FENCE = "SELECT * FROM taskq.lock_terminal_effect_job($1,$2,'pr52.job','test',$3,false)"
 
 
@@ -65,7 +68,10 @@ def migrated(taskq_dsn):
 @pytest.fixture
 async def logins(taskq_dsn, pg):
     suffix = uuid4().hex[:10]
-    roles = {name: f"pr52_{name}_{suffix}" for name in ("owner", "other", "runner", "operator")}
+    roles = {
+        name: f"pr52_{name}_{suffix}"
+        for name in ("owner", "other", "runner", "operator", "housekeeper")
+    }
     connections = {}
     parsed = urlparse(taskq_dsn.replace("postgresql+asyncpg://", "postgresql://"))
     try:
@@ -238,6 +244,42 @@ async def test_issue1_bind_reserve_race_both_orders(logins, pg, bind_first):
             await asyncio.gather(task, return_exceptions=True)
 
 
+@pytest.mark.parametrize("bind_first", [True, False])
+async def test_issue1_bind_enqueue_race_both_orders(logins, pg, bind_first):
+    """Queue row locks make owner binding atomic with job admission."""
+    roles, conns, installation = logins
+    name = await queue(logins, None)
+    first = conns["operator"] if bind_first else conns["other"]
+    second = conns["other"] if bind_first else conns["operator"]
+    task = None
+    tx = first.transaction()
+    await tx.start()
+    try:
+        if bind_first:
+            await first.fetchval(BIND, name, roles["owner"], installation)
+            task = asyncio.create_task(
+                second.fetchrow("SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb)", name)
+            )
+        else:
+            await first.fetchrow("SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb)", name)
+            task = asyncio.create_task(second.fetchval(BIND, name, roles["owner"], installation))
+        await blocked(pg, second, task)
+        await tx.commit()
+        with pytest.raises(asyncpg.PostgresError) as rejected:
+            await asyncio.wait_for(task, 5)
+        assert rejected.value.sqlstate == ("TQ425" if bind_first else "TQ409")
+        assert await pg.fetchval("SELECT count(*) FROM taskq.jobs WHERE queue=$1", name) == (
+            0 if bind_first else 1
+        )
+    finally:
+        if first.is_in_transaction():
+            await tx.rollback()
+        if task is not None:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.parametrize("bound", [True, False])
 async def test_issue1_owner_and_unbound_admission_lifecycle_preserved(logins, bound):
     conns = logins[1]
@@ -257,6 +299,186 @@ async def test_issue1_owner_and_unbound_admission_lifecycle_preserved(logins, bo
     assert (await producer.fetchrow(CANCEL, name, "cancel", handle))[
         "outcome"
     ] == "already_cancelled"
+
+
+@pytest.mark.parametrize("entrypoint", ["enqueue", "try_enqueue", "enqueue_many"])
+async def test_issue1_bound_idempotent_replay_requires_current_owner(logins, pg, entrypoint):
+    """A replay is an admission decision even when it creates no new row."""
+    conns = logins[1]
+    name = await queue(logins)
+    original = await conns["owner"].fetchrow(
+        "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb,p_idempotency_key=>'replay')",
+        name,
+    )
+    before = await pg.fetchval(
+        "SELECT to_jsonb(j) FROM taskq.jobs j WHERE id=$1", original["job_id"]
+    )
+
+    with pytest.raises(asyncpg.PostgresError) as denied:
+        if entrypoint == "enqueue_many":
+            await conns["other"].fetch(
+                "SELECT * FROM taskq.enqueue_many($1,$2::jsonb)",
+                name,
+                json.dumps([{"job_type": "pr52.job", "idempotency_key": "replay"}]),
+            )
+        else:
+            await conns["other"].fetchrow(
+                f"SELECT * FROM taskq.{entrypoint}("
+                "$1,'pr52.job','{}'::jsonb,p_idempotency_key=>'replay')",
+                name,
+            )
+    assert denied.value.sqlstate == "TQ425"
+    assert (
+        await pg.fetchval("SELECT to_jsonb(j) FROM taskq.jobs j WHERE id=$1", original["job_id"])
+        == before
+    )
+
+
+async def test_issue1_bound_workflow_step_replay_requires_current_owner(logins, pg):
+    """The workflow uniqueness path must not return another owner's job."""
+    conns = logins[1]
+    name = await queue(logins)
+    workflow = await conns["owner"].fetchrow(
+        "SELECT * FROM taskq.create_workflow($1,'dag','{}'::jsonb,ARRAY[$2],'pr52',3,$3)",
+        uuid4().hex,
+        name,
+        POLICY,
+    )
+    original = await conns["owner"].fetchrow(
+        "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb,"
+        "p_workflow_id=>$2,p_step_key=>'root',p_flow_key=>'pr52-flow')",
+        name,
+        workflow["workflow_id"],
+    )
+    with pytest.raises(asyncpg.PostgresError) as denied:
+        await conns["other"].fetchrow(
+            "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb,"
+            "p_workflow_id=>$2,p_step_key=>'root',p_flow_key=>'pr52-flow')",
+            name,
+            workflow["workflow_id"],
+        )
+    assert denied.value.sqlstate == "TQ425"
+    assert (
+        await pg.fetchval(
+            "SELECT count(*) FROM taskq.jobs WHERE workflow_id=$1 AND step_key='root'",
+            workflow["workflow_id"],
+        )
+        == 1
+    )
+    assert (
+        await pg.fetchval("SELECT id FROM taskq.jobs WHERE id=$1", original["job_id"])
+        == original["job_id"]
+    )
+
+
+@pytest.mark.parametrize("bound", [True, False])
+async def test_issue1_owner_check_does_not_block_queue_pause(logins, bound):
+    """The owner check itself must not retain a queue-row lock."""
+    conns = logins[1]
+    name = await queue(logins, "owner" if bound else None)
+    job_id = await terminal_job(logins, name)
+    caller = conns["owner"] if bound else conns["other"]
+    installation = logins[2]
+    tx = caller.transaction()
+    await tx.start()
+    pause = None
+    try:
+        await caller.fetchrow(FENCE, job_id, name, installation)
+        pause = asyncio.create_task(
+            conns["operator"].fetchrow(
+                "SELECT * FROM taskq.pause_queue($1,'pr52','ownership rollout')", name
+            )
+        )
+        result = await asyncio.wait_for(asyncio.shield(pause), 1)
+        assert result is not None
+    finally:
+        await tx.rollback()
+        if pause is not None and not pause.done():
+            pause.cancel()
+            await asyncio.gather(pause, return_exceptions=True)
+
+
+async def test_issue1_role_rename_preserves_bound_owner_identity(logins, pg, taskq_dsn):
+    """Binding follows the database role identity rather than a mutable role name."""
+    roles, conns, _ = logins
+    name = await queue(logins)
+    old_name = roles["owner"]
+    new_name = old_name + "_renamed"
+    await conns["owner"].close()
+    await pg.execute(f'ALTER ROLE "{old_name}" RENAME TO "{new_name}"')
+    roles["owner"] = new_name
+    parsed = urlparse(taskq_dsn.replace("postgresql+asyncpg://", "postgresql://"))
+    renamed = await asyncpg.connect(
+        host=parsed.hostname,
+        port=parsed.port,
+        database=parsed.path[1:],
+        user=new_name,
+        password="pr52-scratch",
+    )
+    conns["owner"] = renamed
+    try:
+        created = await renamed.fetchrow(
+            "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb)", name
+        )
+        assert created["created"] is True
+        profile = await pg.fetchrow(
+            "SELECT * FROM taskq.get_queue_admission_owner_identity($1)", name
+        )
+        assert profile["owner_role"] == new_name
+        assert profile["owner_oid"] == await pg.fetchval(
+            "SELECT oid FROM pg_roles WHERE rolname=$1", new_name
+        )
+    finally:
+        await renamed.close()
+        conns.pop("owner", None)
+
+
+async def test_issue1_adopt_and_rotate_quiesced_queue_with_audit(logins, pg):
+    roles, conns, installation = logins
+    name = await queue(logins, None)
+    await conns["other"].fetchrow(
+        "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb,p_idempotency_key=>'history')",
+        name,
+    )
+    job = await claim(logins, name)
+    await complete(logins, job)
+    await conns["operator"].fetchrow(
+        "SELECT * FROM taskq.pause_queue($1,'pr52','adoption window')", name
+    )
+    adopted = await conns["operator"].fetchval(
+        ADOPT, name, roles["owner"], "pr52", "adopt retained history", installation
+    )
+    assert adopted == roles["owner"]
+    with pytest.raises(asyncpg.PostgresError) as old_denied:
+        await conns["other"].fetchrow(
+            "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb,p_idempotency_key=>'history')",
+            name,
+        )
+    assert old_denied.value.sqlstate == "TQ425"
+
+    rotated = await conns["operator"].fetchval(
+        ROTATE, name, roles["other"], "pr52", "owner credential rotation", installation
+    )
+    assert rotated == roles["other"]
+    with pytest.raises(asyncpg.PostgresError) as prior_denied:
+        await conns["owner"].fetchrow(
+            "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb)", name
+        )
+    assert prior_denied.value.sqlstate == "TQ425"
+    assert (
+        await conns["other"].fetchrow(
+            "SELECT * FROM taskq.enqueue($1,'pr52.job','{}'::jsonb)", name
+        )
+    )["created"] is True
+    audit = await pg.fetch(
+        "SELECT event_type,detail FROM taskq.queue_audit WHERE queue=$1 "
+        "AND event_type LIKE 'admission_owner_%' ORDER BY id",
+        name,
+    )
+    assert [row["event_type"] for row in audit] == [
+        "admission_owner_adopted",
+        "admission_owner_rotated",
+    ]
 
 
 @pytest.mark.parametrize("policy", [False, True])
@@ -323,6 +545,108 @@ async def test_issue2_runner_cannot_launder_foreign_or_unbound_parent(
         await pg.fetchval("SELECT count(*) FROM taskq.jobs WHERE parent_job_id=$1", job["job_id"])
         == 0
     )
+
+
+async def _claim_schedule(conns, installation, name):
+    async with conns["housekeeper"].transaction():
+        await conns["housekeeper"].fetchrow(
+            "SELECT * FROM taskq.attest_target('test',$1,false)", installation
+        )
+        batch = await conns["housekeeper"].fetchrow(
+            "SELECT * FROM taskq.claim_schedules('pr52-scheduler',100,60)"
+        )
+    for schedule in batch["schedules"]:
+        if schedule["name"] == name:
+            return schedule
+    raise AssertionError(f"schedule not claimed: {name}")
+
+
+async def _fire_schedule(conns, installation, claim, occurrences, next_fire_at):
+    async with conns["housekeeper"].transaction():
+        await conns["housekeeper"].fetchrow(
+            "SELECT * FROM taskq.attest_target('test',$1,false)", installation
+        )
+        return await conns["housekeeper"].fetchrow(
+            "SELECT * FROM taskq.fire_schedule($1,$2,$3,$4,$5)",
+            claim["schedule_id"],
+            claim["token"],
+            claim["definition_version"],
+            occurrences,
+            next_fire_at,
+        )
+
+
+async def test_issue2_separate_housekeeper_fires_bound_queue_schedule(logins, pg):
+    """A scheduler login gets narrow, row-backed provenance without producer membership."""
+    roles, conns, installation = logins
+    name = await queue(logins)
+    schedule_name = "pr52." + uuid4().hex[:12]
+    definition = {
+        "target": {
+            "kind": "job",
+            "queue": name,
+            "job_type": "pr52.scheduled",
+            "payload": {"scheduled": True},
+        },
+        "recurrence": {"kind": "interval", "interval_seconds": 60},
+        "catchup_policy": "fire_once",
+        "max_catchup": 1,
+        "paused": False,
+    }
+    async with conns["operator"].transaction():
+        await conns["operator"].fetchrow(
+            "SELECT * FROM taskq.attest_target('test',$1,false)", installation
+        )
+        created = await conns["operator"].fetchrow(
+            "SELECT * FROM taskq.put_schedule($1,$2::jsonb,'pr52',NULL)",
+            schedule_name,
+            json.dumps(definition),
+        )
+    assert created["outcome"] == "created"
+    assert not await pg.fetchval(
+        "SELECT pg_has_role($1,'taskq_producer','member')", roles["housekeeper"]
+    )
+    assert not await pg.fetchval(
+        "SELECT pg_has_role($1,$2,'member')", roles["housekeeper"], roles["owner"]
+    )
+
+    initialized = await _claim_schedule(conns, installation, schedule_name)
+    result = await _fire_schedule(
+        conns,
+        installation,
+        initialized,
+        [],
+        initialized["as_of"] + timedelta(seconds=60),
+    )
+    assert result["outcome"] == "initialized"
+
+    due = datetime.now(UTC) - timedelta(minutes=1)
+    await pg.execute(
+        "UPDATE taskq.schedules SET initialized=true,next_fire_at=$2 WHERE id=$1",
+        initialized["schedule_id"],
+        due,
+    )
+    claimed = await _claim_schedule(conns, installation, schedule_name)
+    fired = await _fire_schedule(
+        conns,
+        installation,
+        claimed,
+        [due],
+        claimed["as_of"] + timedelta(seconds=60),
+    )
+    assert fired["outcome"] == "fired" and fired["jobs_enqueued"] == 1
+    job = await pg.fetchrow(
+        "SELECT queue,job_type,headers->'taskq_schedule' AS schedule_header "
+        "FROM taskq.jobs WHERE queue=$1 AND job_type='pr52.scheduled'",
+        name,
+    )
+    assert job is not None and job["queue"] == name
+    schedule_header = (
+        json.loads(job["schedule_header"])
+        if isinstance(job["schedule_header"], str)
+        else job["schedule_header"]
+    )
+    assert schedule_header["schedule_id"] == str(initialized["schedule_id"])
 
 
 async def test_issue2_producer_cannot_forge_continuation_parent(logins, pg):

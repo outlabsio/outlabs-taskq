@@ -1,4 +1,4 @@
-"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.11.
+"""Machine-readable PostgreSQL catalog manifest for SQL contract 0.6.12.
 
 The canonical prose contract remains ``docs/Task Queue 0.1 Function
 Manifest.md``.  This module is its executable catalog projection: the verifier
@@ -10,7 +10,48 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-CONTRACT_VERSION = "0.6.11"
+CONTRACT_VERSION = "0.6.12"
+# Closed set of database contracts the base a40 runtime can safely attest and
+# operate during a staged rollout. Capability-specific subsets remain in the
+# HTTP runtime; release tooling imports this base set without requiring HTTP.
+SUPPORTED_SQL_CONTRACT_VERSIONS = frozenset(
+    {
+        "0.1.2",
+        "0.1.3",
+        "0.1.4",
+        "0.1.5",
+        "0.2.0",
+        "0.2.1",
+        "0.2.2",
+        "0.2.3",
+        "0.2.4",
+        "0.2.5",
+        "0.2.6",
+        "0.2.7",
+        "0.3.0",
+        "0.3.1",
+        "0.4.0",
+        "0.4.1",
+        "0.4.2",
+        "0.4.3",
+        "0.5.0",
+        "0.5.1",
+        "0.5.2",
+        "0.6.0",
+        "0.6.1",
+        "0.6.2",
+        "0.6.3",
+        "0.6.4",
+        "0.6.5",
+        "0.6.6",
+        "0.6.7",
+        "0.6.8",
+        "0.6.9",
+        "0.6.10",
+        "0.6.11",
+        "0.6.12",
+    }
+)
 SCHEMA_OWNER = "taskq_owner"
 PINNED_SEARCH_PATH = ("pg_catalog", "taskq", "pg_temp")
 
@@ -82,10 +123,10 @@ TABLE_SHAPES = {
     "queue_audit": (6, "4de47d44a28ac4d95b24937cc2398061"),
     "queue_counters": (10, "c2e43315895c6ddbac94394bd398a563"),
     "queue_flow": (25, "a50954dfc4cd416492669b3f3eb4b395"),
-    "queues": (24, "d637e568284618443dba83d3827a0bd4"),
+    "queues": (25, "33a6b740b6bc04ede38b7fb5a4099171"),
     "schedule_decisions": (13, "ebb5c380a87c00d53e626db04a89f82c"),
     "schedule_occurrences": (7, "5ec90a35ba0383db811bf88020522004"),
-    "schedules": (37, "c666ae211b1a176a7af3695f8a9b16b1"),
+    "schedules": (38, "802d784b0d3fce8c36320b8e1ddc1900"),
     "schema_migrations": (4, "69a0d325516891e9b309ec0d42be5f05"),
     "target_binding_events": (10, "94d73ea696dd9eb3f57f029eeca79698"),
     "target_identity": (9, "9c9e666464edd9c079c34f7737adfbe6"),
@@ -112,7 +153,7 @@ CONSTRAINTS = {
     "queue_audit": (2, "5991475eda7f2bc46bdec61b8375708b"),
     "queue_counters": (2, "44835b2b8bfcc389728ec65520ee5e7c"),
     "queue_flow": (13, "72e3a513948c93146646d45c4c39032d"),
-    "queues": (17, "9efdbfaf7eb6bc4e3c5770ee3c764d46"),
+    "queues": (18, "bb6cc4e2c179d6fc17677d1463f572ce"),
     "schedule_decisions": (9, "21f272d0a93325771bf28c016c167f91"),
     "schedule_occurrences": (6, "7d7431666eaf79edefa9c3a26d0a122e"),
     "schedules": (21, "c20e70ddf516bb88d89d20a44bade146"),
@@ -214,6 +255,7 @@ TRIGGERS = {
     "jobs_workflow_member_counts_trg": "e205009f6b176d0896964355ac52b416",
     "workflows_member_counts_lifecycle_trg": "b320cf77e24f9a929354b960dfdd54d2",
     "jobs_admission_owner_guard": "9e643a95ba27673f7f042ba2275e86d9",
+    "schedules_admission_owner_guard": "c252154f80eca62ca1f968a7d848ee37",
 }
 
 COMPOSITES = {
@@ -502,8 +544,13 @@ class FunctionSpec:
 _FUNCTION_ROWS = r"""
 taskq._admission_owner_guard()||trigger|plpgsql|v|u|
 taskq._check_admission_owner(text,uuid)|p_queue text, p_workflow_id uuid DEFAULT NULL::uuid|void|plpgsql|v|u|
+taskq._resolve_admission_owner_role(text)|p_owner_role text|oid|plpgsql|s|u|
+taskq._schedule_admission_owner_guard()||trigger|plpgsql|v|u|
+taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)|p_queue text, p_owner_role text, p_actor text, p_reason text, p_expected_environment text, p_expected_installation_id uuid, p_allow_production boolean DEFAULT false|text|plpgsql|v|u|taskq_operator
 taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)|p_queue text, p_owner_role text, p_expected_environment text, p_expected_installation_id uuid, p_allow_production boolean DEFAULT false|text|plpgsql|v|u|taskq_operator
 taskq.get_queue_admission_owner(text)|p_queue text|TABLE(queue text, owner_role text, max_depth bigint, depth bigint)|plpgsql|v|u|taskq_observer
+taskq.get_queue_admission_owner_identity(text)|p_queue text|TABLE(queue text, owner_role text, owner_oid oid, owner_present boolean, max_depth bigint, depth bigint)|plpgsql|v|u|taskq_observer
+taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)|p_queue text, p_owner_role text, p_actor text, p_reason text, p_expected_environment text, p_expected_installation_id uuid, p_allow_production boolean DEFAULT false|text|plpgsql|v|u|taskq_operator
 taskq._audit_queue(text,text,text,jsonb)|p_queue text, p_event_type text, p_actor text, p_detail jsonb|void|plpgsql|v|u|
 taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,boolean)|p_queue text, p_worker_id text, p_batch integer DEFAULT 1, p_job_types text[] DEFAULT NULL::text[], p_lease_seconds integer DEFAULT NULL::integer, p_affinity_key text DEFAULT NULL::text, p_job_id uuid DEFAULT NULL::uuid, p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|
 taskq._claim_jobs_unattested(text,text,integer,text[],integer,text,uuid,text[],boolean)|p_queue text, p_worker_id text, p_batch integer, p_job_types text[], p_lease_seconds integer, p_affinity_key text, p_job_id uuid, p_continuation_policy_hashes text[], p_accept_throttled boolean DEFAULT false|taskq.claim_batch|plpgsql|v|u|
@@ -682,7 +729,14 @@ PUBLIC_ERRORS = {
     "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)": frozenset(
         {"TQ001", "TQ403", "TQ409", "TQ422", "TQ500"}
     ),
+    "taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)": frozenset(
+        {"TQ001", "TQ403", "TQ409", "TQ422", "TQ500"}
+    ),
     "taskq.get_queue_admission_owner(text)": frozenset(),
+    "taskq.get_queue_admission_owner_identity(text)": frozenset(),
+    "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)": frozenset(
+        {"TQ001", "TQ403", "TQ409", "TQ422", "TQ500"}
+    ),
     "taskq.get_authorization_projection(uuid)": frozenset(),
     "taskq.get_contract_meta()": frozenset(),
     "taskq.get_job(uuid,boolean,boolean,boolean,boolean)": frozenset(),
@@ -778,7 +832,7 @@ REPLAY_RULES = {
 # the immutable contract/capability values are verified.
 CONTROL_SEED_KEYS = frozenset({"tick", "janitor_daily", "stats_snapshot"})
 META_SEEDS = {
-    "contract_version": '"0.6.11"',
+    "contract_version": '"0.6.12"',
     "capabilities": (
         '{"active": ["admission_reservations", "circuit_breaker", '
         '"continuation_flow_inheritance", "dependencies_workflows", '

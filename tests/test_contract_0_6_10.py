@@ -20,7 +20,7 @@ MIGRATION = Path(__file__).parents[1] / "src/taskq/sql/migrations/0046_queue_adm
 def test_queue_admission_owner_migration_is_packaged_and_versioned():
     migrations = discover_migrations()
     assert migrations[45].id == "0046_queue_admission_owner"
-    assert CONTRACT_VERSION == "0.6.11"
+    assert CONTRACT_VERSION == "0.6.12"
     assert "0.6.10" in SUPPORTED_SQL_CONTRACT_VERSIONS
 
 

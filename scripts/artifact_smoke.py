@@ -49,7 +49,7 @@ async def _assert_activation(dsn: str) -> None:
             await conn.fetchval(
                 "SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'"
             )
-            == "0.6.11"
+            == "0.6.12"
         )
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_bulk_admission')") is True
         assert await conn.fetchval("SELECT taskq.has_capability('workflow_continuations')") is True
@@ -211,6 +211,7 @@ def _verify(taskq_cli: Path, dsn: str, *, cwd: Path) -> dict[str, object]:
 _OLD_OWNER_ID = "0046_queue_admission_owner"
 _OLD_OWNER_SHA256 = "7cc1aca7fe508c49886f808eb4dca98d52a21fd269a2b38e8b455370cc5562b9"
 _OWNER_UPGRADE_ID = "0047_queue_admission_owner_upgrade"
+_OWNER_RECOVERY_ID = "0048_queue_admission_owner_recovery"
 
 
 def _owner_upgrade_roles(database: str) -> dict[str, str]:
@@ -499,14 +500,46 @@ def _exercise_owner_upgrade(taskq_cli: Path, admin_dsn: str, database: str, *, c
     )
     digest = _migration_plan(taskq_cli, dsn, cwd=cwd)
     result = _migrate(taskq_cli, dsn, digest, cwd=cwd)
-    assert result["data"]["applied"] == [_OWNER_UPGRADE_ID], result
+    assert result["data"]["applied"] == [_OWNER_UPGRADE_ID, _OWNER_RECOVERY_ID], result
     assert _verify(taskq_cli, dsn, cwd=cwd)["ok"] is True
     after = asyncio.run(_owner_upgrade_snapshot(dsn, database))
     new_ledger = after.pop("schema_migrations")
-    assert [row for row in new_ledger if row["id"] != _OWNER_UPGRADE_ID] == old_ledger
-    addition = [row for row in new_ledger if row["id"] == _OWNER_UPGRADE_ID]
-    assert len(addition) == 1 and addition[0]["checksum"] == discover_migrations()[-1].checksum
-    assert before == after
+    new_ids = {_OWNER_UPGRADE_ID, _OWNER_RECOVERY_ID}
+    assert [row for row in new_ledger if row["id"] not in new_ids] == old_ledger
+    additions = {row["id"]: row for row in new_ledger if row["id"] in new_ids}
+    migrations = {migration.id: migration for migration in discover_migrations()}
+    assert set(additions) == new_ids
+    assert all(additions[key]["checksum"] == migrations[key].checksum for key in new_ids)
+
+    # 0048 adds identity metadata and catalog objects, so compare durable host
+    # and TaskQ application rows separately from their expected schema growth.
+    for key in (
+        "host_reservations",
+        "view",
+        "jobs",
+        "job_attempts",
+        "workflows",
+        "admissions",
+        "target_identity",
+        "target_binding_events",
+        "roles",
+        "memberships",
+        "schema",
+    ):
+        assert before[key] == after[key], key
+    for table in ("queues", "schedules"):
+        normalized = []
+        for row in after[table]:
+            row = dict(row)
+            row.pop("admission_owner_oid", None)
+            normalized.append(row)
+        assert before[table] == normalized, table
+    before_functions = {row["identity"]: row["oid"] for row in before["functions"]}
+    after_functions = {row["identity"]: row["oid"] for row in after["functions"]}
+    assert all(after_functions[identity] == oid for identity, oid in before_functions.items())
+    before_relations = {row["relname"]: row["oid"] for row in before["relations"]}
+    after_relations = {row["relname"]: row["oid"] for row in after["relations"]}
+    assert all(after_relations[name] == oid for name, oid in before_relations.items())
     asyncio.run(_assert_activation(dsn))
     repeated = _migrate(taskq_cli, dsn, _migration_plan(taskq_cli, dsn, cwd=cwd), cwd=cwd)
     assert repeated["data"] == {"applied": [], "up_to_date": True}
@@ -567,7 +600,7 @@ def main() -> None:
     package_file = Path(taskq.__file__).resolve()
     repo = args.repo.resolve()
     assert not package_file.is_relative_to(repo), (package_file, repo)
-    assert taskq.__version__ == "0.1.0a39"
+    assert taskq.__version__ == "0.1.0a40"
     assert importlib.metadata.version("outlabs-taskq") == taskq.__version__
     assert "fastapi" not in sys.modules
     assert "outlabs_auth" not in sys.modules
@@ -789,12 +822,16 @@ def main() -> None:
         "0045_terminal_effect_fence",
         "0046_queue_admission_owner",
         "0047_queue_admission_owner_upgrade",
+        "0048_queue_admission_owner_recovery",
     ]
-    assert len(FUNCTIONS) == 119
+    assert len(FUNCTIONS) == 124
     assert {
+        "taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
         "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)",
         "taskq.get_queue_admission_owner(text)",
+        "taskq.get_queue_admission_owner_identity(text)",
         "taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)",
+        "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
     } <= set(FUNCTIONS)
 
     if args.mode != "core":
