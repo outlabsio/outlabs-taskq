@@ -119,6 +119,13 @@ class WorkerOptions(BaseModel):
     settle_backpressure_max_elapsed: float = Field(default=120.0, gt=0, le=3600)
     no_handler_delay_seconds: int = Field(default=60, ge=0, le=86400)
     unsupported_policy_delay_seconds: int = Field(default=60, ge=0, le=86400)
+    # A normal shutdown releases an in-flight claim without consuming the
+    # task's retry budget. Once the supervisor has forced the handler past
+    # its soft-stop deadline, however, the provider outcome may be unknown
+    # (for example an LLM request can have reached the provider while the
+    # worker lost its lease). Consumers that use idempotent effect fences
+    # can opt into a bounded retry-budgeted failure for that narrow path.
+    fail_on_shutdown_deadline: bool = False
     effect_request_max_bytes: int = Field(default=8192, ge=1024, le=8_388_608)
     effect_response_max_bytes: int = Field(default=8192, ge=1024, le=8_388_608)
 
@@ -1637,17 +1644,35 @@ class WorkerSupervisor:
     ) -> JobRunReport:
         progress = context.progress if context is not None else claim.progress
         if intent is None:
+            if (
+                control is not None
+                and control.shutdown_deadline
+                and self.options.fail_on_shutdown_deadline
+            ):
 
-            async def operation() -> SettleResult:
-                return await self.transport.release(
-                    claim.job_id,
-                    claim.attempt_id,
-                    self.worker_id,
-                    "worker_shutdown",
-                    progress=progress,
-                )
+                async def operation() -> SettleResult:
+                    return await self.transport.fail(
+                        claim.job_id,
+                        claim.attempt_id,
+                        self.worker_id,
+                        "worker_shutdown_deadline",
+                        retryable=True,
+                        progress=progress,
+                    )
 
-            command = CommandName.RELEASE
+                command = CommandName.FAIL
+            else:
+
+                async def operation() -> SettleResult:
+                    return await self.transport.release(
+                        claim.job_id,
+                        claim.attempt_id,
+                        self.worker_id,
+                        "worker_shutdown",
+                        progress=progress,
+                    )
+
+                command = CommandName.RELEASE
         elif isinstance(intent, Complete):
 
             async def operation() -> SettleResult:

@@ -1,14 +1,13 @@
-# outlabs-taskq 0.1.0a40 release candidate
+# outlabs-taskq 0.1.0a40 release notes
 
-**Base release:** 0.1.0a38  
+**Base release:** 0.1.0a39  
 **SQL contract:** 0.6.12  
 **Protocol document:** 1.0.18  
 **Packaged migrations:** 0001–0048  
-**Status:** unreleased candidate
 
 ## Shared-system correction
 
-This candidate retains the terminal host-effect fence and queue admission owner
+This release retains the terminal host-effect fence and queue admission owner
 introduced by migrations 0045/0046, while forward migrations 0047/0048 close
 the cross-consumer paths found during whole-system review.
 
@@ -82,5 +81,5 @@ replaced, keep the queue paused and quiesced, attest the target, and rotate to a
 new dedicated producer role. Preserve the audit evidence and rerun catalog and
 LOGIN-boundary verification before resuming.
 
-No package publish, production migration, queue binding, or deployment is part
-of this candidate work.
+Package publication does not authorize a production migration, queue binding,
+or deployment; those remain consumer rollout decisions with their own gates.
