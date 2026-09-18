@@ -1,9 +1,9 @@
 # outlabs-taskq 0.1.0a40 release notes
 
-**Base release:** 0.1.0a39  
-**SQL contract:** 0.6.12  
-**Protocol document:** 1.0.18  
-**Packaged migrations:** 0001–0048  
+**Base release:** 0.1.0a39
+**SQL contract:** 0.6.12
+**Protocol document:** 1.0.18
+**Packaged migrations:** 0001–0048
 
 ## Shared-system correction
 
