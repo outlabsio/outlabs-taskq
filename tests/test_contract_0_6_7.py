@@ -58,7 +58,7 @@ def _spec(workflow_id: UUID, index: int, *, value: int | None = None) -> dict[st
 async def test_contract_and_capability_are_active(pg: asyncpg.Connection) -> None:
     assert (
         await pg.fetchval("SELECT value #>> '{}' FROM taskq.meta WHERE key='contract_version'")
-        == "0.6.8"
+        == "0.6.12"
     )
     assert await pg.fetchval("SELECT taskq.has_capability('workflow_bulk_admission')") is True
     definition = await pg.fetchval(

@@ -117,7 +117,7 @@ The model is frozen and validates `created == (status is created)`. Single enque
 
 ### 3.4 Errors
 
-`TqCode` is the closed Protocol-v1 registry: `TQ001`, `TQ409`, `TQ422`, `TQ426`, `TQ429`, `TQ500`, `TQ501`, and `TQ503`. `TaskqError` carries `code`, `retryable`, safe `details`, and an exception cause. Stable subclasses provide ergonomic catches for not-found, conflict, validation, version, backpressure, internal, capability, and unavailable categories.
+`TqCode` is the closed Protocol-v1 registry: `TQ001`, `TQ403`, `TQ409`, `TQ422`, `TQ425`, `TQ426`, `TQ429`, `TQ500`, `TQ501`, and `TQ503`. `TaskqError` carries `code`, `retryable`, safe `details`, and an exception cause. Stable subclasses provide ergonomic catches for not-found, operator authorization denial, conflict, validation, queue-owner denial, version, backpressure, internal, capability, and unavailable categories. `TQ403` and `TQ425` map to HTTP 403 and are nonretryable.
 
 The SQL transport reads SQLSTATE from the driver exception chain; it never matches exception text. Registered TQ states map 1:1. Any other database/driver failure exposed as a taskq command becomes `TaskqInternalError(code=TQ500)` unless it is a known availability failure mapped to `TQ503`; the original remains chained for protected logging. Attempt ids, connection strings, raw SQL, and driver diagnostics do not appear in public `str`, `repr`, or details.
 

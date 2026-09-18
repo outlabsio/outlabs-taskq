@@ -2,7 +2,16 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a38`** uses SQL contract **`0.6.8`** and Protocol revision **`1.0.18`**. The resource-oriented, non-interactive CLI is a complete operator and coding-agent surface over direct PostgreSQL and HTTP. Migration `0044` makes policy-bearing workflow continuations inherit their parent's provider flow key; migrations `0022`–`0043` provide the flow-control and workflow-safe admission plane.
+**Status:** alpha — **`0.1.0a40`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. Additive SQL
+contracts 0.6.9–0.6.12 and migrations 0045–0048 add an installation-bound
+terminal host-effect row lock and database-role queue admission owner. The
+0.6.12 correction closes replay and standalone-scheduler admission paths, stores
+role identity by OID, removes owner checks from the queue-row lock path, and adds
+audited adoption and rotation for paused, quiesced queues.
+See [ADR-038](docs/adr/ADR-038-terminal-host-effect-fence.md) and
+[ADR-039](docs/adr/ADR-039-queue-admission-owner.md). The resource-oriented,
+non-interactive CLI is a complete operator and coding-agent surface over direct
+PostgreSQL and HTTP.
 
 SQL functions in schema `taskq` are the contract. The Python package provides the installer, typed client, worker runtime, and an optional FastAPI facade. `outlabs-auth` is an optional adapter, not a hard dependency. Queue storage may be co-resident with the host database or dedicated; the HTTP facade may use OutLabsAuth, a host-supplied/remote authorizer, or simple packaged credentials, while trusted direct-SQL deployments use PostgreSQL capability roles.
 
@@ -21,6 +30,8 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a40.md`](docs/RELEASE-0.1.0a40.md) | Queue-admission ownership correction, recovery, and staged rollout (contract 0.6.12) |
+| [`docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md`](docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md) | First-consumer topology, local compatibility evidence, and production closing gates for Diverse Data |
 | [`docs/RELEASE-0.1.0a38.md`](docs/RELEASE-0.1.0a38.md) | 0.1.0a38 workflow-continuation flow inheritance (contract 0.6.8) |
 | [`docs/RELEASE-0.1.0a37.md`](docs/RELEASE-0.1.0a37.md) | 0.1.0a37 workflow-safe bulk admission and O(1) admission depth checks (contract 0.6.7) |
 | [`docs/RELEASE-0.1.0a36.md`](docs/RELEASE-0.1.0a36.md) | 0.1.0a36 worker degraded-recovery and listener-error log visibility — package-only (contract 0.6.6) |

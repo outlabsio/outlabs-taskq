@@ -140,7 +140,7 @@ class TestChoreographedRaces:
             )
             await _wait_for_lock(pg, second_pid, {"advisory"})
             await _release_barrier(pg, barrier)
-            await _wait_for_lock(pg, second_pid, {"transactionid", "spectoken"})
+            await _wait_for_lock(pg, second_pid, {"advisory", "transactionid", "spectoken"})
             await transaction.commit()
 
             second = await _finish_task(contender)

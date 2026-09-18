@@ -55,12 +55,20 @@ class TaskqNotFoundError(TaskqError):
     code = TqCode.NOT_FOUND
 
 
+class TaskqOperatorDeniedError(TaskqError):
+    code = TqCode.OPERATOR_DENIED
+
+
 class TaskqConflictError(TaskqError):
     code = TqCode.CONFLICT
 
 
 class TaskqValidationError(TaskqError):
     code = TqCode.VALIDATION
+
+
+class TaskqQueueOwnerDeniedError(TaskqError):
+    code = TqCode.QUEUE_OWNER_DENIED
 
 
 class TaskqVersionError(TaskqError):
@@ -99,8 +107,10 @@ class UnknownTaskError(LookupError):
 
 _ERROR_TYPES: dict[TqCode, type[TaskqError]] = {
     TqCode.NOT_FOUND: TaskqNotFoundError,
+    TqCode.OPERATOR_DENIED: TaskqOperatorDeniedError,
     TqCode.CONFLICT: TaskqConflictError,
     TqCode.VALIDATION: TaskqValidationError,
+    TqCode.QUEUE_OWNER_DENIED: TaskqQueueOwnerDeniedError,
     TqCode.VERSION: TaskqVersionError,
     TqCode.BACKPRESSURE: TaskqBackpressureError,
     TqCode.INTERNAL: TaskqInternalError,
@@ -176,6 +186,8 @@ __all__ = [
     "TaskqInternalError",
     "InvalidFollowupError",
     "TaskqNotFoundError",
+    "TaskqOperatorDeniedError",
+    "TaskqQueueOwnerDeniedError",
     "TaskqUnavailableError",
     "TaskqValidationError",
     "TaskqVersionError",

@@ -22,23 +22,48 @@ independent contracts that must each be proven.
 2. Build immutable, platform-correct artifacts once. Record source SHA, artifact
    digest, installed TaskQ version, and previous rollback artifact. Do not use a
    mutable `latest` tag as release identity.
-3. Keep queues paused. Against the exact target, run `taskq db plan`, review the
-   digest, migrate with the owner credential, bind/verify the expected target,
-   then require `taskq db verify` to pass. Runtime services never receive the
+3. Keep affected queues and schedules paused. Deploy the compatible artifact to
+   every API, worker, scheduler, operator, migration, and maintenance process
+   while the database is still on the old supported contract. Attest its package
+   version, source, artifact digest, and target identity, then prove that no old
+   runtime can reconnect.
+4. Against the exact target, run `taskq db plan`, review the digest, migrate with
+   the owner credential, bind or recover the queue owner when required, and
+   require `taskq db verify` to pass. Runtime services never receive the
    owner/migration credential.
-4. Prove authorization boundaries. A generic producer/worker should fail with
+5. Prove authorization boundaries. A generic producer/worker should fail with
    the expected `403` on a host application's domain planner route; a dedicated
    least-privilege integration should succeed only on the required route. Do
    not broaden a generic TaskQ key to solve a domain authorization failure.
-5. Under a serialized release lock, start the API first, exactly one scheduler,
-   and worker lanes while all queues remain paused. Attest the running package,
-   source, artifact digest/platform, target installation, migration head, and
-   scheduler identity before traffic.
-6. Open one queue and one bounded canary at a time. Record workflow keys/IDs,
+6. Under a serialized release lock, confirm the API, exactly one scheduler, and
+   worker lanes are healthy while all affected queues remain paused. Re-attest
+   the running package, source, artifact digest/platform, target installation,
+   migration head, and scheduler identity before traffic.
+7. Open one queue and one bounded canary at a time. Record workflow keys/IDs,
    terminal counts, queue state, provider side effects, and committed writes.
-7. Roll back by pausing the affected queue, draining or allowing leases to
-   expire according to the handler contract, restoring the retained immutable
-   artifact, and re-running all package/database/identity checks.
+8. Roll back by pausing the affected queue and its schedules, draining or
+   allowing leases to expire according to the handler contract, and re-running
+   all package/database/identity checks. After a forward-only migration, retain
+   the compatible runtime and recover forward; restore an older artifact only
+   while the database still reports a contract that artifact accepts.
+
+### API authority with HTTP-only workers
+
+When one API owns the TaskQ database and remote workers use the packaged HTTP
+transport, deploy and attest the API first against the old contract from the
+new runtime's explicit supported-contract set. Prepare the compatible worker
+artifacts before migration and fence every older worker, but keep lanes stopped
+or queues paused. The API owns migration, queue-owner adoption/recovery,
+maintenance, schedules, and the mounted facade. Worker hosts receive no TaskQ
+database credential.
+
+After exact migration verification, start the HTTP workers and require each to
+negotiate the API-reported contract before its first claim. Prove both layers:
+the API's database producer role must pass queue-owner admission while another
+LOGIN fails, and each worker's HTTP identity must succeed only for its
+allowlisted queue and domain effects. A healthy API alone does not prove worker
+presence; a registered worker alone does not prove database contract,
+scheduler ownership, or queue-owner identity.
 
 ## Known footguns
 

@@ -43,6 +43,7 @@ BEHAVIOR_GROUPS = {
     },
     "trusted_effect": {
         "taskq.lock_active_effect_attempt(uuid,uuid,text,text,text)",
+        "taskq.lock_terminal_effect_job(uuid,text,text,text,uuid,boolean)",
     },
     "schedule_operator": {
         "taskq.get_schedule(text)",
@@ -70,6 +71,8 @@ BEHAVIOR_GROUPS = {
         "taskq.worker_heartbeat(text,text[],text,integer,text,jsonb)",
     },
     "observer": {
+        "taskq.get_queue_admission_owner(text)",
+        "taskq.get_queue_admission_owner_identity(text)",
         "taskq.get_authorization_projection(uuid)",
         "taskq.get_contract_meta()",
         "taskq.get_job(uuid,boolean,boolean,boolean,boolean)",
@@ -85,6 +88,8 @@ BEHAVIOR_GROUPS = {
         "taskq.queue_health(text)",
     },
     "operator": {
+        "taskq.adopt_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
+        "taskq.bind_queue_admission_owner(text,text,text,uuid,boolean)",
         "taskq.cancel_job(uuid,text,text)",
         "taskq.ensure_queue(text,jsonb,text)",
         "taskq.expire_job(uuid,text)",
@@ -97,6 +102,7 @@ BEHAVIOR_GROUPS = {
         "taskq.request_worker_shutdown(text,text,text)",
         "taskq.resume_queue(text,text)",
         "taskq.run_now(uuid,text)",
+        "taskq.rotate_queue_admission_owner(text,text,text,text,text,uuid,boolean)",
         "taskq.set_concurrency_limit(text,integer,text)",
         "taskq.set_flow_limit(text,integer,integer,text)",
         "taskq.set_priority_aging(text,integer,text)",
@@ -156,8 +162,10 @@ def test_manifest_coverage_ledgers_are_closed() -> None:
     assert set(REPLAY_RULES) == set(PUBLIC_FUNCTIONS)
     assert set().union(*PUBLIC_ERRORS.values()) == {
         "TQ001",
+        "TQ403",
         "TQ409",
         "TQ422",
+        "TQ425",
         "TQ429",
         "TQ500",
         "TQ501",
@@ -281,7 +289,7 @@ async def test_observer_projections_metrics_and_views(
     assert revealed is not None and _json(revealed["payload"]) == {"hello": "world"}
     meta = await observer.fetchrow("SELECT * FROM taskq.get_contract_meta()")
     assert meta is not None
-    assert meta["contract_version"] == "0.6.8"
+    assert meta["contract_version"] == "0.6.12"
     assert _json(meta["capabilities"]) == {
         "active": [
             "admission_reservations",
