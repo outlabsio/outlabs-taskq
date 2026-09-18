@@ -54,6 +54,25 @@ and business authorization remain the consumer's responsibility.
 Do not migrate first. Runtimes older than this candidate do not recognize SQL
 contract 0.6.12 and may not map `TQ425` correctly.
 
+## First consumer rollout
+
+The first planned rollout is the Diverse Data API and its HTTP-only
+`diverse-data-workers` fleet. The API is the sole TaskQ database, migration,
+facade, producer, operator, and maintenance authority. Workers keep only
+lane-scoped HTTP credentials and never receive TaskQ database roles. Publication
+and both consumer lock regenerations precede promotion. The API runtime rolls
+out first against the old explicitly supported contract; compatible workers
+are then prepared and all older processes are fenced before migration.
+
+The initial local-wheel checks proved broad Python compatibility on older
+consumer snapshots, but they are not the final consumer release gate. The
+current rollout commits must pass their complete suites after locking the
+published artifact and must record compatible-behind API boot, exact
+post-migration attestation, queue-owner adoption, owner/non-owner and HTTP
+authorization checks, separate-housekeeper fire, worker settlement, and a
+bounded canary. See
+[`evidence/diverse-data-a40-pre-rollout-2026-09-18.md`](evidence/diverse-data-a40-pre-rollout-2026-09-18.md).
+
 ## Recovery and rollback
 
 Before migration, rollback can restore the previous artifact. After migration,

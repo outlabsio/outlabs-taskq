@@ -47,6 +47,24 @@ independent contracts that must each be proven.
    the compatible runtime and recover forward; restore an older artifact only
    while the database still reports a contract that artifact accepts.
 
+### API authority with HTTP-only workers
+
+When one API owns the TaskQ database and remote workers use the packaged HTTP
+transport, deploy and attest the API first against the old contract from the
+new runtime's explicit supported-contract set. Prepare the compatible worker
+artifacts before migration and fence every older worker, but keep lanes stopped
+or queues paused. The API owns migration, queue-owner adoption/recovery,
+maintenance, schedules, and the mounted facade. Worker hosts receive no TaskQ
+database credential.
+
+After exact migration verification, start the HTTP workers and require each to
+negotiate the API-reported contract before its first claim. Prove both layers:
+the API's database producer role must pass queue-owner admission while another
+LOGIN fails, and each worker's HTTP identity must succeed only for its
+allowlisted queue and domain effects. A healthy API alone does not prove worker
+presence; a registered worker alone does not prove database contract,
+scheduler ownership, or queue-owner identity.
+
 ## Known footguns
 
 ### Package version is not database compatibility
