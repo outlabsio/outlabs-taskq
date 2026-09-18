@@ -59,6 +59,7 @@ def _supervisor(
     concurrency: int = 2,
     sync_workers: int | None = None,
     timeout: float | None = None,
+    fail_on_shutdown_deadline: bool = False,
 ) -> WorkerSupervisor:
     task = Task(
         name="math.wait",
@@ -75,6 +76,7 @@ def _supervisor(
             concurrency=concurrency,
             sync_workers=sync_workers,
             soft_stop_timeout=timeout,
+            fail_on_shutdown_deadline=fail_on_shutdown_deadline,
         ),
         clock=clock,
     )
@@ -256,6 +258,37 @@ async def test_deadline_hard_cancels_async_and_releases_budget_free() -> None:
     assert report.settlement_command == "release"
     assert report.cancellation_reason.value == "shutdown"
     assert transport.calls[0].arguments["worker_id"] == "worker-1"
+    assert supervisor.stopped
+
+
+async def test_deadline_can_fail_unknown_provider_outcome_with_bounded_retry() -> None:
+    async def handler(payload: Input) -> Output:
+        await asyncio.Event().wait()
+        return Output(doubled=payload.value * 2)
+
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    supervisor = _supervisor(
+        handler,
+        clock=clock,
+        transport=transport,
+        timeout=2,
+        fail_on_shutdown_deadline=True,
+    )
+    supervisor.start()
+    running = supervisor.submit(_claim())
+    await _spin_until(lambda: clock.sleeping == 1)
+    stopping = asyncio.create_task(supervisor.stop())
+    await _spin_until(lambda: clock.sleeping == 2)
+    clock.advance(2)
+    report = await running
+    await stopping
+
+    assert report.settlement_command == "fail"
+    assert report.cancellation_reason.value == "shutdown"
+    assert [call.command for call in transport.calls] == ["fail"]
+    assert transport.calls[0].arguments["error"] == "worker_shutdown_deadline"
+    assert transport.calls[0].arguments["retryable"] is True
     assert supervisor.stopped
 
 
