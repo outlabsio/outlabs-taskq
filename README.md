@@ -2,7 +2,9 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — **`0.1.0a40`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. Additive SQL
+**Status:** alpha — latest published package **`0.1.0a41`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a41 change is limited to PostgreSQL 18 dump/restore catalog verification; existing a40 API, worker, and scheduler deployments remain compatible and do not require a runtime upgrade. See the [a41 release notes](docs/RELEASE-0.1.0a41.md) for the exact verifier boundary and separate ownership/grant checks.
+
+The a40 runtime introduced additive SQL
 contracts 0.6.9–0.6.12 and migrations 0045–0048 add an installation-bound
 terminal host-effect row lock and database-role queue admission owner. The
 0.6.12 correction closes replay and standalone-scheduler admission paths, stores
@@ -59,7 +61,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a38
+pip install outlabs-taskq==0.1.0a41
 ```
 
 ## Credential handling
@@ -170,7 +172,7 @@ reachable should gate it at the host application or reverse proxy.
 
 ```
 src/taskq/
-  sql/           # migrations 0001-0021, runner/verifier, manifest, SQL transport
+  sql/           # migrations 0001-0048, runner/verifier, manifest, SQL transport
   scheduler.py   # standalone runtime, bounded mode, doctor, YAML plan/apply
   protocol.py    # closed command/outcome/error single-source (Tier-0 parity-tested)
   continuations.py # pure policy compiler, negotiation, and derived identities
