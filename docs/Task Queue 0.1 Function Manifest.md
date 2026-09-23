@@ -5,7 +5,7 @@
 > **(a) H-01:** `claim_jobs` returns `taskq.claim_batch (state, jobs[])`, not a bare SETOF — `state ∈ claimed|empty|paused|unknown_queue|unavailable`.
 > **(b) H-03:** settle replays are **verb-aware**: same verb re-settled → `already_settled`; different verb against a settled attempt → `settle_conflict` (the attempt-ledger status IS the verb record: succeeded↔complete, failed↔fail, released↔release, snoozed↔snooze, cancelled↔cancel_running, expired↔reaper).
 
-## Unreleased additive 0.6.9 terminal effect fence
+## Released in a40: additive 0.6.9 terminal effect fence
 
 [ADR-038](adr/ADR-038-terminal-host-effect-fence.md) and migration
 `0045_terminal_effect_fence.sql` define the additional public SQL identity
@@ -20,7 +20,7 @@ errors are excluded; host tenant/generation/payload authorization stays host-own
 No HTTP command or new role/table grants. The machine manifest is updated to
 0.6.9; earlier sections below retain their historical version-specific scope.
 
-## Unreleased additive 0.6.10 queue admission owner
+## Released in a40: additive 0.6.10 queue admission owner
 
 [ADR-039](adr/ADR-039-queue-admission-owner.md) and migration
 `0046_queue_admission_owner.sql` defines immutable database-role admission
@@ -33,7 +33,7 @@ terminal-fence ordering, and provenance-safe continuation enforcement begin in
 migration 0047 / SQL contract 0.6.11. No tenant/API-key identity or HTTP command
 is added. The machine manifest is updated to 0.6.10.
 
-## Unreleased corrective 0.6.11 queue admission owner upgrade
+## Released in a40: corrective 0.6.11 queue admission owner upgrade
 
 Migration `0047_queue_admission_owner_upgrade.sql` requires SQL contract 0.6.10
 and advances metadata to 0.6.11. It runs in place on databases that already
@@ -44,7 +44,7 @@ safe continuation guard, terminal fence check, and admission checks. The
 0046 ledger row remains unchanged; normal repeated packaged migration is a
 no-op.
 
-## Unreleased corrective 0.6.12 ownership closure and recovery
+## Released in a40: corrective 0.6.12 ownership closure and recovery
 
 Migration `0048_queue_admission_owner_recovery.sql` requires SQL contract
 0.6.11 and advances metadata to 0.6.12 without changing migrations 0045–0047.

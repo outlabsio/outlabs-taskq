@@ -1,9 +1,11 @@
 # ADR-039 — Queue admission owner
 
-Status: candidate implemented through migration 0048 (SQL contract 0.6.12; not published)
+Status: released in 0.1.0a40 through migration 0048 (SQL contract 0.6.12)
 
-No live or production verification claim is made in this ADR. Consumer and
-release-train validation are release gates for the candidate.
+This ADR records the design and pre-release verification gates. For release and
+consumer pre-rollout evidence, see the [a40 release notes](../RELEASE-0.1.0a40.md)
+and [consumer pre-rollout record](../evidence/diverse-data-a40-pre-rollout-2026-09-18.md);
+package a41 leaves this SQL behavior unchanged.
 
 ## Decision
 
@@ -77,7 +79,7 @@ auditable, paused, and forward-only.
 ## Rollout
 
 Deploy package 0.1.0a40 to every API, worker, scheduler, operator, migrator, and
-maintenance process before applying migrations 0045–0048. The candidate runtime
+maintenance process before applying migrations 0045–0048. The a40 runtime
 accepts the old and new contracts during that staged transition. Confirm no old
 runtime can reconnect, then migrate, verify the closed catalog, bind or recover
 while queues and schedules remain paused, and run owner/non-owner LOGIN tests on
@@ -95,4 +97,4 @@ queue-configuration concurrency, role rename, adoption, rotation, terminal
 redrive, runner continuations, separate-housekeeper schedule firing, target
 attestation, exact grants, and catalog verification. PostgreSQL 16, 17, and 18,
 built-artifact, release-train, and canonical consumer checks remain required
-before publication or deployment.
+before publication or deployment; see the a40 release record for completed gates.

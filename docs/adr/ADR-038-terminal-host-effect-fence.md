@@ -1,6 +1,6 @@
 # ADR-038 — Transaction-bound terminal host-effect fence
 
-Status: implemented candidate, not released
+Status: released in 0.1.0a40
 Date: 2026-09-10
 SQL contract: 0.6.9; additive migration `0045_terminal_effect_fence`
 
@@ -71,8 +71,8 @@ recovery policy.
 ## Compatibility and verification
 
 Package source baseline: `0.1.0a38` / `5a622cd530c88db9aa92ad9e8e64c31aa883e4df`.
-The candidate package is `0.1.0a40` and unpublished; artifact publication and explicit
-downstream pins remain release gates. The candidate runtime accepts 0.6.9 through 0.6.12 alongside its prior
+Package `0.1.0a40` was published; the a41 restore-verifier release leaves this behavior unchanged. Explicit
+downstream pins remain rollout gates. The a40 runtime accepts 0.6.9 through 0.6.12 alongside its prior
 contracts. Deploy the reviewed runtime everywhere BEFORE forward-only migrations
 0045/0046/0047/0048; each migration requires its immediate predecessor, so a37
 installations also need unchanged 0044 before this chain. A 0.6.9 installation
