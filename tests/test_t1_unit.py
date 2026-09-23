@@ -244,7 +244,9 @@ class TestPlan:
 
 
 def test_restore_equivalent_constraint_digest_is_exactly_bounded() -> None:
-    assert sql_manifest.CONSTRAINT_EQUIVALENT_DIGESTS == {}
+    assert sql_manifest.CONSTRAINT_EQUIVALENT_DIGESTS == {
+        "schedules": frozenset({"5e82a3a9211d75f78cce26bdbdc71736"})
+    }
     assert sql_manifest.CONSTRAINTS["schedules"][1] == "c20e70ddf516bb88d89d20a44bade146"
 
 

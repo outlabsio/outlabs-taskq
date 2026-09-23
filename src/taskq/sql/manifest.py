@@ -165,10 +165,14 @@ CONSTRAINTS = {
     "workflows": (11, "b35b364d2ab059ce10e9248c5dd9abfc"),
 }
 
-# ADR-034: pg_dump/pg_restore may reassociate the equivalent three-term
-# conjunction in schedules_name_ck. This is the sole accepted alternate; all
-# identities and the relation's constraint count remain exact.
-CONSTRAINT_EQUIVALENT_DIGESTS: dict[str, frozenset[str]] = {}
+# ADR-034: PostgreSQL 18 pg_dump/pg_restore reparses four equivalent
+# three-term conjunctions on taskq.schedules. The alternate below was derived
+# from an otherwise exact TaskQ-only restore and is accepted only for this one
+# relation with the same 21 constraint identities. Every other relation and
+# catalog identity remains exact.
+CONSTRAINT_EQUIVALENT_DIGESTS: dict[str, frozenset[str]] = {
+    "schedules": frozenset({"5e82a3a9211d75f78cce26bdbdc71736"}),
+}
 
 INDEXES = {
     "admissions_cancelled_cleanup_idx": "027dfe0b40e8c3fc717ced0dd50cf37f",
