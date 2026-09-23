@@ -30,6 +30,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a41.md`](docs/RELEASE-0.1.0a41.md) | Bounded PostgreSQL 18 restore-verifier compatibility fix (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a40.md`](docs/RELEASE-0.1.0a40.md) | Queue-admission ownership correction, recovery, and staged rollout (contract 0.6.12) |
 | [`docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md`](docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md) | First-consumer topology, local compatibility evidence, and production closing gates for Diverse Data |
 | [`docs/RELEASE-0.1.0a38.md`](docs/RELEASE-0.1.0a38.md) | 0.1.0a38 workflow-continuation flow inheritance (contract 0.6.8) |
