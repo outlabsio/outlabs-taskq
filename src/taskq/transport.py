@@ -113,6 +113,20 @@ class ProducerTransport(ClosableTransport, Protocol):
 
 
 @runtime_checkable
+class ClaimWaitTransport(Protocol):
+    """Runner capability: an empty claim is held open server-side.
+
+    ``claim_wait_seconds`` is the window the server holds a claim that found no
+    work before answering ``empty``. A commit notification for the queue answers
+    the held claim at once, so the outstanding claim is itself the worker's
+    notification channel. Zero means claims answer immediately.
+    """
+
+    @property
+    def claim_wait_seconds(self) -> float: ...
+
+
+@runtime_checkable
 class RunnerTransport(ClosableTransport, Protocol):
     async def claim(
         self,
@@ -465,6 +479,7 @@ class TaskqTransport(
 
 __all__ = [
     "AuthorizationLookupTransport",
+    "ClaimWaitTransport",
     "ClosableTransport",
     "HousekeeperTransport",
     "ObserverTransport",

@@ -149,7 +149,7 @@ The service owns one claim-loop task and one `WorkerSupervisor`. While accepting
    - `unknown_queue`: fatal configuration failure and soft stop;
    - `unavailable`: impossible for an untargeted worker claim, therefore fatal.
 6. Rotate to the next queue after every claim call, including a successful one. A hot first queue cannot permanently starve later queues.
-7. Continue claiming without waiting while capacity remains and a sweep returns work. After a full queue sweep with no claim, wait for the earliest of notification generation change, the next monotonic poll deadline, capacity change, presence-requested shutdown, or local stop.
+7. Continue claiming without waiting while a sweep returns work. With every slot busy, wait only for supervisor capacity or stop, never for a poll deadline, so the next claim leaves the moment a job settles. After a full queue sweep with no claim, a single-queue worker whose transport held the empty claim open (`ClaimWaitTransport`, e.g. HTTP long poll) for at least `min(claim_wait_seconds, poll_interval)` re-claims at once: the held claim is the wait, and a commit notification answers it. Otherwise wait for the earliest of notification generation change, the next monotonic poll deadline, capacity change, presence-requested shutdown, or local stop. Claim errors (bounded backoff), paused queues (`paused_poll_interval`), and throttled claims (server retry hint) keep their own waits.
 8. A retryable typed transport exception means the claim response is unknown, not that the worker
    process is corrupt. Log the unavailable queue, make no settlement or replay guess, continue the
    fair sweep, and retry only at the next bounded poll/nudge boundary. Lease expiry recovers any job

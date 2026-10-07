@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import random
 import re
@@ -290,6 +291,29 @@ class _NotificationGeneration:
             await self._event.wait()
 
 
+def _held_claim_window(transport: object, options: WorkerServiceOptions) -> float:
+    """Return the ``ClaimWaitTransport`` window that replaces the poll wait, or 0.
+
+    Server long poll is permitted only for a single-queue worker (Stage 3); a
+    multi-queue service keeps the fair sweep plus the bounded poll interval
+    whatever its transport reports.
+    """
+
+    if len(options.queues) != 1:
+        return 0.0
+    # Attribute lookup, not a runtime Protocol check: delegating views such as
+    # ``non_owning_transport_view`` expose the capability via ``__getattr__``.
+    window: object = getattr(transport, "claim_wait_seconds", 0.0)
+    if (
+        isinstance(window, bool)
+        or not isinstance(window, (int, float))
+        or not math.isfinite(window)
+        or window <= 0
+    ):
+        return 0.0
+    return float(window)
+
+
 class WorkerService:
     """DB-direct queue poller composing the fenced per-job supervisor."""
 
@@ -340,6 +364,7 @@ class WorkerService:
         self.worker_id = worker_id
         self.options = options
         self._job_types_by_queue = bound_by_queue
+        self._claim_wait_seconds = _held_claim_window(transport, options)
         self.clock = clock or RealWorkerClock()
         self.notifications = notifications
         self._rng = rng or random.Random()
@@ -590,6 +615,8 @@ class WorkerService:
                         break
                 claimed_in_sweep = False
                 swept_any = False
+                held_empty = False
+                early_empty = False
                 for _ in self.options.queues:
                     if self._stop_requested.is_set() or self.supervisor.available_slots == 0:
                         break
@@ -606,6 +633,7 @@ class WorkerService:
                     }
                     if self._supported_policy_hashes:
                         claim_options["supported_policy_hashes"] = self._supported_policy_hashes
+                    claim_started = self.clock.monotonic()
                     try:
                         result = await self.transport.claim(
                             queue,
@@ -653,6 +681,10 @@ class WorkerService:
                         claimed_in_sweep = True
                     elif result.state is ClaimState.EMPTY:
                         self._observe_claim_result(0, batch)
+                        if self._claim_was_held(claim_started):
+                            held_empty = True
+                        else:
+                            early_empty = True
                     elif result.state is ClaimState.THROTTLED:
                         # A typed flow verdict, not an error: honor the server's
                         # retry hint (client-jittered upward) via the existing
@@ -684,9 +716,20 @@ class WorkerService:
                     self._idle_polls = 0
                     self._fruitless_nudges = 0
                     self._nudge_quiet_until = 0.0
-                    if self.supervisor.available_slots > 0:
-                        continue
-                elif swept_any and self._last_wake == "nudge":
+                    # Work is flowing: sweep again at once. With every slot
+                    # busy the loop head waits on the supervisor's capacity
+                    # event, so the next claim leaves the moment a job settles
+                    # instead of after a poll deadline.
+                    continue
+                if held_empty and not early_empty:
+                    # The server held the claim open for its whole window and
+                    # would have answered it as soon as work became claimable
+                    # (commit notification or its bounded recheck). The held
+                    # claim was the wait, so re-issue it at once and keep
+                    # exactly one claim outstanding while capacity exists.
+                    self._last_wake = "claim_wait"
+                    continue
+                if swept_any and self._last_wake == "nudge":
                     self._fruitless_nudges += 1
                     quiet = min(
                         self.options.nudge_quiet_base * (2 ** (self._fruitless_nudges - 1)),
@@ -700,6 +743,21 @@ class WorkerService:
             raise
         except BaseException as exc:
             self._fail_service(exc)
+
+    def _claim_was_held(self, started: float) -> bool:
+        """Whether an empty answer came from a server-held claim.
+
+        Only a held claim may replace the poll wait. An empty answer that
+        returns sooner than both the claim window and ``poll_interval`` was not
+        held (an intermediary or server that ignores the wait), so the classic
+        bounded poll wait applies and the idle claim rate can never exceed one
+        claim per ``poll_interval`` per queue.
+        """
+
+        if self._claim_wait_seconds <= 0:
+            return False
+        held = self.clock.monotonic() - started
+        return held >= min(self._claim_wait_seconds, self.options.poll_interval)
 
     def _effective_batch(self) -> int:
         if not self.options.adaptive_batch:
