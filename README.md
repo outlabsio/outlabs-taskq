@@ -259,6 +259,18 @@ Worker construction rejects missing or queue-mismatched target declarations. HTT
 authorizes the parent queue before decoding the body, then authorizes every distinct child queue
 before SQL; direct SQL retains the trusted runner-role boundary.
 
+## Future work
+
+### Research Python 3.15 and Pydantic 2.14 adoption
+
+**Status**: Research phase, not started.
+
+- **Python 3.15.0** (released 2026-10-09). Evaluate: PEP 810 lazy imports (startup and import cost), PEP 686 UTF-8 default I/O, JIT improvements, the free-threaded build and abi3t stable ABI, the PEP 799 sampling profiler (`profiling.sampling`) for diagnosing runtime behavior, typing additions (PEP 728 TypedDict `closed`/`extra_items`, PEP 747 `TypeForm`), and the `frozendict` and `sentinel` builtins.
+- **Pydantic 2.14** (released 2026-10-08, adds Python 3.15 support, drops 3.9). Evaluate: the stable `MISSING` sentinel, lazy-import support for cross-module models, `TypeForm` on `TypeAdapter`, native `frozendict`, native core schemas for `Fraction`/`deque`/`OrderedDict`/`Counter`/named tuples, and schema-build performance gains. Note behavior changes: the Decimal JSON Schema `pattern` is off by default, and `create_model` `__validators__` is heading toward deprecation in v3.
+- **Research goals**: identify where these can improve this library (performance, typing, API ergonomics) and assess compatibility risk for downstream applications before committing to any change. Decide whether to raise minimum versions, add 3.15 to the supported/test matrix, or support both old and new.
+- **Exit criteria**: written findings with a compatibility matrix, a list of candidate changes ranked by benefit and risk, and a decision on version support, before any implementation starts.
+- **Testing**: per project policy, run the full test suite locally against Python 3.15 and Pydantic 2.14; no GitHub Actions CI.
+
 ## Development gates
 
 Protect `main` with pull requests, require branches to be current, and require the CI gates that run on pull requests: `lint`, `dependency-audit`, both `import-isolation` and `unit` Python lanes, `built-artifacts`, both PostgreSQL `sql-contract` lanes, both `fresh-cluster-security` lanes, `races`, `stage3-audit`, `migrations`, `bench-smoke`, and both PostgreSQL `load-smoke` lanes. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process.
