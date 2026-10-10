@@ -273,7 +273,9 @@ before SQL; direct SQL retains the trusted runner-role boundary.
 
 ## Development gates
 
-Protect `main` with pull requests, require branches to be current, and require the CI gates that run on pull requests: `lint`, `dependency-audit`, both `import-isolation` and `unit` Python lanes, `built-artifacts`, both PostgreSQL `sql-contract` lanes, both `fresh-cluster-security` lanes, `races`, `stage3-audit`, `migrations`, `bench-smoke`, and both PostgreSQL `load-smoke` lanes. The scheduled/dispatchable `million-row-plans` job keeps structural plans honest without charging every pull request. Do not bypass a failed required check except through the repository's explicit break-glass process.
+GitHub Actions and other hosted CI are not a test or release gate for this repository. Before merging to `main` or tagging a release, run the full test suite and the same checks locally: `lint`, `dependency-audit`, both `import-isolation` and `unit` Python lanes, `built-artifacts`, both PostgreSQL `sql-contract` lanes, both `fresh-cluster-security` lanes, `races`, `stage3-audit`, `migrations`, `bench-smoke`, and both PostgreSQL `load-smoke` lanes. Run the `million-row-plans` check periodically and before releases to keep structural plans honest. Do not merge or tag with a failing check except through the repository's explicit break-glass process.
+
+Before promoting a release, maintainers re-run the same checks in their own pre-release environment. The one exception to the no-hosted-CI rule is the tag-triggered PyPI publish workflow, which only publishes artifacts and requires manual approval.
 
 ## License
 
