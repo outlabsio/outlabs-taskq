@@ -2,7 +2,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — latest published package **`0.1.0a41`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a41 change is limited to PostgreSQL 18 dump/restore catalog verification; existing a40 API, worker, and scheduler deployments remain compatible and do not require a runtime upgrade. See the [a41 release notes](docs/RELEASE-0.1.0a41.md) for the exact verifier boundary and separate ownership/grant checks.
+**Status:** alpha — latest published package **`0.1.0a42`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a42 change is limited to the worker claim loop: workers re-claim the moment a slot frees and treat a server-held HTTP long-poll claim as the wait instead of sleeping `poll_interval`. There is no SQL, protocol, or HTTP change; a40/a41 API runtimes remain compatible and only workers need a42 for the behavior. See the [a42 release notes](docs/RELEASE-0.1.0a42.md); the [a41 release notes](docs/RELEASE-0.1.0a41.md) cover the PostgreSQL 18 restore-verifier boundary.
 
 The a40 runtime introduced additive SQL
 contracts 0.6.9–0.6.12 and migrations 0045–0048 add an installation-bound
@@ -32,6 +32,7 @@ Start here:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a42.md`](docs/RELEASE-0.1.0a42.md) | Worker claim loop wakes on work: immediate re-claim on free capacity and held long-poll claims (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a41.md`](docs/RELEASE-0.1.0a41.md) | Bounded PostgreSQL 18 restore-verifier compatibility fix (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a40.md`](docs/RELEASE-0.1.0a40.md) | Queue-admission ownership correction, recovery, and staged rollout (contract 0.6.12) |
 | [`docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md`](docs/evidence/diverse-data-a40-pre-rollout-2026-09-18.md) | First-consumer topology, local compatibility evidence, and production closing gates for Diverse Data |
@@ -61,7 +62,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a41
+pip install outlabs-taskq==0.1.0a42
 ```
 
 ## Credential handling

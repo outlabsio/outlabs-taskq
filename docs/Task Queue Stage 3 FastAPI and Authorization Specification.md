@@ -226,7 +226,11 @@ is honored for permitted retryable commands.
 
 An HTTP-backed `WorkerService` uses the same Stage-2 supervisor, cancellation, heartbeat, replay,
 and soft-stop semantics. Server-side long polling (`claim_wait_seconds`, default 25, maximum 30) is
-permitted only for a worker configured with exactly one queue. Multi-queue HTTP workers must use
+permitted only for a worker configured with exactly one queue. Such a worker keeps one held claim
+outstanding: after an empty answer the server held for at least `min(claim_wait_seconds,
+poll_interval)` it re-claims immediately instead of sleeping `poll_interval`; a shorter empty
+answer falls back to the poll interval, so the idle claim rate never exceeds one per poll interval.
+Multi-queue HTTP workers must use
 immediate claims (`wait_seconds=0`) through the existing fair sweep plus a bounded monotonic poll
 interval; configuration rejects a positive wait with multiple queues. On stop, only an in-flight
 **HTTP long-poll claim** is cancelled so the Stage-2 grace window is not consumed by the server wait.

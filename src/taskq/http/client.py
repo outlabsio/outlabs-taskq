@@ -428,6 +428,12 @@ class AsyncTaskqHttpClient:
             f"owned={self._owned!r}, closed={self._closed!r})"
         )
 
+    @property
+    def claim_wait_seconds(self) -> float:
+        """Server long-poll window for an empty claim (``ClaimWaitTransport``)."""
+
+        return self._claim_wait_seconds
+
     def _http(self) -> httpx.AsyncClient:
         if self._closed:
             raise TaskqConfigError("HTTP client is closed")
