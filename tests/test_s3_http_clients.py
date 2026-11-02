@@ -24,8 +24,11 @@ from taskq.protocol import (
     EnqueueCommand,
     EnqueueStatus,
     Followup,
+    ClaimWireData,
     HttpCommandName,
 )
+from taskq.http.facade import _wire_job
+from taskq.testing import FakeTaskQClient
 from taskq.transport import ProducerTransport, RunnerTransport
 
 
@@ -442,6 +445,47 @@ async def test_claim_negotiates_once_and_timeout_normalizes_to_empty() -> None:
         second = await client.claim("emails", "worker-1")
     assert first.state is second.state is ClaimState.EMPTY
     assert calls.count("/taskq/v1/meta") == 1
+
+
+@pytest.mark.xfail(
+    strict=True,
+    reason=(
+        "known gap: a claim committed server-side whose response is lost is never "
+        "re-delivered (CLAIM is RetryClass.NEVER, no claim token, no runner query for "
+        "leases held by a worker); the job stays running until lease expiry"
+    ),
+)
+async def test_claim_committed_server_side_but_lost_in_flight_is_redelivered() -> None:
+    server = FakeTaskQClient(queues=("emails",))
+    await server.enqueue(_enqueue_command())
+    lost_once = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal lost_once
+        if request.url.path.endswith("/meta"):
+            return _response(request, data={"contract_version": "0.1.2", "capabilities": {}})
+        result = await server.claim("emails", json.loads(request.content)["worker_id"])
+        if not lost_once:
+            lost_once = True
+            raise httpx.ReadTimeout("claim response lost", request=request)
+        return _response(
+            request,
+            outcome=result.state.value,
+            data=ClaimWireData(jobs=tuple(_wire_job(job) for job in result.jobs)).model_dump(
+                mode="json"
+            ),
+        )
+
+    async with httpx.AsyncClient(
+        base_url="https://example.test", transport=httpx.MockTransport(handler)
+    ) as raw:
+        client = AsyncTaskqHttpClient("https://example.test", bearer_token="secret", client=raw)
+        with pytest.raises(TaskqUnavailableError):
+            await client.claim("emails", "worker-1")
+        assert server.pending == ()  # committed: leased to worker-1, off the queue
+        # Desired: the same worker can recover the committed attempt.
+        retried = await client.claim("emails", "worker-1")
+    assert retried.state is ClaimState.CLAIMED
 
 
 async def test_claim_transport_failure_is_never_replayed_after_negotiation() -> None:

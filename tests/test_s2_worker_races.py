@@ -234,7 +234,9 @@ async def test_checkpoint_update_during_heartbeat_survives_old_snapshot_ack() ->
         second.set()
         await second_done.wait()
         transport.release.set()
-        await _spin_until(lambda: clock.sleeping == 1)
+        # The in-flight heartbeat's budget timer is also a sleeper; wait for the
+        # call to finish (recorded) before trusting the sleeper count.
+        await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping == 1)
         clock.advance(5)
         await _spin_until(lambda: len(transport.progress) == 2)
         assert transport.progress == [{"cursor": 1}, {"cursor": 2}]
