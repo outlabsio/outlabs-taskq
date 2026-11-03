@@ -288,8 +288,9 @@ def _decode_envelope(
                 },
                 retry_after_seconds=_retry_after_seconds(response) or None,
             )
-        if response.status_code >= 500:
-            # The host or an intermediary failed before TaskQ answered.
+        if response.status_code >= 500 or response.status_code in (408, 425, 429):
+            # The host, an intermediary or a rate limiter answered before TaskQ;
+            # a resend can succeed, so this is not a protocol violation.
             raise TaskqInternalError(details={"reason": "missing_or_invalid_protocol_header"})
         raise TaskqProtocolError(details={"reason": "missing_or_invalid_protocol_header"})
     try:

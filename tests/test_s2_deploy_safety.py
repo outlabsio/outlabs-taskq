@@ -206,7 +206,7 @@ def test_decode_envelope_honors_retry_after_on_bare_503() -> None:
 
 
 def test_decode_envelope_keeps_protocol_mismatch_internal_off_the_5xx_path() -> None:
-    for status in (200, 400, 500):
+    for status in (200, 400, 404, 408, 413, 425, 429, 500, 520):
         with pytest.raises(TaskqInternalError) as excinfo:
             _decode_envelope(
                 _bare_response(status),
@@ -214,6 +214,46 @@ def test_decode_envelope_keeps_protocol_mismatch_internal_off_the_5xx_path() -> 
                 sent_request_id="req-1",
             )
         assert excinfo.value.details == {"reason": "missing_or_invalid_protocol_header"}
-        # A bare 4xx (e.g. a proxy 413) is a client-side rejection; a bare 5xx
-        # is the host failing before TaskQ answered.
-        assert isinstance(excinfo.value, TaskqProtocolError) is (status < 500)
+        # A bare proxy 413 or 404 fails the same way on every resend; a bare 5xx
+        # or a gateway timeout/rate limit is the path failing before TaskQ answered.
+        transient = status >= 500 or status in (408, 425, 429)
+        assert isinstance(excinfo.value, TaskqProtocolError) is not transient, status
+
+
+def _taskq_response(body: str, *, status: int = 201, request_id: str = "req-1") -> httpx.Response:
+    return httpx.Response(
+        status,
+        headers={"Taskq-Protocol-Version": "1", "Taskq-Request-Id": request_id},
+        text=body,
+        request=httpx.Request("POST", "http://taskq.test/taskq/v1/queues/q/jobs"),
+    )
+
+
+@pytest.mark.parametrize(
+    ("response", "reason"),
+    [
+        (_taskq_response("not json"), "invalid_json_envelope"),
+        (
+            _taskq_response(
+                '{"protocol_version": 1, "request_id": "req-2", "outcome": "created", "data": {}}',
+                request_id="req-2",
+            ),
+            "request_id_mismatch",
+        ),
+        (
+            _taskq_response(
+                '{"protocol_version": 1, "request_id": "req-1", "outcome": "bogus", "data": {}}'
+            ),
+            "unexpected_outcome_or_status",
+        ),
+        (_taskq_response('{"protocol_version": 1}'), "invalid_command_envelope"),
+    ],
+)
+def test_decode_envelope_raises_protocol_error_for_malformed_taskq_responses(
+    response: httpx.Response, reason: str
+) -> None:
+    with pytest.raises(TaskqProtocolError) as excinfo:
+        _decode_envelope(response, spec=_enqueue_spec(), sent_request_id="req-1")  # type: ignore[arg-type]
+    assert excinfo.value.details == {"reason": reason}
+    assert excinfo.value.code.value == "TQ500"
+    assert excinfo.value.retryable is True
