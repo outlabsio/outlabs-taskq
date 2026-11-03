@@ -24,6 +24,7 @@ from taskq.errors import (
     TaskqConflictError,
     TaskqConfigError,
     TaskqError,
+    TaskqProtocolError,
     TaskqValidationError,
 )
 from taskq.execution import (
@@ -606,6 +607,7 @@ class WorkerService:
                     }
                     if self._supported_policy_hashes:
                         claim_options["supported_policy_hashes"] = self._supported_policy_hashes
+                    claimed_at = self.clock.monotonic()
                     try:
                         result = await self.transport.claim(
                             queue,
@@ -635,7 +637,7 @@ class WorkerService:
                         if len(result.jobs) > batch:
                             raise WorkerInvariantError("claim returned more jobs than requested")
                         for claim in result.jobs:
-                            running = self.supervisor.submit(claim)
+                            running = self.supervisor.submit(claim, claimed_at=claimed_at)
                             running.add_done_callback(self._observe_job)
                             self._submitted_jobs += 1
                             logger.info(
@@ -1003,9 +1005,27 @@ class WorkerService:
         await self.stop(cancel=True)
 
 
+def _heartbeat_interval(lease_seconds: int) -> float:
+    return min(lease_seconds / 3, 30.0)
+
+
+def _lease_budget(lease_seconds: int) -> float:
+    """Longest a job may run without a confirmed heartbeat send.
+
+    Every heartbeat call is bounded by the remaining budget, so the margin only
+    has to cover handler cancellation and scheduling; L/4 leaves slack for a
+    slow-but-successful heartbeat on short leases, 60 s caps it on long ones.
+    The bound stops cooperative async handlers only: sync handlers and async
+    handlers that ignore cancellation keep running after ownership is dropped.
+    """
+    return lease_seconds - min(60.0, lease_seconds / 4)
+
+
 class _RunControl:
-    def __init__(self, *, is_sync: bool) -> None:
+    def __init__(self, *, is_sync: bool, claim: ClaimedJob | None = None) -> None:
         self.is_sync = is_sync
+        self.claim = claim
+        self.settling = False
         self.cancellation = CancellationToken()
         self.ownership_lost = asyncio.Event()
         self.settlement_terminal = asyncio.Event()
@@ -1069,6 +1089,7 @@ class WorkerSupervisor:
         self._capacity_changed = asyncio.Event()
         self._capacity_changed.set()
         self._force_stop = asyncio.Event()
+        self._soft_stopped = asyncio.Event()
         self._active: dict[tuple[UUID, UUID], asyncio.Task[JobRunReport]] = {}
         self._controls: dict[tuple[UUID, UUID], _RunControl] = {}
         self._unsafe_blocking: set[ConcurrentFuture[Any]] = set()
@@ -1128,10 +1149,13 @@ class WorkerSupervisor:
         if not self._accepting:
             raise WorkerCapacityError("worker supervisor is not accepting jobs")
 
-    def submit(self, claim: ClaimedJob) -> asyncio.Task[JobRunReport]:
+    def submit(
+        self, claim: ClaimedJob, *, claimed_at: float | None = None
+    ) -> asyncio.Task[JobRunReport]:
+        """``claimed_at``: supervisor-clock instant the claim request was sent."""
         if not self._accepting:
             raise WorkerCapacityError("worker supervisor is not accepting jobs")
-        return self._reserve(claim)
+        return self._reserve(claim, claimed_at)
 
     def _executor_for_sync(self) -> ThreadPoolExecutor:
         if self._executor is None:
@@ -1141,25 +1165,27 @@ class WorkerSupervisor:
             )
         return self._executor
 
-    async def run_job(self, claim: ClaimedJob) -> JobRunReport:
+    async def run_job(self, claim: ClaimedJob, *, claimed_at: float | None = None) -> JobRunReport:
         """Reserve and await one job without requiring the submission intake to be open."""
         if self._stopping or self.stopped:
             raise WorkerCapacityError("worker supervisor is stopping")
-        running = self._reserve(claim)
+        running = self._reserve(claim, claimed_at)
         try:
             return await asyncio.shield(running)
         except asyncio.CancelledError:
             await self.stop()
             raise
 
-    def _reserve(self, claim: ClaimedJob) -> asyncio.Task[JobRunReport]:
+    def _reserve(
+        self, claim: ClaimedJob, claimed_at: float | None = None
+    ) -> asyncio.Task[JobRunReport]:
         key = (claim.job_id, claim.attempt_id)
         if key in self._active:
             raise WorkerCapacityError("job attempt is already running")
         if self._free_slots == 0:
             raise WorkerCapacityError("worker supervisor is at capacity")
         running = asyncio.create_task(
-            self._run_reserved(claim, key),
+            self._run_reserved(claim, key, claimed_at),
             name="taskq-job-supervisor",
         )
         self._active[key] = running
@@ -1200,12 +1226,14 @@ class WorkerSupervisor:
             if self._stop_task is None:
                 self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
 
-    async def _run_reserved(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
+    async def _run_reserved(
+        self, claim: ClaimedJob, key: tuple[UUID, UUID], claimed_at: float | None
+    ) -> JobRunReport:
         fatal = False
         soft_stop = False
         external_cancelled = False
         try:
-            report = await self._execute_job(claim, key)
+            report = await self._execute_job(claim, key, claimed_at)
             if report.fatal:
                 fatal = True
                 self._begin_soft_stop()
@@ -1225,7 +1253,9 @@ class WorkerSupervisor:
             if external_cancelled and self._stop_task is None:
                 self._stop_task = asyncio.create_task(self._stop(), name="taskq-worker-stop")
 
-    async def _execute_job(self, claim: ClaimedJob, key: tuple[UUID, UUID]) -> JobRunReport:
+    async def _execute_job(
+        self, claim: ClaimedJob, key: tuple[UUID, UUID], claimed_at: float | None
+    ) -> JobRunReport:
         continuation_policy = (
             None
             if claim.continuation_policy_hash is None
@@ -1246,7 +1276,7 @@ class WorkerSupervisor:
                 None,
             )
 
-        control = _RunControl(is_sync=not task.handler_is_async)
+        control = _RunControl(is_sync=not task.handler_is_async, claim=claim)
 
         async def report_effect(request: dict[str, Any]) -> dict[str, Any]:
             context.raise_if_cancelled()
@@ -1288,8 +1318,10 @@ class WorkerSupervisor:
         if self._deadline_reached:
             self._enforce_shutdown_deadline(control)
         heartbeat = asyncio.create_task(
-            self._heartbeat_loop(claim, context, control), name="taskq-job-heartbeat"
+            self._heartbeat_loop(claim, context, control, claimed_at),
+            name="taskq-job-heartbeat",
         )
+        heartbeat.add_done_callback(lambda done: self._heartbeat_crashed(done, control, claim))
 
         handler_value: Any = None
         handler_error: BaseException | None = None
@@ -1390,6 +1422,7 @@ class WorkerSupervisor:
     def _begin_soft_stop(self) -> None:
         self._accepting = False
         self._stopping = True
+        self._soft_stopped.set()
         self._capacity_changed.set()
         for control in self._controls.values():
             control.cancellation.cancel(CancellationReason.SHUTDOWN)
@@ -1495,13 +1528,51 @@ class WorkerSupervisor:
             self._unsafe_blocking.update(pending)
 
     async def _heartbeat_loop(
-        self, claim: ClaimedJob, context: JobContext, control: _RunControl
+        self,
+        claim: ClaimedJob,
+        context: JobContext,
+        control: _RunControl,
+        claimed_at: float | None = None,
     ) -> None:
-        interval = min(claim.lease_seconds / 3, 30.0)
+        interval = _heartbeat_interval(claim.lease_seconds)
+        # Never run unconfirmed past ``budget`` since the last confirmed send.
+        # The server sets the lease from its own now() at claim/heartbeat time,
+        # never earlier than our send instant, so client monotonic durations
+        # are conservative and need no cross-host clock.
+        budget = _lease_budget(claim.lease_seconds)
+        last_ok = self.clock.monotonic() if claimed_at is None else claimed_at
         consecutive_failures = 0
-        await self.clock.sleep(interval)
+        attempted = False
+        me = asyncio.current_task()
+        assert me is not None
+        # A long-poll claim may have used much of the budget measured from its
+        # send; confirm ownership early rather than wait a full interval.
+        await self.clock.sleep(
+            max(0.0, min(interval, (last_ok + budget - self.clock.monotonic()) / 2))
+        )
         while not control.settlement_terminal.is_set():
+            remaining = last_ok + budget - self.clock.monotonic()
+            if attempted and remaining <= 0:
+                self._lose_ownership(
+                    control, claim, f"heartbeat_unavailable failures={consecutive_failures}"
+                )
+                return
+            if not attempted:
+                # Never drop on the clock alone: a heartbeat ok=true is the
+                # server's fenced confirmation, so give the first one at least
+                # an interval even if the long-poll claim spent the budget.
+                remaining = max(remaining, interval)
+            attempted = True
             pending = context._pending_checkpoint()
+            sent = self.clock.monotonic()
+            # asyncio.timeout on the injected clock: the call stays a direct
+            # await (same loop ordering as an unbounded call) but cannot carry
+            # the handler past the budget, after which another worker may
+            # reclaim the job. The timer is cancelled before we leave the try.
+            fired = [False]
+            baseline = me.cancelling()
+            timer = asyncio.ensure_future(self._cancel_after(remaining, me, fired))
+            error: Exception | None = None
             try:
                 result = await self.transport.heartbeat(
                     claim.job_id,
@@ -1511,31 +1582,128 @@ class WorkerSupervisor:
                     progress=pending[1] if pending is not None else None,
                 )
             except asyncio.CancelledError:
-                raise
-            except TaskqError as exc:
+                if not fired[0]:
+                    raise
+                me.uncancel()
+                if me.cancelling() > baseline:
+                    raise
+            except Exception as exc:
+                error = exc
+            finally:
+                timer.cancel()
+            if fired[0]:
+                if me.cancelling() > baseline:  # transport swallowed our cancel
+                    me.uncancel()
+                self._lose_ownership(
+                    control, claim, f"heartbeat_timeout failures={consecutive_failures}"
+                )
+                return
+
+            if (isinstance(error, TaskqError) and error.retryable) or isinstance(
+                error, (TimeoutError, ConnectionError)
+            ):
                 consecutive_failures += 1
-                if not exc.retryable or consecutive_failures >= 3:
-                    control.runtime_failed = not exc.retryable
-                    self._lose_ownership(control)
-                    return
-                await self.clock.sleep(min(0.25 * (2 ** (consecutive_failures - 1)), interval))
+                if consecutive_failures == 1:
+                    reason = (
+                        error.code.value if isinstance(error, TaskqError) else type(error).__name__
+                    )
+                    logger.warning(
+                        f"job.heartbeat_failing job_id={claim.job_id} "
+                        f"attempt_id={claim.attempt_id} reason={reason}",
+                        extra={
+                            "worker_id": self.worker_id,
+                            "job_id": str(claim.job_id),
+                            "attempt_id": str(claim.attempt_id),
+                            "reason": reason,
+                        },
+                    )
+                await self.clock.sleep(
+                    max(
+                        0.0,
+                        min(
+                            0.25 * (2 ** min(consecutive_failures - 1, 10)),
+                            interval,
+                            last_ok + budget - self.clock.monotonic(),
+                        ),
+                    )
+                )
                 continue
-            except Exception:
+            if isinstance(error, TaskqError):
                 control.runtime_failed = True
-                self._lose_ownership(control)
+                self._lose_ownership(control, claim, f"heartbeat_error code={error.code.value}")
+                return
+            if error is not None:
+                control.runtime_failed = True
+                self._lose_ownership(control, claim, f"heartbeat_exception {type(error).__name__}")
                 return
 
             if not result.ok:
-                self._lose_ownership(control)
+                # A settle in flight is the authority; ok=false may just mean
+                # it already committed, so don't raise a false alarm.
+                self._lose_ownership(
+                    control,
+                    claim,
+                    "heartbeat_lost",
+                    level=logging.INFO if control.settling else logging.WARNING,
+                )
                 return
+            if consecutive_failures:
+                logger.info(
+                    f"job.heartbeat_recovered job_id={claim.job_id} "
+                    f"attempt_id={claim.attempt_id} failures={consecutive_failures}",
+                    extra={
+                        "worker_id": self.worker_id,
+                        "job_id": str(claim.job_id),
+                        "attempt_id": str(claim.attempt_id),
+                        "failures": consecutive_failures,
+                    },
+                )
+            last_ok = sent
             consecutive_failures = 0
             if pending is not None:
                 context._ack_checkpoint(pending[0])
             if result.cancel_requested:
                 self._request_operator_cancel(control)
-            await self.clock.sleep(interval)
+            # Pace from the send: the budget restarted at ``sent``, not at the response.
+            await self.clock.sleep(max(0.0, interval - (self.clock.monotonic() - sent)))
 
-    def _lose_ownership(self, control: _RunControl) -> None:
+    async def _cancel_after(self, delay: float, task: asyncio.Task[Any], fired: list[bool]) -> None:
+        await self.clock.sleep(max(0.0, delay))
+        fired[0] = True
+        task.cancel()
+
+    def _heartbeat_crashed(
+        self, heartbeat: asyncio.Task[None], control: _RunControl, claim: ClaimedJob
+    ) -> None:
+        # Every legitimate heartbeat.cancel() follows ownership_lost or
+        # settlement_terminal; anything else (a stray CancelledError from the
+        # transport, an unexpected exception) stops lease renewal silently.
+        if control.ownership_lost.is_set() or control.settlement_terminal.is_set():
+            return
+        if heartbeat.cancelled():
+            self._lose_ownership(control, claim, "heartbeat_cancelled")
+            return
+        if heartbeat.exception() is None:
+            return
+        control.runtime_failed = True
+        self._lose_ownership(
+            control, claim, f"heartbeat_crashed {type(heartbeat.exception()).__name__}"
+        )
+
+    def _lose_ownership(
+        self, control: _RunControl, claim: ClaimedJob, reason: str, *, level: int = logging.WARNING
+    ) -> None:
+        logger.log(
+            level,
+            f"job.ownership_lost job_id={claim.job_id} attempt_id={claim.attempt_id} "
+            f"reason={reason}",
+            extra={
+                "worker_id": self.worker_id,
+                "job_id": str(claim.job_id),
+                "attempt_id": str(claim.attempt_id),
+                "reason": reason,
+            },
+        )
         control.cancellation.cancel(CancellationReason.LEASE_LOST)
         control.ownership_lost.set()
         if control.is_sync and control.handler is not None and not control.handler.done():
@@ -1774,12 +1942,17 @@ class WorkerSupervisor:
         started_at = self.clock.monotonic()
         attempt = 0
         last_error_code: str | None = None
+        owned_claim = control.claim if control is not None else None
+        settle_failing = False
+        if control is not None:
+            control.settling = True
         while True:
             attempt += 1
             if control is not None and control.ownership_lost.is_set():
                 return self._ownership_lost_report(job_id, control)
             retry_after = 0.0
             backpressure = False
+            availability = False
             try:
                 result = await operation()
             except asyncio.CancelledError:
@@ -1799,11 +1972,18 @@ class WorkerSupervisor:
                 last_error_code = exc.code.value
                 retry_after = exc.retry_after_seconds or 0.0
                 backpressure = isinstance(exc, TaskqBackpressureError)
+                # Server DB stalls surface as TQ500 as well as TQ503. A response
+                # the client itself rejected as malformed fails the same way on
+                # every retry, so it keeps the attempt cap.
+                availability = not backpressure and not isinstance(exc, TaskqProtocolError)
             except (TimeoutError, ConnectionError):
                 last_error_code = "transport"
+                availability = True
             except Exception:
                 return self._runtime_failure(job_id, command)
             else:
+                if settle_failing:
+                    self._log_settle(logging.INFO, "job.settle_recovered", owned_claim, attempt)
                 if result.result.value not in COMMAND_SPECS[command].outcomes:
                     return self._runtime_failure(job_id, command)
                 return self._report_from_settle(job_id, command.value, result)
@@ -1812,21 +1992,49 @@ class WorkerSupervisor:
             if backpressure:
                 retry_allowed = elapsed < self.options.settle_backpressure_max_elapsed
             else:
+                # An owned job outlasts an availability outage: a heartbeat
+                # outage ends it as a non-fatal ownership loss via the heartbeat
+                # loop; a settle-only outage is bounded by the same lease budget.
+                # A draining worker keeps the attempt cap.
                 retry_allowed = attempt < self.options.settle_max_attempts
+                if (
+                    not retry_allowed
+                    and availability
+                    and owned_claim is not None
+                    and not self._stopping
+                ):
+                    retry_allowed = elapsed < _lease_budget(owned_claim.lease_seconds)
+                    if not settle_failing:
+                        settle_failing = True
+                        self._log_settle(
+                            logging.WARNING, "job.settle_failing", owned_claim, attempt
+                        )
             if not retry_allowed:
+                if control is not None and control.ownership_lost.is_set():
+                    return self._ownership_lost_report(job_id, control)
                 break
 
             upper = min(
                 self.options.settle_backoff_base * (2 ** min(attempt - 1, 30)),
-                self.options.settle_backoff_cap,
+                # Past the attempt cap, pace like heartbeats: many settling jobs
+                # must not hammer a recovering API.
+                _heartbeat_interval(owned_claim.lease_seconds)
+                if settle_failing and owned_claim is not None
+                else self.options.settle_backoff_cap,
             )
             delay = max(retry_after, self._rng.uniform(0.0, upper))
             if backpressure and attempt >= self.options.settle_max_attempts:
                 delay = max(delay, min(self.options.settle_backoff_base, upper))
             if backpressure and elapsed + delay > self.options.settle_backpressure_max_elapsed:
                 break
-            if await self._settle_delay(delay, control):
+            # Once stopping, the stop event stays set; waking on it again would
+            # skip every remaining backpressure backoff.
+            if await self._settle_delay(
+                delay, control, wake_on_stop=settle_failing and not self._stopping
+            ):
                 return self._ownership_lost_report(job_id, control)
+        if settle_failing:
+            self._log_settle(logging.WARNING, "job.settle_exhausted", owned_claim, attempt)
         return JobRunReport(
             job_id=job_id,
             state=JobRunState.RUNTIME_FAILED,
@@ -1834,6 +2042,19 @@ class WorkerSupervisor:
             settlement_command=command.value,
             settlement_error_code=last_error_code,
             fatal=True,
+        )
+
+    def _log_settle(self, level: int, event: str, claim: ClaimedJob | None, attempts: int) -> None:
+        assert claim is not None
+        logger.log(
+            level,
+            f"{event} job_id={claim.job_id} attempt_id={claim.attempt_id} attempts={attempts}",
+            extra={
+                "worker_id": self.worker_id,
+                "job_id": str(claim.job_id),
+                "attempt_id": str(claim.attempt_id),
+                "attempts": attempts,
+            },
         )
 
     async def _report_effect(
@@ -1930,16 +2151,21 @@ class WorkerSupervisor:
             fatal=True,
         )
 
-    async def _settle_delay(self, delay: float, control: _RunControl | None) -> bool:
+    async def _settle_delay(
+        self, delay: float, control: _RunControl | None, *, wake_on_stop: bool = False
+    ) -> bool:
         if control is None:
             await self.clock.sleep(delay)
             return False
         sleeping = asyncio.create_task(self.clock.sleep(delay), name="taskq-settle-backoff")
         lost = asyncio.create_task(control.ownership_lost.wait(), name="taskq-settle-ownership")
-        done, _ = await asyncio.wait((sleeping, lost), return_when=asyncio.FIRST_COMPLETED)
-        sleeping.cancel()
-        lost.cancel()
-        await asyncio.gather(sleeping, lost, return_exceptions=True)
+        waiters = [sleeping, lost]
+        if wake_on_stop:  # long post-cap backoff: a stop re-applies the attempt cap now
+            waiters.append(asyncio.create_task(self._soft_stopped.wait()))
+        done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+        for waiter in waiters:
+            waiter.cancel()
+        await asyncio.gather(*waiters, return_exceptions=True)
         return lost in done
 
     @staticmethod

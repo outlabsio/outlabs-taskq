@@ -241,14 +241,26 @@ async def test_complete_outcomes_are_command_specific_and_never_switch_verbs(
 async def test_retry_exhaustion_is_settlement_unknown_and_stops_heartbeat() -> None:
     clock = ManualClock()
     transport = ScriptedTransport()
+    # An owned job keeps retrying retryable settle errors past the attempt cap
+    # (bounded by the lease budget); a draining worker keeps the cap, so the
+    # exhaustion path is exercised during stop().
     transport.script(
         "complete",
         TaskqUnavailableError(),
         TaskqUnavailableError(),
         TaskqUnavailableError(),
     )
-    supervisor = _supervisor(transport, clock, complete_handler, attempts=3)
+    finish = asyncio.Event()
+
+    async def finishing_handler(payload: Input) -> Output:
+        await finish.wait()
+        return Output(doubled=payload.value * 2)
+
+    supervisor = _supervisor(transport, clock, finishing_handler, attempts=3)
     running = asyncio.create_task(supervisor.run_job(_claim()))
+    await _spin_until(lambda: clock.sleeping == 1)
+    stopping = asyncio.create_task(supervisor.stop())
+    finish.set()
     await _spin_until(lambda: len(transport.calls) == 1 and clock.sleeping >= 2)
     clock.advance(0.25)
     await _spin_until(lambda: len(transport.calls) == 2 and clock.sleeping >= 2)
@@ -258,6 +270,7 @@ async def test_retry_exhaustion_is_settlement_unknown_and_stops_heartbeat() -> N
     assert report.fatal
     assert [call.command for call in transport.calls] == ["complete"] * 3
     assert clock.sleeping == 0
+    await stopping
     await supervisor.aclose()
 
 

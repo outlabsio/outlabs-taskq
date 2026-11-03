@@ -163,7 +163,7 @@ accepted → running → settling → settled
 | `cancel_pending` | operator or shutdown signal delivered; heartbeat continues |
 | `settling` | handler stopped; heartbeat remains active while the same verb is retried |
 | `settled` | typed command returned a command-valid success outcome |
-| `ownership_lost` | heartbeat `ok=false`, three consecutive heartbeat failures, settle `lost`, or retry exhaustion made ownership unsafe; no alternative settle follows |
+| `ownership_lost` | heartbeat `ok=false`, no confirmed heartbeat within the lease budget (`lease_seconds - min(60, lease_seconds/4)` since the claim request or last successful heartbeat was sent; never on the clock alone before one heartbeat attempt after the claim), settle `lost`, or retry exhaustion made ownership unsafe; no alternative settle follows |
 | `abandoned_sync` | ownership is unsafe while an unkillable sync thread remains; process exit is required and no settlement is permitted |
 | `runtime_failed` | local invariant/config/cross-verb conflict; supervisor enters soft stop |
 
@@ -176,7 +176,7 @@ Lease ownership dominates every handler outcome; operator cancellation dominates
 | Event | Async handler | Sync/thread handler | Settlement |
 |---|---|---|---|
 | heartbeat `ok=false` | cancel immediately; a live managed blocking section becomes `abandoned_sync` | set lease-lost token | suppress forever; live blocking work requires process exit until its thread returns |
-| third consecutive heartbeat transport failure | cancel immediately | set lease-lost token | suppress forever; stop heartbeating and let lease expiry reclaim |
+| lease budget exhausted by retryable heartbeat failures or by one in-flight heartbeat call (every call is bounded by the remaining budget) | cancel immediately | set lease-lost token | suppress forever; stop heartbeating and let lease expiry reclaim |
 | non-retryable heartbeat error | cancel immediately; supervisor soft-stops | set lease-lost token; supervisor soft-stops | suppress forever |
 | heartbeat `cancel_requested=true` | signal operator token; hard-cancel after `cancel_grace_seconds` | signal token; cannot hard-cancel; keep heartbeating | when handler stops, `cancel_running`; ignore its normal result |
 | soft stop begins | signal shutdown token; handler may finish normally | signal shutdown token; handler may finish normally | normal result wins before deadline |
@@ -229,7 +229,7 @@ Outcome rules:
 - `lost` means ownership loss and is never converted to success;
 - `settle_conflict` is a cross-verb invariant failure, causes supervisor soft stop, and never triggers another verb;
 - a value outside that command's protocol-owned outcome set is `TQ500` at the transport boundary;
-- exhausted ordinary transient retries or an exhausted backpressure horizon stop heartbeating, report `settlement_unknown` with the safe typed error code, soft-stop the supervisor, and let lease expiry provide the only recovery.
+- while the job is owned and the worker is not draining, retryable non-backpressure errors (`TQ503`, `TQ500` such as server DB stalls, transport timeout/connection) retry settlement past `settle_max_attempts` (backoff capped at the heartbeat interval; one `job.settle_failing` WARNING, then `job.settle_recovered` INFO or `job.settle_exhausted` WARNING) until either the heartbeat loop exhausts the lease budget, which ends it as non-fatal `ownership_lost`, or the settle attempts themselves have run for one lease budget. A `TQ500` the client raised itself on a malformed response (`TaskqProtocolError`, such as a bare proxy 4xx or an envelope that fails validation) fails identically on every resend and keeps the attempt cap; a bare 5xx without the TaskQ protocol header remains a server-side `TQ500`. A stop wakes a post-cap backoff once so the cap applies at once; later backpressure backoffs during the drain sleep normally. Otherwise exhausted ordinary transient retries or an exhausted backpressure horizon stop heartbeating, report `settlement_unknown` with the safe typed error code, soft-stop the supervisor, and let lease expiry provide the only recovery.
 
 Programmable lost-response injection applies the scripted command once, drops its response, then lets the identical retry observe `already_settled`. The harness asserts the handler ran once and only one semantic command was selected.
 
@@ -303,7 +303,7 @@ These are package-owned harness utilities, not the S2-06 consumer testing API.
 
 - Exact cadence is derived from returned `lease_seconds` with a monotonic manual clock; tests prove `lease_expires_at` is unused.
 - Exactly one heartbeat task exists per active job and is joined at terminal state.
-- One/two transient heartbeat failures recover; the third cancels async or suppresses sync settlement.
+- The first heartbeat is sent after `min(interval, remaining_budget/2)` so a long-poll claim that used much of the budget is confirmed early; until that first heartbeat has been attempted it is bounded by `max(remaining_budget, interval)`, so a long-poll claim that spent the budget still gets one confirming heartbeat; worst case, a job whose claim response arrived after the whole budget runs unconfirmed for up to one interval after its first heartbeat is sent (at most 1.5 intervals after it starts) before it is dropped. Later heartbeats are paced from the previous send, not its response. Each call is bounded by the budget minus the time since the last confirmed send, so on leases up to about 72 s a successful heartbeat slower than about 0.42 × lease still drops the job; HTTP workers should use leases of at least about 2.5 × the HTTP request timeout (about 75 s for the 30 s default). The bound stops cooperative async handlers only; sync and cancellation-ignoring handlers keep running. Transient heartbeat failures (retryable taskq errors, raw timeout/connection errors) retry with backoff (capped at the heartbeat interval) and recover while within the lease budget; past it the worker cancels async or suppresses sync settlement. Every heartbeat-loop ownership drop logs a `job.ownership_lost` WARNING with job_id, attempt_id and reason; an outage logs one `job.heartbeat_failing` WARNING and, on recovery, one `job.heartbeat_recovered` INFO. A heartbeat cancelled by the budget bound may still have committed server-side; the worker treats it as unconfirmed and drops ownership, and the lease then expires normally.
 - `ok=false`, operator cancellation grace, managed blocking abandonment,
   checkpoint retention/flush, missing handler release, and invalid payload
   behavior follow §§4–7.
