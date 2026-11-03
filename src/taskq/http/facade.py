@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import base64
 import json
+import logging
 import re
 import random
 import time
@@ -40,6 +41,7 @@ from taskq.http.deps import (
 )
 from taskq.http.hub import ClaimWaitHub
 from taskq.protocol import (
+    SettleOutcome,
     HTTP_COMMAND_SPECS,
     TQ_ERROR_REGISTRY,
     AdmissionCancelRequest,
@@ -156,6 +158,16 @@ _SCHEDULE_COMMANDS = frozenset(
     }
 )
 _SCHEDULE_LIST_COMMANDS = frozenset({HttpCommandName.LIST_SCHEDULES})
+
+
+logger = logging.getLogger("taskq.http")
+
+# The stock HTTP client reads a claim with a 30 s timeout regardless of
+# wait_seconds. A claim that commits after that is never seen by the worker,
+# so the facade hands it straight back instead of orphaning it for a lease.
+# ponytail: assumes the default client timeout; make it a facade option if
+# consumers run longer read timeouts and want those late claims delivered.
+_CLAIM_DELIVERY_SECONDS = 28.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -882,6 +894,8 @@ class _FacadeDispatcher:
         queue: str,
         body: ClaimWireRequest,
     ) -> tuple[str, ClaimWireData]:
+        # Start before prepare_queue: its first-use LISTEN can stall with the DB.
+        started = time.monotonic()
         if body.wait_seconds > 0:
             await self.resources.claim_wait_hub.prepare_queue(queue)
         claim_options: dict[str, Any] = {
@@ -894,7 +908,7 @@ class _FacadeDispatcher:
         }
         if body.supported_policy_hashes is not None:
             claim_options["supported_policy_hashes"] = body.supported_policy_hashes
-        deadline = time.monotonic() + body.wait_seconds
+        deadline = started + body.wait_seconds
         while True:
             generation = self.resources.claim_wait_hub.queue_generation(queue)
             result = await self.resources.runner.claim(
@@ -904,6 +918,7 @@ class _FacadeDispatcher:
             )
             outcome = self._claim_outcome(result)
             if outcome != "empty" or body.wait_seconds == 0:
+                await self._release_if_undeliverable(request, queue, body, result, started)
                 return outcome, ClaimWireData(
                     jobs=tuple(_wire_job(job) for job in result.jobs),
                     retry_after_seconds=result.retry_after_seconds,
@@ -923,6 +938,7 @@ class _FacadeDispatcher:
                 )
                 outcome = self._claim_outcome(result)
                 if outcome != "empty":
+                    await self._release_if_undeliverable(request, queue, body, result, started)
                     return outcome, ClaimWireData(
                         jobs=tuple(_wire_job(job) for job in result.jobs),
                         retry_after_seconds=result.retry_after_seconds,
@@ -935,6 +951,50 @@ class _FacadeDispatcher:
                 await subscription.wait(
                     min(remaining, self.poll_interval * random.uniform(1.0, 1.5))
                 )
+
+    async def _release_if_undeliverable(
+        self,
+        request: Request,
+        queue: str,
+        body: ClaimWireRequest,
+        result: ClaimResult,
+        started: float,
+    ) -> None:
+        if not result.jobs:
+            return
+        # Never cut into the wait the client asked for (wire allows up to 30 s).
+        limit = max(_CLAIM_DELIVERY_SECONDS, body.wait_seconds + 3)
+        late = time.monotonic() - started > limit
+        if not late and not await request.is_disconnected():
+            return
+        for job in result.jobs:
+            try:
+                released = await self.resources.runner.release(
+                    job.job_id, job.attempt_id, body.worker_id, "released"
+                )
+                if released.result != SettleOutcome.OK:
+                    logger.warning(
+                        f"claim.release_not_ok job_id={job.job_id} result={released.result}",
+                        extra={"queue": queue, "job_id": str(job.job_id)},
+                    )
+            except Exception:
+                # Lease expiry still recovers the job; never mask the outcome.
+                logger.warning(
+                    f"claim.release_failed job_id={job.job_id} attempt_id={job.attempt_id}",
+                    extra={"queue": queue, "job_id": str(job.job_id)},
+                    exc_info=True,
+                )
+        logger.warning(
+            f"claim.undeliverable queue={queue} worker_id={body.worker_id} "
+            f"jobs={len(result.jobs)} late={late}",
+            extra={
+                "queue": queue,
+                "worker_id": body.worker_id,
+                "job_ids": [str(job.job_id) for job in result.jobs],
+                "late": late,
+            },
+        )
+        raise TaskqUnavailableError(details={"reason": "claim_undeliverable"})
 
     @staticmethod
     def _claim_outcome(result: ClaimResult) -> str:
