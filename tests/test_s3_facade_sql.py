@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from typing import Any
 from uuid import UUID
 
 import asyncpg
@@ -149,5 +151,84 @@ async def test_live_asgi_oversized_multibyte_failure_is_settled_and_byte_bounded
             )
             assert row is not None
             assert dict(row) == {"status": "failed", "bytes": 2048}
+    finally:
+        await transport.aclose()
+
+
+async def test_live_late_claim_is_released_to_queued_and_frees_its_slot(
+    pg: asyncpg.Connection,
+    operator: asyncpg.Connection,
+    sqlalchemy_dsn: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The SQL path behind claim_undeliverable: release_job(cause='released').
+    queue = "s3_late_claim"
+    await operator.fetchrow(
+        "SELECT * FROM taskq.ensure_queue($1, '{\"max_running\": 1}'::jsonb, 's3-test')", queue
+    )
+    transport = SqlTaskqTransport.from_dsn(sqlalchemy_dsn)
+    import taskq.http.facade as facade
+
+    real = time.monotonic
+    offset = [0.0]
+    late = [True]
+    monkeypatch.setattr(facade.time, "monotonic", lambda: real() + offset[0])
+    claim = transport.claim
+
+    async def slow_claim(*args: Any, **kwargs: Any) -> Any:
+        result = await claim(*args, **kwargs)
+        if result.jobs and late[0]:
+            offset[0] += 29  # committed after the stock client's 30 s read timeout
+        return result
+
+    monkeypatch.setattr(transport, "claim", slow_claim)
+    resources = TaskqFacadeTransports(
+        producer=transport,
+        runner=transport,
+        observer=transport,
+        authorization=transport,
+        claim_wait_hub=ClaimWaitHub(),
+    )
+    app = _mounted(create_taskq_app(resources, authorizer=no_auth_for_tests()))
+    headers = {"Taskq-Protocol-Version": "1"}
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            enqueued = await client.post(
+                f"/taskq/v1/queues/{queue}/jobs",
+                headers=headers,
+                json={"job_type": "tests.echo", "payload": {}},
+            )
+            job_id = UUID(enqueued.json()["data"]["job_id"])
+
+            undeliverable = await client.post(
+                f"/taskq/v1/queues/{queue}/claims",
+                headers=headers,
+                json={"worker_id": "s3-worker", "wait_seconds": 0},
+            )
+            assert undeliverable.status_code == 503
+            assert undeliverable.json()["error"]["details"]["reason"] == "claim_undeliverable"
+            row = await pg.fetchrow(
+                "SELECT status, failure_count, expiry_streak, current_attempt_id,"
+                " lease_expires_at FROM taskq.jobs WHERE id = $1",
+                job_id,
+            )
+            assert row is not None
+            assert row["status"] == "queued"
+            assert row["failure_count"] == 0  # no retry budget spent
+            assert row["expiry_streak"] == 0
+            assert row["current_attempt_id"] is None
+            assert row["lease_expires_at"] is None
+
+            late[0] = False
+            claimed = await client.post(
+                f"/taskq/v1/queues/{queue}/claims",
+                headers=headers,
+                json={"worker_id": "s3-worker", "wait_seconds": 0},
+            )
+            # max_running=1: a second claim only succeeds if the release freed the slot.
+            assert claimed.json()["outcome"] == "claimed"
+            assert UUID(claimed.json()["data"]["jobs"][0]["job_id"]) == job_id
     finally:
         await transport.aclose()
