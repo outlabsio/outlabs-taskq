@@ -6,6 +6,7 @@ import asyncio
 import base64
 from dataclasses import replace
 import json
+import time
 from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID, uuid4
@@ -1297,3 +1298,115 @@ async def test_hub_generation_closes_notify_before_subscribe_and_shutdown_races(
     assert await pending is True
     await waiter.aclose()
     assert hub.subscriber_count == 0
+
+
+class _ReleasingTransport(FacadeTransport):
+    """Claims jobs ``claim_takes`` seconds late on the facade's clock."""
+
+    def __init__(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        *,
+        claim_takes: float = 0.0,
+        release_error: Exception | None = None,
+    ) -> None:
+        super().__init__()
+        self.release_error = release_error
+        self.claim_takes = claim_takes
+        self.offset = 0.0
+        real = time.monotonic
+        import taskq.http.facade as facade
+
+        monkeypatch.setattr(facade.time, "monotonic", lambda: real() + self.offset)
+
+    async def claim(self, queue: str, worker_id: str, **kwargs: Any) -> ClaimResult:
+        result = await super().claim(queue, worker_id, **kwargs)
+        if result.jobs:
+            self.offset += self.claim_takes
+        return result
+
+    async def release(self, *args: Any, **kwargs: Any) -> Any:
+        self.calls.append(("release", args))
+        if self.release_error is not None:
+            raise self.release_error
+        return SettleOkResult(result="ok", job_status=JobStatus.QUEUED, scheduled_at=None)
+
+
+async def _post_claim(transport: FacadeTransport, wait_seconds: float) -> httpx.Response:
+    app = _mounted(
+        create_taskq_app(
+            _resources(transport, ClaimWaitHub()),
+            authorizer=no_auth_for_tests(),
+            poll_interval=0.01,
+        )
+    )
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        return await client.post(
+            "/taskq/v1/queues/emails/claims",
+            headers=_headers(),
+            json={"worker_id": "worker-1", "wait_seconds": wait_seconds},
+        )
+
+
+def _released(transport: FacadeTransport, claimed: ClaimResult) -> bool:
+    job = claimed.jobs[0]
+    return ("release", (job.job_id, job.attempt_id, "worker-1", "released")) in transport.calls
+
+
+@pytest.mark.parametrize("release_error", [None, RuntimeError("db down")])
+async def test_claim_committed_after_client_gave_up_is_released(
+    monkeypatch: pytest.MonkeyPatch, release_error: Exception | None
+) -> None:
+    transport = _ReleasingTransport(monkeypatch, claim_takes=29, release_error=release_error)
+    claimed = _claimed()
+    transport.claims = [claimed]
+    response = await _post_claim(transport, 0)
+    assert response.status_code == 503
+    assert response.json()["error"]["details"]["reason"] == "claim_undeliverable"
+    assert _released(transport, claimed)
+
+
+async def test_claim_delivered_in_time_is_not_released(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _ReleasingTransport(monkeypatch, claim_takes=27)
+    transport.claims = [_claimed()]
+    response = await _post_claim(transport, 0)
+    assert response.json()["outcome"] == "claimed"
+    assert not [c for c in transport.calls if c[0] == "release"]
+
+
+async def test_claim_released_when_client_disconnected(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.requests import Request
+
+    async def gone(self: Request) -> bool:
+        return True
+
+    monkeypatch.setattr(Request, "is_disconnected", gone)
+    transport = _ReleasingTransport(monkeypatch)
+    claimed = _claimed()
+    transport.claims = [claimed]
+    response = await _post_claim(transport, 0)
+    assert response.status_code == 503
+    assert _released(transport, claimed)
+
+
+async def test_late_claim_on_post_subscribe_recheck_is_released(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _ReleasingTransport(monkeypatch, claim_takes=29)
+    claimed = _claimed()
+    transport.claims = [ClaimResult(state=ClaimState.EMPTY), claimed]  # recheck finds it
+    response = await _post_claim(transport, 1)
+    assert response.status_code == 503
+    assert _released(transport, claimed)
+
+
+async def test_claim_within_requested_wait_is_delivered_even_past_28s(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transport = _ReleasingTransport(monkeypatch, claim_takes=29)  # 29 s into a 30 s poll
+    transport.claims = [_claimed()]
+    response = await _post_claim(transport, 30)
+    assert response.json()["outcome"] == "claimed"
+    assert not [c for c in transport.calls if c[0] == "release"]
