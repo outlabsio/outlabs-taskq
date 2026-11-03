@@ -17,6 +17,8 @@ from typing import Any
 import asyncpg
 import pytest
 
+from taskq.sql.manifest import META_SEEDS
+
 pytestmark = pytest.mark.taskq_sql
 
 _MILLION = 1_000_000
@@ -783,27 +785,7 @@ async def test_million_row_index_plan_families(pg: asyncpg.Connection) -> None:
     )
 
     capabilities = await pg.fetchval("SELECT value FROM taskq.meta WHERE key = 'capabilities'")
-    assert json.loads(capabilities) == {
-        "active": [
-            "admission_reservations",
-            "dependencies_workflows",
-            "flow_control",
-            "followups",
-            "operator_schedule_list",
-            "read_model_job_events",
-            "read_model_job_views_v2",
-            "read_model_list_finished",
-            "read_model_list_ready",
-            "read_model_list_running",
-            "read_model_workflow",
-            "read_model_workflow_list",
-            "scheduler_v2",
-            "schedules",
-            "target_attestation",
-            "worker_presence",
-            "workflow_continuations",
-        ]
-    }
+    assert json.loads(capabilities) == json.loads(META_SEEDS["capabilities"])
 
 
 async def test_plan_binding_detects_rollback_only_function_drift(
