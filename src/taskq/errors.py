@@ -83,6 +83,14 @@ class TaskqInternalError(TaskqError):
     code = TqCode.INTERNAL
 
 
+class TaskqProtocolError(TaskqInternalError):
+    """A response the client itself rejected as malformed; still ``TQ500``.
+
+    Resending the same request cannot repair it, so owned settlement keeps its
+    attempt cap instead of retrying for the lease.
+    """
+
+
 class TaskqCapabilityError(TaskqError):
     code = TqCode.CAPABILITY
 
@@ -184,6 +192,7 @@ __all__ = [
     "TaskqConflictError",
     "TaskqError",
     "TaskqInternalError",
+    "TaskqProtocolError",
     "InvalidFollowupError",
     "TaskqNotFoundError",
     "TaskqOperatorDeniedError",

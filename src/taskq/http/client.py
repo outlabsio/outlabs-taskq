@@ -20,6 +20,7 @@ from pydantic_core import to_jsonable_python
 from taskq.errors import (
     TaskqConfigError,
     TaskqInternalError,
+    TaskqProtocolError,
     TaskqUnavailableError,
     taskq_error_from_code,
 )
@@ -287,24 +288,27 @@ def _decode_envelope(
                 },
                 retry_after_seconds=_retry_after_seconds(response) or None,
             )
-        raise TaskqInternalError(details={"reason": "missing_or_invalid_protocol_header"})
+        if response.status_code >= 500:
+            # The host or an intermediary failed before TaskQ answered.
+            raise TaskqInternalError(details={"reason": "missing_or_invalid_protocol_header"})
+        raise TaskqProtocolError(details={"reason": "missing_or_invalid_protocol_header"})
     try:
         raw = response.json()
     except ValueError as exc:
-        raise TaskqInternalError(details={"reason": "invalid_json_envelope"}, cause=exc) from exc
+        raise TaskqProtocolError(details={"reason": "invalid_json_envelope"}, cause=exc) from exc
 
     if response.status_code >= 400 and "error" in raw:
         try:
             envelope = ErrorEnvelope.model_validate(raw)
         except ValidationError as exc:
-            raise TaskqInternalError(
+            raise TaskqProtocolError(
                 details={"reason": "invalid_error_envelope"}, cause=exc
             ) from exc
         if (
             envelope.request_id != response.headers.get("Taskq-Request-Id")
             or envelope.request_id != sent_request_id
         ):
-            raise TaskqInternalError(details={"reason": "request_id_mismatch"})
+            raise TaskqProtocolError(details={"reason": "request_id_mismatch"})
         if envelope.error.code == "AUTH401":
             raise TaskqAuthenticationError("taskq authentication failed")
         if envelope.error.code == "AUTH403":
@@ -314,7 +318,7 @@ def _decode_envelope(
             response.status_code != expected_error_status
             or envelope.error.retryable != TQ_ERROR_REGISTRY[envelope.error.code].retryable
         ):
-            raise TaskqInternalError(details={"reason": "error_status_mismatch"})
+            raise TaskqProtocolError(details={"reason": "error_status_mismatch"})
         raise taskq_error_from_code(
             envelope.error.code,
             details=envelope.error.details,
@@ -324,13 +328,13 @@ def _decode_envelope(
     try:
         envelope = CommandEnvelope[dict[str, Any]].model_validate(raw)
     except ValidationError as exc:
-        raise TaskqInternalError(details={"reason": "invalid_command_envelope"}, cause=exc) from exc
+        raise TaskqProtocolError(details={"reason": "invalid_command_envelope"}, cause=exc) from exc
     echoed = response.headers.get("Taskq-Request-Id")
     if envelope.request_id != echoed or envelope.request_id != sent_request_id:
-        raise TaskqInternalError(details={"reason": "request_id_mismatch"})
+        raise TaskqProtocolError(details={"reason": "request_id_mismatch"})
     expected_status = spec.outcomes.get(envelope.outcome)
     if expected_status is None or expected_status != response.status_code:
-        raise TaskqInternalError(details={"reason": "unexpected_outcome_or_status"})
+        raise TaskqProtocolError(details={"reason": "unexpected_outcome_or_status"})
     if spec.sql_command in {
         CommandName.GET_SCHEDULE,
         CommandName.PUT_SCHEDULE,
@@ -342,7 +346,7 @@ def _decode_envelope(
             or isinstance(version, bool)
             or response.headers.get("ETag") != f'"taskq-schedule-{version}"'
         ):
-            raise TaskqInternalError(details={"reason": "schedule_etag_mismatch"})
+            raise TaskqProtocolError(details={"reason": "schedule_etag_mismatch"})
     return envelope.outcome, envelope.data, envelope.request_id
 
 
@@ -753,11 +757,11 @@ class AsyncTaskqHttpClient:
         )
         wire = EnqueueManyWireData.model_validate(data)
         if len(wire.items) != len(items):
-            raise TaskqInternalError(details={"reason": "bulk_result_count_mismatch"})
+            raise TaskqProtocolError(details={"reason": "bulk_result_count_mismatch"})
         results: list[EnqueueResult] = []
         for index, result in enumerate(wire.items, start=1):
             if result.input_index != index:
-                raise TaskqInternalError(details={"reason": "bulk_result_order_mismatch"})
+                raise TaskqProtocolError(details={"reason": "bulk_result_order_mismatch"})
             item = items[index - 1]
             results.append(
                 ENQUEUE_RESULT_ADAPTER.validate_python(
@@ -1016,7 +1020,7 @@ class AsyncTaskqHttpClient:
             response.headers.get("Taskq-Protocol-Version") != str(PROTOCOL_MAJOR)
             or response.headers.get("Taskq-Request-Id") != request_id
         ):
-            raise TaskqInternalError(details={"reason": "invalid_metrics_headers"})
+            raise TaskqProtocolError(details={"reason": "invalid_metrics_headers"})
         return response.text
 
     async def command(
@@ -1425,11 +1429,11 @@ class TaskqHttpClient:
         )
         wire = EnqueueManyWireData.model_validate(data)
         if len(wire.items) != len(items):
-            raise TaskqInternalError(details={"reason": "bulk_result_count_mismatch"})
+            raise TaskqProtocolError(details={"reason": "bulk_result_count_mismatch"})
         results: list[EnqueueResult] = []
         for index, result in enumerate(wire.items, start=1):
             if result.input_index != index:
-                raise TaskqInternalError(details={"reason": "bulk_result_order_mismatch"})
+                raise TaskqProtocolError(details={"reason": "bulk_result_order_mismatch"})
             item = items[index - 1]
             results.append(
                 ENQUEUE_RESULT_ADAPTER.validate_python(
@@ -1717,7 +1721,7 @@ class TaskqHttpClient:
             response.headers.get("Taskq-Protocol-Version") != str(PROTOCOL_MAJOR)
             or response.headers.get("Taskq-Request-Id") != request_id
         ):
-            raise TaskqInternalError(details={"reason": "invalid_metrics_headers"})
+            raise TaskqProtocolError(details={"reason": "invalid_metrics_headers"})
         return response.text
 
     def close(self) -> None:

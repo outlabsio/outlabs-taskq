@@ -24,6 +24,7 @@ from taskq.errors import (
     TaskqConflictError,
     TaskqConfigError,
     TaskqError,
+    TaskqProtocolError,
     TaskqValidationError,
 )
 from taskq.execution import (
@@ -1971,8 +1972,10 @@ class WorkerSupervisor:
                 last_error_code = exc.code.value
                 retry_after = exc.retry_after_seconds or 0.0
                 backpressure = isinstance(exc, TaskqBackpressureError)
-                # Server DB stalls surface as TQ500 as well as TQ503.
-                availability = not backpressure
+                # Server DB stalls surface as TQ500 as well as TQ503. A response
+                # the client itself rejected as malformed fails the same way on
+                # every retry, so it keeps the attempt cap.
+                availability = not backpressure and not isinstance(exc, TaskqProtocolError)
             except (TimeoutError, ConnectionError):
                 last_error_code = "transport"
                 availability = True
@@ -2024,7 +2027,11 @@ class WorkerSupervisor:
                 delay = max(delay, min(self.options.settle_backoff_base, upper))
             if backpressure and elapsed + delay > self.options.settle_backpressure_max_elapsed:
                 break
-            if await self._settle_delay(delay, control, wake_on_stop=settle_failing):
+            # Once stopping, the stop event stays set; waking on it again would
+            # skip every remaining backpressure backoff.
+            if await self._settle_delay(
+                delay, control, wake_on_stop=settle_failing and not self._stopping
+            ):
                 return self._ownership_lost_report(job_id, control)
         if settle_failing:
             self._log_settle(logging.WARNING, "job.settle_exhausted", owned_claim, attempt)

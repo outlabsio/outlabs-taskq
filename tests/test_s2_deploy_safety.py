@@ -26,6 +26,7 @@ from taskq import (
 )
 from taskq.errors import (
     TaskqInternalError,
+    TaskqProtocolError,
     TaskqUnavailableError,
 )
 from taskq.http.client import _decode_envelope
@@ -213,3 +214,6 @@ def test_decode_envelope_keeps_protocol_mismatch_internal_off_the_5xx_path() -> 
                 sent_request_id="req-1",
             )
         assert excinfo.value.details == {"reason": "missing_or_invalid_protocol_header"}
+        # A bare 4xx (e.g. a proxy 413) is a client-side rejection; a bare 5xx
+        # is the host failing before TaskQ answered.
+        assert isinstance(excinfo.value, TaskqProtocolError) is (status < 500)

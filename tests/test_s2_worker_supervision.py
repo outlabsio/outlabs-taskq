@@ -28,6 +28,7 @@ from taskq import (
 from taskq.errors import (
     TaskqBackpressureError,
     TaskqInternalError,
+    TaskqProtocolError,
     TaskqUnavailableError,
     TaskqValidationError,
 )
@@ -776,6 +777,89 @@ async def test_mixed_503_and_500_settle_outage_while_owned_settles() -> None:
     assert report.state is JobRunState.SETTLED
     assert not report.fatal
     assert [call.command for call in transport.calls].count("complete") == 13
+    await supervisor.aclose()
+
+
+async def test_client_protocol_error_on_owned_settle_keeps_the_attempt_cap() -> None:
+    # A proxy 413 or a malformed envelope fails the same way on every resend.
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        *(
+            TaskqProtocolError(details={"reason": "missing_or_invalid_protocol_header"})
+            for _ in range(500)
+        ),
+    )
+    release = asyncio.Event()
+    release.set()
+    supervisor = _supervisor(_waiting_handler(release), transport, clock)
+    running = asyncio.create_task(supervisor.run_job(_claim(lease_seconds=3600)))
+    await _advance_until_done(clock, running, limit=600)
+    report = await asyncio.wait_for(running, timeout=1)
+    assert report.outcome is JobRunOutcome.SETTLEMENT_UNKNOWN
+    assert report.fatal
+    assert [call.command for call in transport.calls].count("complete") == 5
+    await supervisor.aclose()
+
+
+async def test_client_protocol_error_during_post_cap_settle_outage_ends_it(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        *(TaskqUnavailableError() for _ in range(7)),
+        *(TaskqProtocolError(details={"reason": "invalid_json_envelope"}) for _ in range(500)),
+    )
+    release = asyncio.Event()
+    release.set()
+    supervisor = _supervisor(_waiting_handler(release), transport, clock)
+    with caplog.at_level(logging.INFO, logger="taskq.worker"):
+        running = asyncio.create_task(supervisor.run_job(_claim(lease_seconds=3600)))
+        await _advance_until_done(clock, running, limit=600)
+        report = await asyncio.wait_for(running, timeout=1)
+    assert report.outcome is JobRunOutcome.SETTLEMENT_UNKNOWN
+    assert [call.command for call in transport.calls].count("complete") == 8
+    events = [r.message.split(" ")[0] for r in caplog.records if r.message.startswith("job.settle")]
+    assert events == ["job.settle_failing", "job.settle_exhausted"]
+    await supervisor.aclose()
+
+
+async def test_backpressure_after_stop_during_post_cap_settle_keeps_its_backoff() -> None:
+    # The stop event stays set once stopping; waking on it again would spin on TQ429.
+    clock = ManualClock()
+    transport = ScriptedTransport()
+    transport.script(
+        "complete",
+        *(TaskqUnavailableError() for _ in range(6)),
+        *(TaskqBackpressureError(retry_after_seconds=10) for _ in range(1000)),
+    )
+    release = asyncio.Event()
+    release.set()
+    supervisor = _supervisor(_waiting_handler(release), transport, clock)
+
+    def completes() -> int:
+        return [call.command for call in transport.calls].count("complete")
+
+    running = asyncio.create_task(supervisor.run_job(_claim(lease_seconds=3600)))
+    while completes() < 6 and clock.monotonic() < 600:
+        clock.advance(0.25)
+        for _ in range(5):
+            await asyncio.sleep(0)
+    for _ in range(20):
+        await asyncio.sleep(0)
+    assert completes() == 6  # past the cap, in a post-cap backoff
+    stopping = asyncio.create_task(supervisor.stop())
+    for _ in range(50):
+        await asyncio.sleep(0)
+    assert completes() == 7  # the stop woke the backoff once; TQ429 then backs off
+    await _advance_until_done(clock, running, limit=clock.monotonic() + 600)
+    report = await asyncio.wait_for(running, timeout=1)
+    assert report.outcome is JobRunOutcome.SETTLEMENT_UNKNOWN
+    assert completes() < 30
+    await stopping
     await supervisor.aclose()
 
 
