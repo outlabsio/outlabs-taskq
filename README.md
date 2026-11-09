@@ -1,5 +1,7 @@
 # outlabs-taskq
 
+[Auth docs](https://auth.outlabs.io/) · [Auth UI guide](https://auth.outlabs.io/integrations/outlabsauth-ui/) · [TaskQ docs](https://taskq.outlabs.io/) · [Use them together](https://auth.outlabs.io/integrations/taskq/)
+
 Postgres-native durable task queue for Python services.
 
 **Status:** alpha — latest published package **`0.1.0a42`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a42 change is package-only: workers keep jobs through API stalls by bounding heartbeat ownership by lease time, and the HTTP facade releases claims it can no longer deliver. There is no database step; API and workers can upgrade independently. See the [a42 release notes](docs/RELEASE-0.1.0a42.md).
@@ -19,7 +21,22 @@ SQL functions in schema `taskq` are the contract. The Python package provides th
 
 ## Docs
 
-Start here:
+Start with the **[live TaskQ documentation](https://taskq.outlabs.io/)**:
+
+1. [Install the package](https://taskq.outlabs.io/getting-started/install/) with Python 3.12+ and PostgreSQL 16+.
+2. [Run the complete quickstart](https://taskq.outlabs.io/getting-started/quickstart/):
+   migrate and bind a development database, create a queue, enqueue a task,
+   start a worker and inspect the result.
+3. [Add Auth and Auth UI](https://taskq.outlabs.io/getting-started/auth-and-admin-ui/)
+   when your HTTP workers should use Auth identities and permissions.
+
+Use the [CLI guide](https://taskq.outlabs.io/getting-started/cli/) for operations,
+[standalone scheduler](https://taskq.outlabs.io/operations/standalone-scheduler/)
+for recurring jobs, and [runtime-first upgrades](https://taskq.outlabs.io/operations/runtime-first-upgrades/)
+before changing an existing installation. Auth is optional; Auth UI administers
+identity while the TaskQ CLI operates queues and jobs.
+
+Repository references for maintainers and deeper contracts:
 
 | Doc | What it is |
 |---|---|
@@ -62,7 +79,7 @@ Start here:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a41
+pip install outlabs-taskq==0.1.0a42
 ```
 
 ## Credential handling
@@ -92,13 +109,17 @@ give it to an API, worker, or scheduler. Runtime logins receive only the
 required TaskQ capability roles.
 
 Migration `0019` deliberately stops at an unbound target before scheduler
-activation. Inspect and bind the safe fingerprint, then resume migration:
+activation. The fresh-database stop reports `TQ422` / `target_unbound` (exit 1).
+Read the safe fingerprint from a new `db plan`, bind it, then review a fresh
+plan before resuming migration. In published a42, `target show` refuses an
+unbound target when the context already declares its future environment:
 
 ```bash
 PLAN=$(taskq --context staging db plan -o json)
 # Review PLAN and extract data.plan_digest.
 taskq --context staging --yes db migrate --plan-digest "$PLAN_DIGEST"
-taskq --context staging target show -o json
+taskq --context staging db plan -o json
+# Read TASKQ_INSTALLATION_ID from data.target.installation_id in this plan.
 taskq --context staging --yes target bind staging \
   --expected-installation-id "$TASKQ_INSTALLATION_ID" \
   --expected-binding-version 0
