@@ -4,7 +4,7 @@
 
 Postgres-native durable task queue for Python services.
 
-**Status:** alpha — latest published package **`0.1.0a42`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a42 change is package-only: workers keep jobs through API stalls by bounding heartbeat ownership by lease time, and the HTTP facade releases claims it can no longer deliver. There is no database step; API and workers can upgrade independently. See the [a42 release notes](docs/RELEASE-0.1.0a42.md).
+**Status:** alpha — latest published package **`0.1.0a43`** uses SQL contract **`0.6.12`** and Protocol revision **`1.0.18`**. The a43 change is package-only: a fatal settle report now stops the worker service, and a claim that lands after admission closed is released instead of dropped. a42 made workers keep jobs through API stalls and made the HTTP facade release claims it can no longer deliver. There is no database step; API and workers can upgrade independently. See the [a43 release notes](docs/RELEASE-0.1.0a43.md).
 
 The a40 runtime introduced additive SQL
 contracts 0.6.9–0.6.12 and migrations 0045–0048 add an installation-bound
@@ -49,6 +49,7 @@ Repository references for maintainers and deeper contracts:
 | [`docs/Task Queue Stage 2A Typed Enqueue Specification.md`](docs/Task%20Queue%20Stage%202A%20Typed%20Enqueue%20Specification.md) | Typed enqueue contract |
 | [`docs/Task Queue Stage 2B Worker Runtime Specification.md`](docs/Task%20Queue%20Stage%202B%20Worker%20Runtime%20Specification.md) | Worker runtime behavior |
 | [`docs/Task Queue Stage 3 FastAPI and Authorization Specification.md`](docs/Task%20Queue%20Stage%203%20FastAPI%20and%20Authorization%20Specification.md) | Optional HTTP and authorization integration |
+| [`docs/RELEASE-0.1.0a43.md`](docs/RELEASE-0.1.0a43.md) | Fatal settle reports stop the worker service; late claims after admission closed are released (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a42.md`](docs/RELEASE-0.1.0a42.md) | Worker lease-time heartbeat ownership and facade release of undeliverable claims (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a41.md`](docs/RELEASE-0.1.0a41.md) | Bounded PostgreSQL 18 restore-verifier compatibility fix (contract 0.6.12 unchanged) |
 | [`docs/RELEASE-0.1.0a40.md`](docs/RELEASE-0.1.0a40.md) | Queue-admission ownership correction, recovery, and staged rollout (contract 0.6.12) |
@@ -79,7 +80,7 @@ Repository references for maintainers and deeper contracts:
 Install the exact published prerelease selected by the consumer lockfile:
 
 ```bash
-pip install outlabs-taskq==0.1.0a42
+pip install outlabs-taskq==0.1.0a43
 ```
 
 ## Credential handling
