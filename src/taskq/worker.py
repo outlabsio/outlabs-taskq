@@ -641,7 +641,9 @@ class WorkerService:
                                 # A fatal job closed admission while this claim was in
                                 # flight: hand the jobs back instead of holding their
                                 # leases and concurrency slots until expiry.
-                                await self._release_unadmitted(result.jobs[index:])
+                                await asyncio.shield(self._release_unadmitted(result.jobs[index:]))
+                                if self._stop_requested.is_set():
+                                    return
                                 raise WorkerCapacityError("worker supervisor is not accepting jobs")
                             running = self.supervisor.submit(claim, claimed_at=claimed_at)
                             running.add_done_callback(self._observe_job)
