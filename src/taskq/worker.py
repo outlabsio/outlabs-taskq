@@ -636,7 +636,15 @@ class WorkerService:
                     if result.state is ClaimState.CLAIMED:
                         if len(result.jobs) > batch:
                             raise WorkerInvariantError("claim returned more jobs than requested")
-                        for claim in result.jobs:
+                        for index, claim in enumerate(result.jobs):
+                            if not self.supervisor.accepting:
+                                # A fatal job closed admission while this claim was in
+                                # flight: hand the jobs back instead of holding their
+                                # leases and concurrency slots until expiry.
+                                await asyncio.shield(self._release_unadmitted(result.jobs[index:]))
+                                if self._stop_requested.is_set():
+                                    return
+                                raise WorkerCapacityError("worker supervisor is not accepting jobs")
                             running = self.supervisor.submit(claim, claimed_at=claimed_at)
                             running.add_done_callback(self._observe_job)
                             self._submitted_jobs += 1
@@ -702,6 +710,27 @@ class WorkerService:
             raise
         except BaseException as exc:
             self._fail_service(exc)
+
+    async def _release_unadmitted(self, claims: Sequence[ClaimedJob]) -> None:
+        for claim in claims:
+            try:
+                await self.transport.release(
+                    claim.job_id,
+                    claim.attempt_id,
+                    self.worker_id,
+                    "worker_shutdown",
+                    progress=claim.progress,
+                )
+            except TaskqError as exc:
+                # ponytail: one attempt; lease expiry stays the fallback.
+                logger.warning(
+                    "claim.release_failed",
+                    extra={
+                        "worker_id": self.worker_id,
+                        "job_id": str(claim.job_id),
+                        "error_code": exc.code.value,
+                    },
+                )
 
     def _effective_batch(self) -> int:
         if not self.options.adaptive_batch:
@@ -795,9 +824,8 @@ class WorkerService:
             self._fail_service(exc)
             return
         if report.fatal:
-            settlement_outcome = (
-                report.settlement_outcome.value if report.settlement_outcome is not None else "none"
-            )
+            # settlement_outcome is a plain str: pydantic coerces SettleOutcome into the str field.
+            settlement_outcome = report.settlement_outcome or "none"
             self._fail_service(
                 WorkerInvariantError(
                     "fatal job "
