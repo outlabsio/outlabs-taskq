@@ -24,7 +24,7 @@ from taskq import (
     WorkerServiceOptions,
     WorkerSupervisor,
 )
-from taskq.protocol import ClaimState, EnqueueCommand, JobStatus, SettleResult
+from taskq.protocol import ClaimState, EnqueueCommand, JobStatus, SettleOutcome, SettleResult
 from taskq.sql.transport import SqlTaskqTransport
 from taskq.sql.notifications import PostgresNotificationSource
 
@@ -360,3 +360,99 @@ async def test_real_hot_queues_each_receive_capacity(
     await asyncio.wait_for(both.wait(), timeout=5)
     await service.aclose()
     assert seen == {"service_fair_a", "service_fair_b"}
+
+
+class _GatedSecondClaim:
+    """Holds the service's second claim in flight until the test opens the gate."""
+
+    def __init__(self, inner: SqlTaskqTransport) -> None:
+        self.inner = inner
+        self.results: list[Any] = []
+        self.second_entered = asyncio.Event()
+        self.second_allowed = asyncio.Event()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self.inner, name)
+
+    async def claim(self, *args: Any, **kwargs: Any) -> Any:
+        if self.results:
+            self.second_entered.set()
+            await self.second_allowed.wait()
+        result = await self.inner.claim(*args, **kwargs)
+        self.results.append(result)
+        return result
+
+
+async def test_real_sql_claim_landing_after_fatal_is_released_not_held(
+    pg: Any, worker_transports: dict[str, SqlTaskqTransport]
+) -> None:
+    del pg
+    started = asyncio.Event()
+    finish = asyncio.Event()
+
+    async def handler(payload: Input) -> Output:
+        started.set()
+        await finish.wait()
+        return Output(doubled=payload.value * 2)
+
+    operator, producer, runner = (worker_transports[k] for k in ("operator", "producer", "runner"))
+    await operator.set_concurrency_limit("late:slot", 1, actor="audit")
+    tasks = []
+    for queue in ("late_fatal", "late_held"):
+        await operator.ensure_queue(queue, actor="audit")
+        tasks.append(
+            Task(
+                name=f"{queue}.work",
+                queue=queue,
+                input_model=Input,
+                output_model=Output,
+                handler=handler,
+            )
+        )
+    await producer.enqueue(
+        EnqueueCommand(queue="late_fatal", job_type="late_fatal.work", payload={"value": 1})
+    )
+    late = await producer.enqueue(
+        EnqueueCommand(
+            queue="late_held",
+            job_type="late_held.work",
+            payload={"value": 2},
+            concurrency_key="late:slot",
+        )
+    )
+    transport = _GatedSecondClaim(runner)
+    service = WorkerService(
+        transport,  # type: ignore[arg-type]
+        TaskRegistry(tasks),
+        "late-claim",
+        options=WorkerServiceOptions(queues=("late_fatal", "late_held"), listen=False),
+        supervisor_options=WorkerOptions(concurrency=2),
+    )
+    await service.start()
+    await asyncio.wait_for(asyncio.gather(started.wait(), transport.second_entered.wait()), 5)
+    # Real settle_conflict: settle the running attempt out from under the handler,
+    # so its own complete conflicts and the supervisor closes admission.
+    fatal = transport.results[0].jobs[0]
+    released = await runner.release(fatal.job_id, fatal.attempt_id, "late-claim", "worker_shutdown")
+    assert released.result is SettleOutcome.OK
+    finish.set()
+    for _ in range(500):
+        if not service.supervisor.accepting:
+            break
+        await asyncio.sleep(0.01)
+    assert not service.supervisor.accepting
+    transport.second_allowed.set()  # the in-flight claim now lands on a closed supervisor
+    await asyncio.wait_for(service._stopped.wait(), timeout=5)
+    await service.aclose()
+    assert service.snapshot().fatal
+    assert [job.job_id for job in transport.results[1].jobs] == [late.job_id]
+
+    detail = await worker_transports["observer"].get_job(late.job_id)
+    assert detail is not None
+    assert detail.status is JobStatus.QUEUED
+    assert detail.attempt_count == 1 and detail.failure_count == 0
+    # The limit-1 concurrency slot is free: a fresh worker claims the job at once.
+    again = await runner.claim("late_held", "late-claim-2")
+    assert again.state is ClaimState.CLAIMED
+    assert [job.job_id for job in again.jobs] == [late.job_id]
+    assert again.jobs[0].attempt_number == 2 and again.jobs[0].failure_count == 0
