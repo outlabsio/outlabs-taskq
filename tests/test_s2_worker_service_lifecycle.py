@@ -17,7 +17,7 @@ from taskq import (
     WorkerServiceState,
 )
 from taskq.errors import TaskqConflictError, TaskqUnavailableError
-from taskq.protocol import ClaimResult, ClaimState
+from taskq.protocol import ClaimResult, ClaimState, SettleConflictResult
 from tests.test_s2_worker_service_poll import Input, Output, _claim, _registry, _spin_until
 from tests.worker_support import ManualClock, ScriptedTransport
 
@@ -281,3 +281,96 @@ async def test_external_run_cancellation_cleans_up_and_reraises() -> None:
         await running
     assert running.cancelled()
     assert service.stopped
+
+
+async def test_fatal_settle_conflict_names_settlement_outcome(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    transport = ScriptedTransport()
+    claim = _claim("alpha")
+    transport.script("claim", ClaimResult(state=ClaimState.CLAIMED, jobs=(claim,)))
+    transport.script("complete", SettleConflictResult(job_status=None, scheduled_at=None))
+    service = WorkerService(
+        transport,  # type: ignore[arg-type]
+        _registry("alpha"),
+        "worker-1",
+        options=WorkerServiceOptions(queues=("alpha",), listen=False),
+        clock=ManualClock(),
+    )
+    with caplog.at_level(logging.ERROR, logger="taskq.worker"):
+        await service.start()
+        await _spin_until(lambda: service.stopped)
+    fatal_messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.message.startswith("worker.fatal")
+    ]
+    assert fatal_messages == [
+        "worker.fatal error_type=WorkerInvariantError "
+        f"detail=fatal job job_id={claim.job_id} outcome=settle_conflict "
+        "settlement_command=complete settlement_outcome=settle_conflict "
+        "settlement_error_code=none"
+    ]
+
+
+class SecondClaimBarrierTransport(ScriptedTransport):
+    def __init__(self, first: ClaimResult, second: ClaimResult) -> None:
+        super().__init__()
+        self.results = [first, second]
+        self.second_entered = asyncio.Event()
+        self.second_allowed = asyncio.Event()
+
+    async def claim(self, *args: Any, **kwargs: Any) -> ClaimResult:
+        await super().claim(*args, **kwargs)
+        if not self.results:
+            return ClaimResult(state=ClaimState.EMPTY, jobs=())
+        if len(self.results) == 1:
+            self.second_entered.set()
+            await self.second_allowed.wait()
+        return self.results.pop(0)
+
+
+async def test_claim_landing_after_fatal_is_released_not_held() -> None:
+    fatal_claim = _claim("alpha")
+    late_claim = _claim("alpha")
+    transport = SecondClaimBarrierTransport(
+        ClaimResult(state=ClaimState.CLAIMED, jobs=(fatal_claim,)),
+        ClaimResult(state=ClaimState.CLAIMED, jobs=(late_claim,)),
+    )
+    blocker = asyncio.Event()
+
+    async def wait_then_finish(payload: Input) -> Output:
+        await blocker.wait()
+        return Output(doubled=payload.value * 2)
+
+    registry = TaskRegistry(
+        (
+            Task(
+                name="alpha.work",
+                queue="alpha",
+                input_model=Input,
+                output_model=Output,
+                handler=wait_then_finish,
+            ),
+        )
+    )
+    transport.script("complete", SettleConflictResult(job_status=None, scheduled_at=None))
+    service = WorkerService(
+        transport,  # type: ignore[arg-type]
+        registry,
+        "worker-1",
+        options=WorkerServiceOptions(queues=("alpha",), listen=False),
+        supervisor_options=WorkerOptions(concurrency=2),
+        clock=ManualClock(),
+    )
+    await service.start()
+    await transport.second_entered.wait()
+    blocker.set()
+    await _spin_until(lambda: not service.supervisor.accepting)
+    transport.second_allowed.set()
+    await _spin_until(lambda: service.stopped)
+    assert service.snapshot().fatal
+    releases = [call.arguments for call in transport.calls if call.command == "release"]
+    assert [(r["job_id"], r["attempt_id"], r["cause"]) for r in releases] == [
+        (late_claim.job_id, late_claim.attempt_id, "worker_shutdown")
+    ]
